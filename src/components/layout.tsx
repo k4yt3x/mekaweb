@@ -2,6 +2,14 @@ import { PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import { useRuntime, useSettings } from '../connections/context';
 import { Button } from './ui/button';
 
+export function MekawebLink() {
+  return (
+    <a href="https://github.com/k4yt3x/mekaweb" target="_blank" rel="noreferrer noopener">
+      mekaweb
+    </a>
+  );
+}
+
 export function NavigationToggle({ className = '' }: { className?: string }) {
   const { storage } = useRuntime();
   const { layout } = useSettings();

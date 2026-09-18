@@ -411,14 +411,16 @@ nav a.active {
   color: var(--accent);
   background: var(--accent-soft);
 }
-.sidebar-footer {
-  margin-top: auto;
-  padding: 20px var(--navigation-inset) 0;
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 0.6rem;
+.app-version {
   color: var(--muted);
+  font-size: 0.75rem;
+}
+.app-version a {
+  color: inherit;
+}
+.welcome > .app-version {
+  margin-top: 20px;
+  text-align: center;
 }
 .main-content {
   min-width: 0;
@@ -1785,9 +1787,6 @@ select option {
   }
   .resource-grid {
     grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
-  }
-  .sidebar-footer {
-    margin-top: 25px;
   }
 }
 @media (max-width: 420px) {

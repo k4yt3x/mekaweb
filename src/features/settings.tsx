@@ -7,6 +7,7 @@ import { download, normalizeEndpoint, type Schema } from '../api/client';
 import { Button } from '../components/ui/button';
 import { Dialog } from '../components/ui/dialog';
 import { ConfirmButton, ErrorNotice, Field, Json, Loading } from '../components/common';
+import { MekawebLink } from '../components/layout';
 
 const supportedVersions = ['0.59.0', '0.60.0'];
 
@@ -129,6 +130,9 @@ export function Welcome() {
         )}
         <ConnectionForm key={existing?.id ?? 'new'} existing={existing} />
       </section>
+      <footer className="app-version">
+        <MekawebLink /> version {__MEKAWEB_VERSION__}
+      </footer>
     </main>
   );
 }
@@ -219,9 +223,11 @@ export function SettingsPage() {
         </Field>
       </section>
       <section className="panel">
-        <h2>Endpoint diagnostics</h2>
+        <h2>Diagnostics</h2>
         <dl className="facts">
-          <dt>Version</dt>
+          <dt>mekaweb version</dt>
+          <dd>{__MEKAWEB_VERSION__}</dd>
+          <dt>meka version</dt>
           <dd>
             {state.info?.version}
             {!supportedVersions.includes(state.info?.version ?? '') && (

@@ -1,6 +1,9 @@
 name: Deploy static site
 
 on:
+  push:
+    tags:
+      - '[0-9]+.[0-9]+.[0-9]+'
   workflow_dispatch:
 
 permissions:
@@ -12,6 +15,7 @@ concurrency:
 
 jobs:
   build:
+    if: github.event_name != 'push' || github.event.deleted == false
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -23,6 +27,22 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: npm
+      - name: Validate release tag
+        if: github.ref_type == 'tag'
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs';
+          const { version } = JSON.parse(readFileSync('package.json', 'utf8'));
+          const lock = JSON.parse(readFileSync('package-lock.json', 'utf8'));
+          const tag = process.env.GITHUB_REF_NAME;
+          if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(tag ?? '') || tag !== version) {
+            throw new Error(`Release tag ${tag} must match package.json version ${version} (major.minor.patch).`);
+          }
+          if (lock.version !== version || lock.packages[''].version !== version) {
+            throw new Error('package-lock.json must match package.json before releasing.');
+          }
+          console.log(`Validated mekaweb ${version}`);
+          NODE
       - run: npm ci
       - name: Configure GitHub Pages
         id: pages

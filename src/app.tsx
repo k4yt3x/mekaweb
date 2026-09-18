@@ -176,27 +176,29 @@ function Navigation({ onNavigate }: { onNavigate?: () => void }) {
         </a>
         {!onNavigate && <NavigationToggle />}
       </div>
-      <div className="connection-switcher">
-        <label className="sr-only" htmlFor={onNavigate ? 'mobile-connection' : 'connection'}>
-          Active connection
-        </label>
-        <select
-          id={onNavigate ? 'mobile-connection' : 'connection'}
-          value={state.connection?.id ?? ''}
-          onChange={(event) => {
-            const record = settings.connections.find((c) => c.id === event.target.value);
-            if (record) void runtime.connect(record);
-            onNavigate?.();
-          }}
-        >
-          {settings.connections.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </select>
-        <ChevronDown size={14} />
-      </div>
+      {settings.connections.length > 1 && (
+        <div className="connection-switcher">
+          <label className="sr-only" htmlFor={onNavigate ? 'mobile-connection' : 'connection'}>
+            Active connection
+          </label>
+          <select
+            id={onNavigate ? 'mobile-connection' : 'connection'}
+            value={state.connection?.id ?? ''}
+            onChange={(event) => {
+              const record = settings.connections.find((c) => c.id === event.target.value);
+              if (record) void runtime.connect(record);
+              onNavigate?.();
+            }}
+          >
+            {settings.connections.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+          <ChevronDown size={14} />
+        </div>
+      )}
       <nav aria-label="Main navigation">
         {entries
           .filter((entry) => !entry.scope || state.info?.scopes.includes(entry.scope))
@@ -218,10 +220,6 @@ function Navigation({ onNavigate }: { onNavigate?: () => void }) {
             );
           })}
       </nav>
-      <div className="sidebar-footer">
-        <span className="status-dot" />
-        <span>Connected to meka {state.info?.version}</span>
-      </div>
     </>
   );
 }
