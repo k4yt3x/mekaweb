@@ -1,0 +1,6 @@
+* text=auto eol=lf
+*.png binary
+*.ico binary
+
+src/api/schema.d.ts linguist-generated=true
+docs/api/meka-*.json linguist-generated=true

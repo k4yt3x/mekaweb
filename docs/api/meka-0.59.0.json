@@ -1,0 +1,5277 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "meka HTTP API",
+    "description": "Service-to-service API for driving meka agent turns programmatically. Mirrors the wire format described in the HTTP API docs. A field that has no value is omitted from every response and event, never sent as `null`.",
+    "license": {
+      "name": "AGPL-3.0-or-later"
+    },
+    "version": "0.59.0"
+  },
+  "paths": {
+    "/v1/health/live": {
+      "get": {
+        "tags": ["health"],
+        "summary": "Liveness probe. Always returns 200 if the process is up and the listener is accepting; the\nresponse handler running at all is sufficient proof. Used by Kubernetes / systemd to distinguish\n\"process crashed\" from \"process degraded\".",
+        "operationId": "live",
+        "responses": {
+          "200": {
+            "description": "Process is up and accepting connections",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LiveResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/health/ready": {
+      "get": {
+        "tags": ["health"],
+        "summary": "Readiness probe. Returns 200 iff the server is in a state where new turn requests can\nreasonably be expected to succeed (session DB queryable, a profile configured, no *required* MCP\nserver stuck in `Failed`). Returns 503 with a body that names which subsystem is the blocker.",
+        "operationId": "ready",
+        "responses": {
+          "200": {
+            "description": "All dependencies healthy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadyResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "One or more subsystems unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadyResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/info": {
+      "get": {
+        "tags": ["discovery"],
+        "summary": "`GET /v1/info`: server identity and the permission surface. Authenticated; admits any token\nholding at least one read scope (see [`crate::host::http::scope::ANY_READ_SCOPES`]). Tokens with\nonly write scopes get 403. The broad-read fallback is intentional: a token configured for\n`sessions:r` to surface session listings can also see the server's own identity without\noperators having to grant it anything else.",
+        "description": "For which profiles exist and which one a session gets by default, see `GET /v1/profiles`.",
+        "operationId": "info",
+        "responses": {
+          "200": {
+            "description": "Server identity and capability flags",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InfoResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": ["sessions:r", "mcp:r", "skills:r", "memory:r", "schedule:r"]
+          }
+        ]
+      }
+    },
+    "/v1/instructions": {
+      "get": {
+        "tags": ["discovery"],
+        "summary": "`GET /v1/instructions`: the standing instructions this server's agents run under.",
+        "operationId": "instructions",
+        "responses": {
+          "200": {
+            "description": "Resolved standing instructions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstructionsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": ["sessions:r"]
+          }
+        ]
+      }
+    },
+    "/v1/mcp": {
+      "get": {
+        "tags": ["discovery"],
+        "summary": "`GET /v1/mcp`: configured MCP servers and their current connection state.",
+        "operationId": "mcp",
+        "responses": {
+          "200": {
+            "description": "Per-server connection state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/McpServerStateView"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": ["sessions:r", "mcp:r", "skills:r", "memory:r", "schedule:r"]
+          }
+        ]
+      }
+    },
+    "/v1/mcp/{name}/reconnect": {
+      "post": {
+        "tags": ["discovery"],
+        "summary": "`POST /v1/mcp/{name}/reconnect`: heal one server now.",
+        "description": "An impatience button rather than the only route back: a server that failed its initial connect\nis already being retried in the background with exponential backoff. This collapses the wait for\nan operator who has just fixed whatever was wrong.",
+        "operationId": "mcp_reconnect",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "MCP server name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read `state` for where the server now stands",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpReconnectResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such server",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Server is disabled in config",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Re-establishing a connected server's transport did not finish in time",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": ["mcp:w"]
+          }
+        ]
+      }
+    },
+    "/v1/mcp/{name}/tools": {
+      "get": {
+        "tags": ["discovery"],
+        "summary": "`GET /v1/mcp/{name}/tools`: what one MCP server advertises, with resolved permissions.",
+        "description": "Queries the server live rather than reporting the registered set, matching `meka mcp tools`:\nthe point is to see everything it offers, including tools config is currently filtering out.",
+        "operationId": "mcp_tools",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "MCP server name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Advertised tools",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpToolsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such server",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Server unreachable or list_tools failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": ["mcp:r"]
+          }
+        ]
+      }
+    },
+    "/v1/memory": {
+      "get": {
+        "tags": ["memory"],
+        "summary": "`GET /v1/memory`: the memory index, most important first.",
+        "operationId": "list_memories",
+        "responses": {
+          "200": {
+            "description": "Memory index",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": ["memory:r"]
+          }
+        ]
+      }
+    },
+    "/v1/memory/{name}": {
+      "get": {
+        "tags": ["memory"],
+        "summary": "`GET /v1/memory/{name}`: one memory, body included.",
+        "operationId": "get_memory",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Memory name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Memory with its body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such memory",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": ["memory:r"]
+          }
+        ]
+      },
+      "put": {
+        "tags": ["memory"],
+        "summary": "`PUT /v1/memory/{name}`: create or update a memory.",
+        "operationId": "put_memory",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Memory name, [A-Za-z0-9_-]",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WriteMemoryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Memory written",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request body exceeds `[serve] max_body_bytes`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid name, empty description, or an unwritable path",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": ["memory:w"]
+          }
+        ]
+      },
+      "delete": {
+        "tags": ["memory"],
+        "summary": "`DELETE /v1/memory/{name}`: remove a memory.",
+        "operationId": "delete_memory",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Memory name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Memory removed"
+          },
+          "401": {
+            "description": "Authorization missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such memory",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid name, or a symlinked path",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": ["memory:w"]
+          }
+        ]
+      }
+    },
+    "/v1/profiles": {
+      "get": {
+        "tags": ["discovery"],
+        "summary": "`GET /v1/profiles`: configured profiles, with their account, backend and model only.",
+        "description": "Read-only by design, and the distinction is which fact is being written. A session *may* name a\nprofile (`POST /v1/sessions`) and move to another (`PATCH /v1/sessions/{id}`), because that\nrecords a choice on one session's own row where the user can see it. What no request may do is\nedit the profiles themselves: what `work` means, and therefore which account it bills, comes\nfrom `config.toml` and nothing else. Letting a request redefine a profile is how an ambient\nvalue silently rebinds an account, which is the same reason there is no environment tier.\n\nNo credentials are returned: they live in the database, keyed by account name, and never\ntransit this API.",
+        "operationId": "profiles",
+        "responses": {
+          "200": {
+            "description": "Configured profiles",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfilesResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": ["sessions:r", "mcp:r", "skills:r", "memory:r", "schedule:r"]
+          }
+        ]
+      }
+    },
+    "/v1/schedule": {
+      "get": {
+        "tags": ["schedule"],
+        "summary": "`GET /v1/schedule`: every scheduled job in the database, across all sessions.",
+        "operationId": "list_all",
+        "responses": {
+          "200": {
+            "description": "All scheduled jobs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduledJobsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": ["schedule:r"]
+          }
+        ]
+      }
+    },
+    "/v1/schedule/{job_id}": {
+      "delete": {
+        "tags": ["schedule"],
+        "summary": "`DELETE /v1/schedule/{job_id}`: cancel a job.",
+        "description": "Keyed on the job id alone rather than nested under its session, because that is how a client\nthat read `GET /v1/schedule` holds it.\n\nTakes a unique id prefix as well as the full id, and 404s when nothing matches. Both halves\nmatter, and for the same reason: the 8-character short form is what every surface that renders a\njob to a human shows (`meka schedule list`, the REPL's `/schedule`, the `schedule_list` tool),\nso an operator will paste one here, and answering 204 to an id that matched nothing would report\na still-firing job as canceled. A gated job kept alive that way goes on running a shell command\nunattended.",
+        "operationId": "cancel",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "description": "Scheduled job id, or a unique prefix of one",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Job canceled"
+          },
+          "401": {
+            "description": "Authorization missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No job matches that id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The prefix matches more than one job",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": ["schedule:w"]
+          }
+        ]
+      }
+    },
+    "/v1/sessions": {
+      "get": {
+        "tags": ["sessions"],
+        "summary": "GET /v1/sessions: paginated list. Returns persisted sessions from the DB (not just\nin-memory entries) so audit consumers can see everything regardless of GC state.",
+        "operationId": "list_sessions",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": ["integer", "null"],
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": ["string", "null"]
+            }
+          },
+          {
+            "name": "include_children",
+            "in": "query",
+            "description": "Include sub-agent sessions. Default `false`, which lists only root conversations.\n\nOff by default because a dispatcher that spawns freely would otherwise bury its own\nsessions under the sub-agents it started, and a client paging through the list wants the\nconversations it created. Turn it on to audit what was spawned; `parent_id` on each row is\nwhat reconnects a sub-agent to the session that dispatched it.",
+            "required": false,
+            "schema": {
+              "type": ["boolean", "null"]
+            }
+          },
+          {
+            "name": "cwd",
+            "in": "query",
+            "description": "Only list sessions whose working directory is this one, compared in the canonical spelling\nevery session records.",
+            "required": false,
+            "schema": {
+              "type": ["string", "null"]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Page of sessions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListSessionsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": ["sessions:r"]
+          }
+        ]
+      },
+      "post": {
+        "tags": ["sessions"],
+        "summary": "POST /v1/sessions: create a session.",
+        "description": "Requires scope `sessions:w`. The created session's runtime (Agent, ToolRegistry,\nHttpFrontend) is constructed eagerly so subsequent `POST /turn` doesn't pay the build cost.",
+        "operationId": "create_session",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSessionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Session created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request body exceeds `[serve] max_body_bytes`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": ["sessions:w"]
+          }
+        ]
+      }
+    },
+    "/v1/sessions/import": {
+      "post": {
+        "tags": ["conversation"],
+        "summary": "`POST /v1/sessions/import`: recreate a session tree from an export envelope.",
+        "operationId": "import",
+        "requestBody": {
+          "description": "A `format=json` export envelope",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "string"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Session tree imported",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request body exceeds `[serve] max_body_bytes`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Malformed or unsupported envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": ["sessions:w"]
+          }
+        ]
+      }
+    },
+    "/v1/sessions/{id}": {
+      "get": {
+        "tags": ["sessions"],
+        "summary": "GET /v1/sessions/{id}: single session metadata.",
+        "operationId": "get_session",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Session UUID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Session record",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Session not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": ["sessions:r"]
+          }
+        ]
+      },
+      "delete": {
+        "tags": ["sessions"],
+        "summary": "DELETE /v1/sessions/{id}: drop the in-memory entry and (optionally) the DB row.",
+        "operationId": "delete_session",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Session UUID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Session deleted (idempotent, also returned for unknown ids)"
+          },
+          "401": {
+            "description": "Authorization missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A turn is in flight; cancel first (`/errors/turn-in-flight`). Or another meka process holds the session (`/errors/session-locked`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": ["sessions:w"]
+          }
+        ]
+      },
+      "patch": {
+        "tags": ["sessions"],
+        "summary": "PATCH /v1/sessions/{id}: update mutable session knobs (permission, approvals, cwd, profile) on\na live session without re-creating it. Returns the updated metadata.",
+        "description": "Permission and cwd are hoisted on [`SessionEntry`] outside the runtime mutex precisely so the\nPATCH handler can apply them without contending with a long-running turn; the change is\nvisible to the next agent operation that reads the cells.",
+        "operationId": "patch_session",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Session UUID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatchSessionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Updated session record",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Session not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A turn is in flight and the body names `cwd` or `profile`; cancel first (`/errors/turn-in-flight`). Or another meka process holds the session, so only that process may move it (`/errors/session-locked`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request body exceeds `[serve] max_body_bytes`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid body, or the id names a sub-agent's conversation, whose permission, cwd and profile come from the terms its parent spawned it with (`/errors/session-not-drivable`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": ["sessions:w"]
+          }
+        ]
+      }
+    },
+    "/v1/sessions/{id}/blobs/{hash}": {
+      "get": {
+        "tags": ["sessions"],
+        "summary": "`GET /v1/sessions/{id}/blobs/{hash}`: the bytes behind an image block, with their media type.",
+        "description": "Scoped to the session: the blob has to be referenced by one of this session's messages, so a\ntoken that may read one session cannot walk every image in the store by hash.",
+        "operationId": "get_blob",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Session UUID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "hash",
+            "in": "path",
+            "description": "Content hash of an image block, as `GET /v1/sessions/{id}/messages` reports it",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The image bytes, under their media type",
+            "content": {
+              "image/*": {}
+            }
+          },
+          "401": {
+            "description": "Authorization missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No message of this session references such a blob",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": ["sessions:r"]
+          }
+        ]
+      }
+    },
+    "/v1/sessions/{id}/cancel": {
+      "post": {
+        "tags": ["turn"],
+        "summary": "`POST /v1/sessions/{id}/cancel`: interrupt the in-flight turn (if any) by firing the\nsession's cancellation token. Always returns 204 even if no turn is in flight (the\noperation is idempotent and absence is observationally indistinguishable from a turn that\nfinished microseconds before the cancel arrived).",
+        "operationId": "cancel_turn",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Session UUID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "Optional: the turn to cancel",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CancelRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Cancellation token fired (idempotent)"
+          },
+          "401": {
+            "description": "Authorization missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The named turn is not the one in flight",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": ["sessions:w"]
+          }
+        ]
+      }
+    },
+    "/v1/sessions/{id}/compact": {
+      "post": {
+        "tags": ["conversation"],
+        "summary": "`POST /v1/sessions/{id}/compact`: summarize the conversation now.",
+        "operationId": "compact",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Session UUID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompactRequestBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Compaction completed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompactResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Session not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A turn is in flight; cancel first (`/errors/turn-in-flight`). Or another meka process holds the session (`/errors/session-locked`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request body exceeds `[serve] max_body_bytes`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid body, nothing to compact, or the id names a sub-agent's conversation (`/errors/session-not-drivable`), which no payload makes acceptable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The provider rejected or failed the summarizing turn. Read `type`: `/errors/provider-unavailable` is worth resending after a pause, `/errors/provider` covers everything meka does not classify, and `/errors/context-overflow` here means the conversation will not fit even to summarize it",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "An MCP server the checkpoint turn needed was unavailable (`/errors/mcp-unavailable`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": ["sessions:w"]
+          }
+        ]
+      }
+    },
+    "/v1/sessions/{id}/context": {
+      "get": {
+        "tags": ["conversation"],
+        "summary": "`GET /v1/sessions/{id}/context`: live window occupancy plus cumulative usage.",
+        "operationId": "context",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Session UUID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Context occupancy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContextResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Session not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": ["sessions:r"]
+          }
+        ]
+      }
+    },
+    "/v1/sessions/{id}/export": {
+      "get": {
+        "tags": ["conversation"],
+        "summary": "`GET /v1/sessions/{id}/export`: the full conversation, including pre-compaction turns.",
+        "description": "Reads the raw event log rather than the materialized view, so turns that compaction hid from\nthe model are still in the export. That is the whole point of having it: `GET /messages` shows\nwhat the model can see, and this shows what actually happened.",
+        "operationId": "export",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Session UUID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "description": "`markdown` (default) or `json`. Markdown is a rendered transcript for a human; JSON is the\nround-trippable envelope `POST /v1/sessions/import` accepts.",
+            "required": false,
+            "schema": {
+              "type": ["string", "null"]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Rendered transcript (text/markdown) or export envelope (application/json)"
+          },
+          "401": {
+            "description": "Authorization missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Session not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unknown format",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": ["sessions:r"]
+          }
+        ]
+      }
+    },
+    "/v1/sessions/{id}/fork": {
+      "post": {
+        "tags": ["sessions"],
+        "summary": "POST /v1/sessions/{id}/fork: copy a session's conversation into a new one.",
+        "description": "Requires scope `sessions:w`. The copy starts with the source's full conversation and is\nimmediately usable; the source is left untouched and is not required to be in memory, so an\nevicted session forks just as well as a live one. A source with a turn in flight is refused,\nlike every other write to it: the copy would end on a prompt nothing answered.",
+        "operationId": "fork_session",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Session UUID to fork",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/ForkSessionBody"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Forked session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Session not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A turn is in flight on the source; cancel first (`/errors/turn-in-flight`). Or another meka process holds the source (`/errors/session-locked`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request body exceeds `[serve] max_body_bytes`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid body, or the source is a sub-agent's conversation, whose copy is another sub-agent and so has no live session to hand back (`/errors/session-not-drivable`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": ["sessions:w"]
+          }
+        ]
+      }
+    },
+    "/v1/sessions/{id}/inbox": {
+      "get": {
+        "tags": ["inbox"],
+        "operationId": "list",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Session UUID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Items the model has not been shown, oldest first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Session not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": ["sessions:r"]
+          }
+        ]
+      },
+      "post": {
+        "tags": ["inbox"],
+        "operationId": "enqueue",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Session UUID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InboxRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Item recorded; the feed reports its delivery",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Session not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Another process holds the session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Blank message, unknown class, or a sub-agent's session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": ["sessions:w"]
+          }
+        ]
+      }
+    },
+    "/v1/sessions/{id}/inbox/{item_id}": {
+      "delete": {
+        "tags": ["inbox"],
+        "operationId": "withdraw",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Session UUID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "item_id",
+            "in": "path",
+            "description": "Inbox item id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Item withdrawn; it will not reach the model"
+          },
+          "401": {
+            "description": "Authorization missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such item on this session, or already closed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The item is already in the conversation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": ["sessions:w"]
+          }
+        ]
+      }
+    },
+    "/v1/sessions/{id}/messages": {
+      "get": {
+        "tags": ["sessions"],
+        "operationId": "list_messages",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Session UUID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": ["integer", "null"],
+              "minimum": 0
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": ["integer", "null"],
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Page of conversation messages",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessagesResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Session not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": ["sessions:r"]
+          }
+        ]
+      }
+    },
+    "/v1/sessions/{id}/responses/{request_id}": {
+      "post": {
+        "tags": ["turn"],
+        "operationId": "respond",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Session UUID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "request_id",
+            "in": "path",
+            "description": "Pending request id emitted by the matching permission_required SSE event.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResponseBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Resolved; the parked turn continues"
+          },
+          "401": {
+            "description": "Authorization missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Session or request not found / already resolved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request body exceeds `[serve] max_body_bytes`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid body, or the id names a sub-agent's conversation (`/errors/session-not-drivable`), which no payload makes acceptable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": ["sessions:w"]
+          }
+        ]
+      }
+    },
+    "/v1/sessions/{id}/rewind": {
+      "post": {
+        "tags": ["conversation"],
+        "summary": "`POST /v1/sessions/{id}/rewind`: drop trailing turns from the conversation.",
+        "operationId": "rewind",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Session UUID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RewindRequestBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Turns removed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RewindResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Session not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A turn is in flight; cancel first (`/errors/turn-in-flight`). Or another meka process holds the session, as a running sub-agent's parent does (`/errors/session-locked`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request body exceeds `[serve] max_body_bytes`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid body, or fewer turns than requested",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": ["sessions:w"]
+          }
+        ]
+      }
+    },
+    "/v1/sessions/{id}/schedule": {
+      "get": {
+        "tags": ["schedule"],
+        "summary": "`GET /v1/sessions/{id}/schedule`: jobs belonging to one session.",
+        "operationId": "list_for_session",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Session UUID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Scheduled jobs for this session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduledJobsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Session not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": ["schedule:r"]
+          }
+        ]
+      },
+      "post": {
+        "tags": ["schedule"],
+        "summary": "`POST /v1/sessions/{id}/schedule`: plant a job on a session.",
+        "operationId": "create",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Session UUID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateJobRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Job created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduledJobView"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient scope, or a session that cannot do unattended work",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Session not found, or scheduling is disabled on this server (`[schedule] enabled = false`), so there is nowhere for a job to go",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request body exceeds `[serve] max_body_bytes`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid schedule, or the session's job limit is reached, or the id names a sub-agent's conversation, which nothing outside its parent can fire a job on (`/errors/session-not-drivable`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": ["schedule:w"]
+          }
+        ]
+      }
+    },
+    "/v1/sessions/{id}/stream": {
+      "get": {
+        "tags": ["turn"],
+        "summary": "`GET /v1/sessions/{id}/stream`: rejoin the current turn's SSE stream.",
+        "description": "Replays the events after `Last-Event-ID` from a bounded per-turn ring, then follows the live\nstream. When the turn has already ended, the backlog plus its terminal event are delivered and\nthe connection closes, so a client that dropped at the last moment still learns the outcome.\n\nTwo limits worth stating plainly. The ring holds `[serve] stream_replay_events` events, so a\nclient that was away longer than that gets a `notice` saying its replay has a hole rather than a\ntranscript that silently skips. And only the most recent turn is retained: reconnecting after a\n*newer* turn has started returns that turn's stream, which the `turn_id` on the re-issued\n`turn.started` identifies.",
+        "operationId": "stream_turn",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Session UUID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Last-Event-ID",
+            "in": "header",
+            "description": "Resume after this event id",
+            "required": false,
+            "schema": {
+              "type": ["string", "null"]
+            }
+          },
+          {
+            "name": "last_event_id",
+            "in": "query",
+            "description": "Last event id the client received, for clients that cannot set a `Last-Event-ID` header\n(browser `EventSource` sets it automatically; `fetch`-based clients often cannot).\nThe header wins when both are present.",
+            "required": false,
+            "schema": {
+              "type": ["integer", "null"],
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "attend",
+            "in": "query",
+            "description": "Attend the session: show `permission_required` events and answer them. While an attending\nreader is connected, a gated call on any turn parks for an answer instead of being refused\nwithout asking. Needs `sessions:w`, the scope that answers.",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "SSE stream (text/event-stream)"
+          },
+          "401": {
+            "description": "Authorization missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Session not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Another meka process holds the session (`/errors/session-locked`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The id names a sub-agent's session (`/errors/session-not-drivable`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": ["sessions:r"]
+          }
+        ]
+      }
+    },
+    "/v1/sessions/{id}/tasks": {
+      "get": {
+        "tags": ["tasks"],
+        "summary": "`GET /v1/sessions/{id}/tasks`: this session's background tasks, newest first.",
+        "operationId": "list_tasks",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Session UUID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Background tasks",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackgroundTasksResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Session not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": ["sessions:r"]
+          }
+        ]
+      }
+    },
+    "/v1/sessions/{id}/tasks/{task_id}": {
+      "delete": {
+        "tags": ["tasks"],
+        "summary": "`DELETE /v1/sessions/{id}/tasks/{task_id}`: stop a running background task.",
+        "operationId": "cancel_task",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Session UUID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "task_id",
+            "in": "path",
+            "description": "Background task id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Task canceled, or already terminal"
+          },
+          "401": {
+            "description": "Authorization missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Session or task not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The prefix matches more than one task",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": ["sessions:w"]
+          }
+        ]
+      }
+    },
+    "/v1/sessions/{id}/tools": {
+      "get": {
+        "tags": ["discovery"],
+        "summary": "`GET /v1/sessions/{id}/tools`: what this session's agent can call.",
+        "description": "Per-session rather than server-global because the catalog includes MCP tools and reflects that\nregistry's deferred / loaded state, neither of which is a process-wide fact.",
+        "operationId": "list_tools",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Session UUID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Tool catalog",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Session not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Session is not loaded; run a turn first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": ["sessions:r"]
+          }
+        ]
+      }
+    },
+    "/v1/sessions/{id}/turn": {
+      "post": {
+        "tags": ["turn"],
+        "operationId": "submit_turn",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Session UUID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Stripe-style replay key. Same key + same body returns the cached response; same key + different body returns 409.",
+            "required": false,
+            "schema": {
+              "type": ["string", "null"]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TurnRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Blocking turn response (stream=false) or live SSE stream (stream=true). The application/json schema applies only to blocking mode.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TurnResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Session not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A turn is already in flight (`/errors/turn-in-flight`), the Idempotency-Key was used with another body or is in flight on a concurrent request (`/errors/idempotency`), or another meka process holds the session (`/errors/session-locked`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request body exceeds `[serve] max_body_bytes`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid body, the id names a sub-agent's conversation, or the request still exceeds the profile's `max_request_bytes` after redaction. Read `type`: `/errors/invalid-body` is worth resending with a corrected payload, `/errors/request-too-large` with a smaller one or after `/compact`, `/errors/session-not-drivable` never is",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Concurrency limit reached or idempotency-key cache full",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The provider rejected or failed this turn. Read `type`: `/errors/provider-unavailable` was classified as transient and is worth resending after a pause, `/errors/provider` is the catch-all for everything else and usually needs the account or endpoint fixed, and `/errors/context-overflow` needs the conversation shortened first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "An MCP server marked `required` was not connected, so the turn never reached the provider",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": ["sessions:w"]
+          }
+        ]
+      }
+    },
+    "/v1/skills": {
+      "get": {
+        "tags": ["discovery"],
+        "summary": "`GET /v1/skills`: installed skill palette. Mirrors what the REPL `/skill` command and\nthe ACP `available_commands_update` notification surface.",
+        "operationId": "skills",
+        "responses": {
+          "200": {
+            "description": "Installed skill palette",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SkillView"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": ["sessions:r", "mcp:r", "skills:r", "memory:r", "schedule:r"]
+          }
+        ]
+      }
+    },
+    "/v1/skills/{name}": {
+      "get": {
+        "tags": ["skills"],
+        "summary": "`GET /v1/skills/{name}`: one skill, body included.",
+        "operationId": "get_skill",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Skill name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Skill with its body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such skill",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The skill exists but its SKILL.md does not parse",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": ["skills:r"]
+          }
+        ]
+      },
+      "put": {
+        "tags": ["skills"],
+        "summary": "`PUT /v1/skills/{name}`: create or update a skill.",
+        "operationId": "put_skill",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Skill name, lowercase letters, digits, hyphens",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WriteSkillRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Skill written",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The skill store is disabled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The skill lives in a read-only root from `[skills] extra_paths`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request body exceeds `[serve] max_body_bytes`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid name, empty description, or an unwritable path",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": ["skills:w"]
+          }
+        ]
+      },
+      "delete": {
+        "tags": ["skills"],
+        "summary": "`DELETE /v1/skills/{name}`: remove a skill and everything bundled with it.",
+        "operationId": "delete_skill",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Skill name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Skill removed"
+          },
+          "401": {
+            "description": "Authorization missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such skill",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The skill lives in a read-only root from `[skills] extra_paths`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid name, or a symlinked skill directory",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": ["skills:w"]
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "BackgroundTaskView": {
+        "type": "object",
+        "required": ["id", "session_id", "tool", "label", "status", "started_at"],
+        "properties": {
+          "announced_at": {
+            "type": ["string", "null"],
+            "description": "When subscribers were told, which is when `task.finished` fired for this task. Absent when\nnobody has been told yet.\n\nA row migrated from before the split carries its `delivered_at` here, which records that\nthe outcome was reported rather than that any endpoint received it: the store cannot\nknow whether one was subscribed at the time.\n\nSeparate from `delivered_at` because the two answer different questions and stopped\nhappening together: announcing needs nothing from a live session, while telling the agent\nneeds a turn. A client polling this after a `task.finished` can otherwise not tell\n\"announced, waiting for a turn\" from \"never announced at all\"."
+          },
+          "delivered_at": {
+            "type": ["string", "null"],
+            "description": "When the outcome was handed to the agent. Absent when it is still waiting to be delivered\non the session's next turn."
+          },
+          "finished_at": {
+            "type": ["string", "null"]
+          },
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string",
+            "description": "Human-readable summary of what was started."
+          },
+          "outcome": {
+            "type": ["string", "null"],
+            "description": "The tool's output for a terminal task, truncated when it was also spilled to the\nscratchpad."
+          },
+          "scratchpad_entry": {
+            "type": ["string", "null"],
+            "description": "Scratchpad entry holding the full output, when it was too large to carry inline."
+          },
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "started_at": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "description": "`running`, `completed`, `failed`, `canceled`, or `interrupted`."
+          },
+          "tool": {
+            "type": "string",
+            "description": "The tool that was backgrounded, e.g. `execute_command`."
+          }
+        }
+      },
+      "BackgroundTasksResponse": {
+        "type": "object",
+        "required": ["tasks"],
+        "properties": {
+          "tasks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BackgroundTaskView"
+            }
+          }
+        }
+      },
+      "CancelRequest": {
+        "type": "object",
+        "description": "The optional body of `POST /v1/sessions/{id}/cancel`.",
+        "properties": {
+          "turn_id": {
+            "type": ["string", "null"],
+            "format": "uuid",
+            "description": "Cancel only if this turn is the one in flight; another answers 409 `turn-mismatch`."
+          }
+        },
+        "additionalProperties": false
+      },
+      "CapabilitiesBody": {
+        "type": "object",
+        "properties": {
+          "supports_permission_prompts": {
+            "type": "boolean",
+            "description": "When `false`, mid-turn permission requests are denied immediately with a notice instead of\nparking on the SSE channel. Streaming clients with no approval interface set this. Default\n`true`, so a client that says nothing keeps the chance to approve."
+          },
+          "supports_reasoning_stream": {
+            "type": "boolean",
+            "description": "When `true`, the SSE stream includes `thinking.delta` events for extended-thinking\ncontent. Default `false`: chat-transcript clients (Telegram bridges) don't want\nreasoning inline."
+          }
+        },
+        "additionalProperties": false
+      },
+      "CompactRequestBody": {
+        "type": "object",
+        "properties": {
+          "instructions": {
+            "type": ["string", "null"],
+            "description": "Free-text guidance on what to preserve or drop, the wire equivalent of `/compact\n<instructions>`. Reaches the checkpoint turn and the fallback summarizer alike."
+          },
+          "keep_recent": {
+            "type": ["boolean", "null"],
+            "description": "Whether to keep the most recent turns verbatim after the summary. Omit to let meka decide;\nthe checkpoint turn overrides this when it knows better, having just read the conversation."
+          }
+        },
+        "additionalProperties": false
+      },
+      "CompactResponse": {
+        "type": "object",
+        "required": [
+          "session_id",
+          "source",
+          "memories_written",
+          "kept_recent",
+          "messages_before",
+          "messages_after"
+        ],
+        "properties": {
+          "kept_recent": {
+            "type": "boolean",
+            "description": "Whether the recent turns were kept verbatim after the summary."
+          },
+          "memories_written": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Memories the checkpoint turn wrote, observed from its `memory_write` calls rather than\nself-reported, so this cannot disagree with what actually landed on disk."
+          },
+          "messages_after": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "messages_before": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "source": {
+            "type": "string",
+            "description": "Which strategy produced the summary: `checkpoint`, `checkpoint_text`, or `summarizer`.\nReported because they differ in fidelity, not just in mechanism: `summarizer` means the\ncheckpoint turn was disabled, failed, or produced nothing usable."
+          }
+        }
+      },
+      "CompactionMarker": {
+        "type": "object",
+        "required": ["replaced_count", "generation"],
+        "properties": {
+          "generation": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Which compaction produced it, counting from 1. Fidelity degrades with each pass, so a\nclient rendering a transcript can say how far from the original it is.",
+            "minimum": 0
+          },
+          "replaced_count": {
+            "type": "integer",
+            "description": "How many materialized messages the boundary removed.\n\nThe whole pre-compaction window, including the recent tail that compaction then re-appends\nverbatim, so it over-counts what the summary itself stands for. Use it to detect *that* the\nview was rewritten, not to compute how much was lost.",
+            "minimum": 0
+          }
+        }
+      },
+      "ContentBlockView": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": ["text", "type"],
+            "properties": {
+              "text": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": ["text"]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "What meka injected ahead of the user's words for that turn (permission and environment\ncontext, todos, catalog changes, background outcomes, the resume notice), which the model\nsaw as text ahead of them. Typed so a client can show or hide it; `text` alone is the words.",
+            "required": ["text", "type"],
+            "properties": {
+              "text": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": ["turn_context"]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["media_type", "type"],
+            "properties": {
+              "hash": {
+                "type": ["string", "null"],
+                "description": "Content hash of the stored bytes; `GET /v1/sessions/{id}/blobs/{hash}` returns them.\nAbsent only for an image the store never externalized."
+              },
+              "media_type": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": ["image"]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["thinking", "type"],
+            "properties": {
+              "thinking": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": ["thinking"]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Encrypted reasoning whose contents the API withholds; surfaced as a presence marker so\nhistory responses note it occurred without exposing the opaque payload.",
+            "required": ["type"],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": ["redacted_thinking"]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["id", "name", "input", "type"],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "input": {
+                "type": "object"
+              },
+              "name": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": ["tool_use"]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["tool_use_id", "is_error", "content", "type"],
+            "properties": {
+              "content": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ToolResultContentView"
+                }
+              },
+              "is_error": {
+                "type": "boolean"
+              },
+              "tool_use_id": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": ["tool_result"]
+              }
+            }
+          }
+        ]
+      },
+      "ContextResponse": {
+        "type": "object",
+        "required": ["session_id", "generation", "totals"],
+        "properties": {
+          "compact_at_percent": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "Occupancy at which auto-compaction fires, omitted when it is switched off.",
+            "minimum": 0
+          },
+          "generation": {
+            "type": "integer",
+            "format": "int64",
+            "description": "How many times this session has already been compacted. Fidelity degrades with each pass,\nso a client deciding whether to fork rather than compact again wants this.",
+            "minimum": 0
+          },
+          "message_count": {
+            "type": ["integer", "null"],
+            "description": "Messages currently in the materialized window (post-compaction), not the full history.\n\nAbsent while a turn holds the conversation. Everything else here is read from atomics and\nthe database, so occupancy stays answerable during a turn; this one field genuinely needs\nthe log, and blocking the whole response on it would defeat the point of asking.",
+            "minimum": 0
+          },
+          "overhead": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "Estimated system prompt + tool schemas: the part of the window compaction cannot reclaim.\n\nAbsent, not zero, when nothing has measured it. Same reasoning as `used`: the counter is\nonly stamped mid-turn, so a session evicted or re-attached since its last turn has a real\noverhead of several thousand tokens and a recorded one of zero. Reporting `0` would make a\nclient computing `used - overhead` confidently wrong rather than visibly uninformed.",
+            "minimum": 0
+          },
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/SessionTotals",
+            "description": "Cumulative turns and tokens for this session, read from the DB and so unaffected by\neviction or restart."
+          },
+          "used": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "Tokens behind the most recent provider round, omitted when no turn has run since this\nprocess loaded the session.\n\nAbsent rather than zero, deliberately. A re-attached session has a full conversation and an\nunmeasured window, and reporting `0` there would read as \"empty\" to every client that\ndivides by `window`. Run a turn, or read `total_input_tokens` for the cumulative figure\nthat does survive a restart.",
+            "minimum": 0
+          },
+          "used_percent": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "Occupancy percent, present only when both `used` and `window` are known.",
+            "minimum": 0
+          },
+          "window": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "The model's context window, omitted when meka has no metadata for it. A percentage of an\nunknown denominator is worse than silence, so clients should suppress occupancy rather than\nassume a default.",
+            "minimum": 0
+          }
+        }
+      },
+      "CreateGate": {
+        "type": "object",
+        "required": ["check"],
+        "properties": {
+          "check": {
+            "description": "What to run: `{\"command\": \"…\"}` for a shell command, or `{\"tool\": \"mcp__server__tool\",\n\"arguments\": {…}}` for a tool call."
+          },
+          "when": {
+            "description": "When to fire: `\"changed\"` (the default), `\"succeeded\"`, `{\"matches\": \"<regex>\"}`, or\n`{\"at\": \"<json pointer>\", \"is\": \"not_empty\" | \"empty\" | \"changed\"}`.\n\nUntyped here because one parser answers for this field on every door\n([`crate::schedule::GatePredicate::parse_request`]); a second, derived shape would drift\nfrom the tool schema and give different errors for the same mistake."
+          }
+        },
+        "additionalProperties": false
+      },
+      "CreateJobRequest": {
+        "type": "object",
+        "required": ["prompt"],
+        "properties": {
+          "at": {
+            "type": ["string", "null"],
+            "description": "One-shot time: an RFC 3339 instant, or a duration from now (`\"20m\"`, `\"1h 30m\"`)."
+          },
+          "cron": {
+            "type": ["string", "null"],
+            "description": "5-field cron pattern, evaluated in the host's local time."
+          },
+          "every": {
+            "type": ["string", "null"],
+            "description": "Recurring interval (`\"30m\"`, `\"6h\"`)."
+          },
+          "gate": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CreateGate",
+                "description": "Guard the job on a probe: a shell command, or a call to a read-only tool.\n\nThe level required depends on which. A shell command runs unattended and with no sandbox,\nso it needs `unrestricted` and no level that promises a boundary can honestly authorize it.\nA tool probe needs only what the tool itself resolves to, which a gate requires to be\n`read`."
+              }
+            ]
+          },
+          "prompt": {
+            "type": "string",
+            "description": "What the agent is asked to do when the job fires."
+          }
+        },
+        "additionalProperties": false
+      },
+      "CreateSessionRequest": {
+        "type": "object",
+        "description": "`deny_unknown_fields` rejects typos like `permision: \"read\"` with 422 instead of silently\nfalling back to defaults.",
+        "properties": {
+          "approvals": {
+            "type": ["boolean", "null"],
+            "description": "Whether a call above the level is submitted for approval rather than refused. Defaults to\nthe server's `[permissions].approvals`."
+          },
+          "capabilities": {
+            "$ref": "#/components/schemas/CapabilitiesBody",
+            "description": "Per-session capability flags. See the HTTP API docs § \"Capabilities\"."
+          },
+          "cwd": {
+            "type": ["string", "null"],
+            "description": "Absolute path. Defaults to the server process's `current_dir` if omitted."
+          },
+          "permission": {
+            "type": ["string", "null"],
+            "description": "Permission level the session starts in. Defaults to the server's configured default\nfrom `[permissions].default` (typically `read`). Must be in the enabled set."
+          },
+          "profile": {
+            "type": ["string", "null"],
+            "description": "Profile the session runs on, and keeps for the rest of its life unless a later PATCH moves\nit. Defaults to the server's own default profile. Must name a profile in `config.toml`;\n`GET /v1/profiles` lists them."
+          }
+        },
+        "additionalProperties": false
+      },
+      "ForkSessionBody": {
+        "type": "object",
+        "description": "Body for `POST /v1/sessions/{id}/fork`. Every field is optional; omitted means \"inherit from\nthe session being forked\".\n\nOnly `cwd` is offered, mirroring ACP's `session/fork` request, which likewise carries a\nworkspace but no permission or capability fields. Both of those are inherited and remain\nchangeable afterwards via `PATCH /v1/sessions/{id}`.",
+        "properties": {
+          "cwd": {
+            "type": ["string", "null"],
+            "description": "Absolute path for the forked session. Absent → inherit the source's."
+          }
+        },
+        "additionalProperties": false
+      },
+      "GateView": {
+        "type": "object",
+        "description": "A job's gate: what it runs and when the result fires the job.",
+        "required": ["kind", "when"],
+        "properties": {
+          "check": {
+            "type": ["string", "null"],
+            "description": "What the gate runs: a shell command, or a tool name. Omitted when the caller may not see\nit.\n\nThe HTTP API withholds it from a token that does not also hold `sessions:r`. A gate command\nis an `execute_command` line that runs unattended, the highest-entropy field in the system\nand the one most likely to carry a credential someone pasted into a `curl`, and `GET\n/v1/schedule` is server-wide, so a `schedule:r` token would otherwise read every gate on\nthe box. A tool gate is withheld on the same terms, though it discloses less either\nway: this carries the bare tool name, and its arguments reach only `schedule_list`. The\ngate's kind and its condition stay visible, so a client can still tell a gated job from\nan ungated one, and a shell gate from a tool gate, without being told what it runs."
+          },
+          "kind": {
+            "type": "string",
+            "description": "`shell` or `tool`."
+          },
+          "when": {
+            "type": "string",
+            "description": "The fire condition, as `changed`, `succeeded`, `matches /…/` or `/pointer not_empty`."
+          }
+        }
+      },
+      "ImageInput": {
+        "type": "object",
+        "description": "One inline image attachment. Base64 rather than a path or URL because the API is a network\nsurface: `[serve].bind` may be non-loopback, so the caller generally shares no filesystem with\nthe agent and cannot name a file for it to read.",
+        "required": ["media_type", "data"],
+        "properties": {
+          "data": {
+            "type": "string",
+            "description": "Base64-encoded image bytes (standard alphabet, padding required)."
+          },
+          "media_type": {
+            "type": "string",
+            "description": "Declared MIME type, e.g. `image/png`. Used as the primary format hint; the payload's magic\nbytes win if this doesn't name a supported format."
+          }
+        },
+        "additionalProperties": false
+      },
+      "ImportResponse": {
+        "type": "object",
+        "required": ["session_id", "sessions_imported"],
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Freshly minted id for the imported root. Import never reuses the exported ids, so the same\nenvelope can be imported twice without collision."
+          },
+          "sessions_imported": {
+            "type": "integer",
+            "description": "Total sessions written, including sub-agent descendants.",
+            "minimum": 0
+          }
+        }
+      },
+      "InboxItemView": {
+        "type": "object",
+        "description": "One inbox item as the API shows it.",
+        "required": ["id", "session_id", "class", "source", "state", "created_at"],
+        "properties": {
+          "appended_at": {
+            "type": ["string", "null"]
+          },
+          "class": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "delivered_at": {
+            "type": ["string", "null"]
+          },
+          "failure": {
+            "type": ["string", "null"],
+            "description": "Why it was given up on, when it was."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "source": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "description": "`pending`, `appended`, `delivered` or `withdrawn`."
+          },
+          "withdrawn_at": {
+            "type": ["string", "null"]
+          }
+        }
+      },
+      "InboxListResponse": {
+        "type": "object",
+        "description": "The answer to `GET /v1/sessions/{id}/inbox`: the items the model has not been shown, oldest\nfirst.",
+        "required": ["session_id", "items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InboxItemView"
+            }
+          },
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "InboxRequest": {
+        "type": "object",
+        "description": "The body of `POST /v1/sessions/{id}/inbox`.",
+        "required": ["message", "class"],
+        "properties": {
+          "class": {
+            "type": "string",
+            "description": "`steer` reaches a running turn at its next round boundary; `interrupt` cuts the answer it\nis streaming and is read at the boundary while a tool runs; `followup` waits for the turn\nto end. Any of them rides the next turn's opening, or opens one, when nothing is running."
+          },
+          "message": {
+            "type": "string",
+            "description": "What the model reads, verbatim under a header naming `source` and when it arrived."
+          },
+          "source": {
+            "type": ["string", "null"],
+            "description": "Who the message is from, as the header names them. Defaults to the token's description,\nthen to `client`."
+          }
+        },
+        "additionalProperties": false
+      },
+      "InboxResponse": {
+        "type": "object",
+        "description": "The answer to `POST /v1/sessions/{id}/inbox`.",
+        "required": ["item_id", "session_id", "class", "state", "replayed"],
+        "properties": {
+          "class": {
+            "type": "string"
+          },
+          "item_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "replayed": {
+            "type": "boolean",
+            "description": "Whether the `Idempotency-Key` had been used before, so the item is the earlier one."
+          },
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "state": {
+            "type": "string",
+            "description": "`pending` on a fresh item. A replayed `Idempotency-Key` answers the earlier item's state."
+          }
+        }
+      },
+      "InfoResponse": {
+        "type": "object",
+        "description": "What this server is, for a client deciding how to talk to it.\n\nDeliberately carries no backend, profile or model. A server-wide field for either invites a\nclient to post it back to `POST /v1/sessions`, whose `profile` names a profile (`work`) and\nnever a backend (`anthropic-messages`): one field, two meanings, one API, and a 422 for the\nclient that mixed them. `GET /v1/profiles` answers both questions and names them apart, `name`\nfor the profile and `backend` for the backend, and marks the default with `active`.",
+        "required": ["version", "default_permission", "enabled_permissions", "vision", "scopes"],
+        "properties": {
+          "default_permission": {
+            "type": "string"
+          },
+          "enabled_permissions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The scopes the calling token holds, sorted. A client otherwise learns what it may do by\ncollecting 403s."
+          },
+          "version": {
+            "type": "string"
+          },
+          "vision": {
+            "type": "boolean",
+            "description": "Whether the process default profile accepts image attachments. The HTTP analog of ACP's\n`promptCapabilities.image`, so a client can tell whether attaching one is worth the base64\npayload instead of discovering it from a 422.\n\nAn answer for the process, like everything else on this endpoint, and therefore only for a\nsession created without naming a `profile`. `POST /turn` asks the session itself\n(`ResidentSession::accepts_images`), so a session on another profile can differ."
+          }
+        }
+      },
+      "InstructionsResponse": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": ["string", "null"],
+            "description": "The resolved instruction text the agent runs under, omitted when there is none."
+          },
+          "source": {
+            "type": ["string", "null"],
+            "description": "Where the instructions came from, for an operator diagnosing \"why is it behaving like\nthat\". Absent when none are configured."
+          }
+        }
+      },
+      "ListSessionsResponse": {
+        "type": "object",
+        "required": ["sessions"],
+        "properties": {
+          "next_cursor": {
+            "type": ["string", "null"]
+          },
+          "sessions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SessionResponse"
+            }
+          }
+        }
+      },
+      "LiveResponse": {
+        "type": "object",
+        "required": ["status"],
+        "properties": {
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "McpReconnectResponse": {
+        "type": "object",
+        "required": ["server", "state"],
+        "properties": {
+          "server": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "description": "Where the server stands now: `connected`, `failed`, or `pending`.\n\nA 200 says meka acted on the request, not that the server came back, so read this to find\nout which. `pending` means no attempt was made because one was already under way. A\n`disabled` server is a 422 and never appears here."
+          }
+        }
+      },
+      "McpServerStateView": {
+        "type": "object",
+        "description": "One configured MCP server and where its connection stands. Not the server's configuration,\nwhich `meka mcp list` prints and which a read token has no business seeing.",
+        "required": ["name", "state"],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "description": "`pending`, `connected`, `failed` or `disabled`."
+          }
+        }
+      },
+      "McpToolView": {
+        "type": "object",
+        "description": "One tool an MCP server advertises, with its permission resolved: what `meka mcp tools` prints\nand `GET /v1/mcp/{name}/tools` answers with.",
+        "required": [
+          "raw_name",
+          "description",
+          "required_permission",
+          "permission_source",
+          "allowed",
+          "read_only_hint_declined"
+        ],
+        "properties": {
+          "allowed": {
+            "type": "boolean",
+            "description": "`false` when `allowed_tools` or `disabled_tools` filters this tool out, so the agent never\nsees it. Listed anyway: \"configured away\" and \"not advertised\" are different problems."
+          },
+          "description": {
+            "type": "string"
+          },
+          "permission_source": {
+            "type": "string",
+            "description": "Which step of that chain decided it, so a misclassified tool can be traced to the rule that\nclassified it rather than guessed at."
+          },
+          "raw_name": {
+            "type": "string",
+            "description": "Raw name as the server advertises it. This is the value to put in `allowed_tools`,\n`disabled_tools` or `tool_permissions`, which is why it is reported unmangled."
+          },
+          "read_only_hint_declined": {
+            "type": "boolean",
+            "description": "The server advertised `readOnlyHint: true` and `trust_read_only_hint = false` withheld it.\n`permission_source` names only the step that won, and a declined hint by definition did\nnot, so without this a server advertising no hint and one whose hint was refused read\nalike."
+          },
+          "required_permission": {
+            "type": "string",
+            "description": "Output of the permission resolution chain."
+          }
+        }
+      },
+      "McpToolsResponse": {
+        "type": "object",
+        "description": "What one MCP server advertises, under the server's name.",
+        "required": ["server", "tools"],
+        "properties": {
+          "server": {
+            "type": "string"
+          },
+          "tools": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/McpToolView"
+            }
+          }
+        }
+      },
+      "MemoryDetail": {
+        "type": "object",
+        "description": "A memory: what `meka memory list` prints and `GET /v1/memory/{name}` answers with. The body\nrides only on the single-memory surfaces, so a listing stays small.",
+        "required": [
+          "name",
+          "description",
+          "priority",
+          "updated_at",
+          "created_at",
+          "tags",
+          "read_count"
+        ],
+        "properties": {
+          "body": {
+            "type": ["string", "null"],
+            "description": "Present on `GET /v1/memory/{name}` and `meka memory show`, absent from a listing."
+          },
+          "created_at": {
+            "type": "string",
+            "description": "RFC 3339, when the memory was created. Stamped once, at creation: the one the model is\nshown as an age, and the one ties are broken by."
+          },
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "integer",
+            "format": "int32",
+            "description": "0..=9, lower first. Unlike a skill's, a memory's priority is shown to the model, because it\nsays how heavily to weigh a note the model is already reasoning from.",
+            "minimum": 0
+          },
+          "read_count": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many times the agent has recalled this memory through `memory_read`. Feeds search\nranking; an operator reading the memory does not move it.",
+            "minimum": 0
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Lowercase labels for grouping and filtering."
+          },
+          "updated_at": {
+            "type": "string",
+            "description": "RFC 3339, when the row was last written, which a metadata-only edit moves; see\n`created_at` for when the note was made."
+          }
+        }
+      },
+      "MemoryListResponse": {
+        "type": "object",
+        "required": ["memories"],
+        "properties": {
+          "memories": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MemoryDetail"
+            }
+          }
+        }
+      },
+      "MessageView": {
+        "type": "object",
+        "description": "Lightweight wire view of a `Message`. Strips provider-internal blocks like `Thinking`\nsignatures down to their textual content, since callers consuming this endpoint are\ntypically just rendering a transcript.",
+        "required": ["role", "content"],
+        "properties": {
+          "compaction": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CompactionMarker",
+                "description": "Present only on a message that *is* a compaction summary.\n\nWithout this a client polling `/messages` watches history rewrite itself: a compaction\ntruncates the materialized tail and pushes a summary in its place, so `total` shrinks and\nmessages the client already rendered stop coming back. The marker is what lets it tell\n\"the window was summarized\" from \"the server lost my conversation\"."
+              }
+            ]
+          },
+          "content": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ContentBlockView"
+            }
+          },
+          "created_at": {
+            "type": ["string", "null"],
+            "description": "RFC 3339 timestamp at which this message was persisted. `None` for messages produced by\n`assemble_response` in the same turn (no DB round-trip yet). Once the conversation has\nbeen read back via `GET /v1/sessions/{id}/messages`, every row has a `created_at`."
+          },
+          "role": {
+            "type": "string"
+          },
+          "turn_id": {
+            "type": ["string", "null"],
+            "description": "Virtual per-conversation turn correlator (`t_001`, `t_002`, …). Derived at query time\nby grouping every user-role message into a new turn that includes the assistant +\ntool-result messages that follow it. `None` on messages from the assembled-response\npath (no turn boundary known yet).\n\nNote: these are dense sequential indexes (`t_0001`, not UUIDs). The UUID-shaped\n`turn_id` on `POST /v1/sessions/{id}/turn` is a different identifier."
+          }
+        }
+      },
+      "MessagesResponse": {
+        "type": "object",
+        "required": ["session_id", "messages", "total", "revision"],
+        "properties": {
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MessageView"
+            }
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "description": "How many times this conversation has been rewritten rather than appended to.\n\nIncrements on every compaction, rewind, mid-turn repair and image redaction. A polling\nclient that sees it change knows its copy is no longer a prefix of the server's and must\nre-fetch rather than diff; `total` alone cannot tell it apart from data loss.\n\nThe per-message `compaction` marker explains one of those four. This covers the other\nthree: a rewind removes messages with nothing left behind to attach a marker to, which\nwould otherwise reproduce exactly the silent-rewrite failure the marker was added to\nprevent, and a repair or a redaction rewrites a message in place.",
+            "minimum": 0
+          },
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "NoticeView": {
+        "type": "object",
+        "description": "A [`Notice`] as every JSON surface serializes it: `level` is [`NoticeLevel::name`].",
+        "required": ["level", "text"],
+        "properties": {
+          "level": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        }
+      },
+      "PatchSessionRequest": {
+        "type": "object",
+        "properties": {
+          "approvals": {
+            "type": ["boolean", "null"],
+            "description": "Whether calls above the level are submitted for approval. Absent → keep current."
+          },
+          "cwd": {
+            "type": ["string", "null"],
+            "description": "New working directory. Must be absolute. Absent → keep current."
+          },
+          "permission": {
+            "type": ["string", "null"],
+            "description": "New permission level (`none` / `read` / `workspace` / `unrestricted`). Must be in the\nserver's enabled set. Absent → keep current."
+          },
+          "profile": {
+            "type": ["string", "null"],
+            "description": "Profile to move the session onto. Must name a profile in `config.toml`. Absent → keep\ncurrent.\n\nSwitching mid-conversation is allowed and is the client's call. Thinking blocks are tagged\nwith the profile that produced them and are not replayed to a different one, so the\nreasoning recorded so far stops being visible to the model from the next turn onward."
+          }
+        },
+        "additionalProperties": false
+      },
+      "PermissionDecision": {
+        "type": "string",
+        "enum": ["allow", "deny", "allow_always", "deny_always"]
+      },
+      "PermissionRequiredEvent": {
+        "type": "object",
+        "description": "The `permission_required` SSE event's payload: what a client needs to show the prompt and\nanswer it.",
+        "required": ["request_id", "tool_name", "input", "expires_in_seconds"],
+        "properties": {
+          "expires_in_seconds": {
+            "type": "integer",
+            "format": "int64",
+            "description": "How long the request stays answerable before it is denied.",
+            "minimum": 0
+          },
+          "input": {
+            "description": "Every argument the tool was called with, plus `background` when the call would detach. The\nprompt has to show what is being written, not only where; see\n[`PermissionRequest::input`]."
+          },
+          "request_id": {
+            "type": "string",
+            "description": "Names the parked request on `POST /v1/sessions/{id}/responses/{request_id}`."
+          },
+          "tool_name": {
+            "type": "string"
+          }
+        }
+      },
+      "ProblemDetail": {
+        "allOf": [
+          {
+            "type": "object",
+            "description": "Extension members (e.g. `session_id`, `request_id`, `retry_after`). Serialized as\ntop-level JSON fields via `#[serde(flatten)]`."
+          },
+          {
+            "type": "object",
+            "required": ["type", "title", "status"],
+            "properties": {
+              "detail": {
+                "type": ["string", "null"],
+                "description": "Instance-specific message. May vary between occurrences of the same `type_uri`."
+              },
+              "instance": {
+                "type": ["string", "null"],
+                "description": "URI (typically a request path) identifying the specific occurrence."
+              },
+              "status": {
+                "type": "integer",
+                "format": "int32",
+                "description": "HTTP status code that accompanied this response, mirrored into the body for clients that\nonly see the body.",
+                "minimum": 0
+              },
+              "title": {
+                "type": "string",
+                "description": "Short, human-readable summary. Stable for a given `type_uri`."
+              },
+              "type": {
+                "type": "string",
+                "description": "Stable URI identifying the error class. Always set; opaque to clients beyond exact\ncomparison. URIs are documented (not dereferenced); clients should never fetch them."
+              }
+            }
+          }
+        ],
+        "description": "RFC 9457 Problem Details body. The five core members (`type`, `title`, `status`, `detail`,\n`instance`) are first-class; meka-specific extension members ride in `extensions` and get\nflattened into the top-level JSON object on serialization."
+      },
+      "ProfileView": {
+        "type": "object",
+        "description": "A profile as `meka profile list` prints it and `GET /v1/profiles` answers with: its account, the\naccount's backend and its model, and never a credential.",
+        "required": ["name", "account", "active"],
+        "properties": {
+          "account": {
+            "type": "string",
+            "description": "The account this profile bills."
+          },
+          "active": {
+            "type": "boolean",
+            "description": "Whether this is the profile a session gets when it names none.\n\nNot \"the profile the server is running\": a server runs no profile of its own, and each\nsession runs on the one its row records. This marks only the default a run applies to a\nrequest that names no profile."
+          },
+          "backend": {
+            "type": ["string", "null"],
+            "description": "The account's backend, e.g. `anthropic-messages`, `openai-responses` or\n`chatgpt-subscription`. Omitted when the profile names an account that is not configured,\nwhich a listing reports beside the table and which no server starts on."
+          },
+          "model": {
+            "type": ["string", "null"]
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "ProfilesResponse": {
+        "type": "object",
+        "required": ["profiles"],
+        "properties": {
+          "profiles": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProfileView"
+            }
+          }
+        }
+      },
+      "ReadyResponse": {
+        "type": "object",
+        "required": ["status", "session_db", "profile_configured", "mcp_servers_healthy"],
+        "properties": {
+          "mcp_servers_healthy": {
+            "type": "boolean",
+            "description": "`true` unless some MCP server marked `required` is stuck in `Failed`. Optional servers\ndon't count: they can't stop a turn, so they can't make the instance unready either.\nPer-server detail (names, connection states) is available via `GET /v1/mcp`\n(requires auth). It is deliberately omitted here because `/v1/health/ready` is\nunauthenticated and server names leak infrastructure topology."
+          },
+          "profile_configured": {
+            "type": "boolean"
+          },
+          "session_db": {
+            "type": "boolean",
+            "description": "Per-subsystem readiness flags. `false` here means the subsystem is in a state that\nwould fail a real request; a `503` is returned in that case."
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "ResponseBody": {
+        "type": "object",
+        "required": ["outcome"],
+        "properties": {
+          "outcome": {
+            "$ref": "#/components/schemas/PermissionDecision"
+          }
+        },
+        "additionalProperties": false
+      },
+      "RewindRequestBody": {
+        "type": "object",
+        "properties": {
+          "turns": {
+            "type": "integer",
+            "description": "How many trailing turns to drop. A turn starts at a user message that is not a tool result,\nso dropping one removes that message and every assistant / tool-result message after it.",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "RewindResponse": {
+        "type": "object",
+        "required": ["session_id", "turns_removed", "messages_before", "messages_after"],
+        "properties": {
+          "messages_after": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "messages_before": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "turns_removed": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "ScheduledJobView": {
+        "type": "object",
+        "description": "A scheduled job: what `meka schedule list` prints and `GET /v1/schedule` answers with.",
+        "required": ["id", "session_id", "schedule", "prompt", "created_at", "next_fire_at"],
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "gate": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/GateView",
+                "description": "Present when the job is gated, on a shell command or a tool call."
+              }
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "last_fired_at": {
+            "type": ["string", "null"]
+          },
+          "next_fire_at": {
+            "type": "string"
+          },
+          "prompt": {
+            "type": "string"
+          },
+          "schedule": {
+            "type": "string",
+            "description": "Human-readable rendering of the schedule, e.g. `every 30m`, `cron 0 9 * * 1-5`, or an RFC\n3339 instant for a one-shot."
+          },
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "withheld": {
+            "type": ["string", "null"],
+            "description": "Why this job will not fire on its next occurrence, when something is holding it back.\n\nAbsent means it will, as far as the reader can establish. A held job and a healthy watcher\nwith nothing to report are otherwise identical from outside: neither fires, and\n`last_fired_at` is absent for a brand-new job too. Computed per request from the session's\ncurrent level, not stored, so it tracks a `PATCH /v1/sessions/{id}` without the job being\nrewritten."
+          }
+        }
+      },
+      "ScheduledJobsResponse": {
+        "type": "object",
+        "required": ["jobs"],
+        "properties": {
+          "jobs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ScheduledJobView"
+            }
+          }
+        }
+      },
+      "SessionCapabilities": {
+        "type": "object",
+        "description": "Per-session capabilities flags declared at create time. Defaults match the bot/bridge use\ncase (server handles everything locally; SSE clients get assistant text + tool calls but not\nthinking deltas). See the HTTP API docs § \"Capabilities\".\n\n`Serialize` / `Deserialize` are derived so the value can be persisted on the session row and\nre-hydrated by `reattach::ensure_session_loaded` when a GC-evicted session is reconstructed.\n`ToSchema` is derived so the field can ride on `SessionResponse` in the OpenAPI spec.",
+        "properties": {
+          "supports_permission_prompts": {
+            "type": "boolean",
+            "description": "When `false`, a mid-turn permission request is denied immediately with a notice instead of\nparking on the SSE channel for [`APPROVAL_TIMEOUT`].\n\nStreaming mode otherwise assumes the consumer can answer a prompt, which is wrong for a\nservice-to-service client: it wants streaming for liveness on a long turn and has no\ninterface to put an approval in front of, so a session with approvals on stalls for the\nwhole approval timeout per gated call and then denies anyway. That reads as a hang rather\nthan a misconfiguration. Setting this `false` gets blocking mode's behavior (immediate deny\nplus an explanatory notice), which is the same outcome without the stall and legible in\nthe response rather than only in the timing.\n\nDefaults to `true`, so a client that declares nothing and an imported `capabilities_json`\nthat omits the flag both park rather than refuse without asking.",
+            "default": true
+          },
+          "supports_reasoning_stream": {
+            "type": "boolean",
+            "description": "When `true`, the SSE stream includes `thinking.delta` events for extended-thinking\ncontent. Default `false` so chat-transcript clients (Telegram bridges, etc.) don't\nsurface reasoning text inline.",
+            "default": false
+          }
+        }
+      },
+      "SessionResponse": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/SessionView",
+            "description": "The row's own fields, the same object `meka session show --format json` prints. A resident\nsession reports its level and clock from its cells rather than the row; re-attach is where\nthe process default answers for a bare row, and that answer is written to the cells."
+          },
+          {
+            "type": "object",
+            "required": ["capabilities", "turn_in_flight"],
+            "properties": {
+              "capabilities": {
+                "$ref": "#/components/schemas/SessionCapabilities",
+                "description": "Per-session capability flags declared at create time (or re-attach), echoed back so clients\ncan confirm the settings their session actually ended up with."
+              },
+              "inbox_pending": {
+                "type": ["integer", "null"],
+                "format": "int64",
+                "description": "Inbox items waiting to be appended. Reported for a loaded session only, since it is what a\nclient asks a session it is driving; a listing does not pay a query per row for it.",
+                "minimum": 0
+              },
+              "last_turn_at": {
+                "type": ["string", "null"],
+                "description": "Wall-clock timestamp (RFC 3339) of the last successful turn on this session. Omitted when\nthe session has never run a turn (just-created or just-re-attached). Distinct from\n`updated_at`, which advances on any session-level mutation (PATCH included)."
+              },
+              "turn_in_flight": {
+                "type": "boolean",
+                "description": "Whether a turn is running on this session right now.\n\nExists so a client whose SSE stream dropped mid-turn can tell \"my turn is still running\"\nfrom \"my turn died\" without submitting a speculative turn and reading the 409. A dropped\nstream does not cancel the turn: the spawned task keeps the runtime lock and dropping the\n`JoinHandle` detaches rather than aborts, so the work completes and resubmitting would\nduplicate a reply the user is about to receive anyway.\n\nAlways `false` for a GC-evicted session, since eviction requires an idle session."
+              }
+            }
+          }
+        ],
+        "description": "A session as this server answers for it: the row every host prints, under the facts only the\nprocess holding the session can add."
+      },
+      "SessionTotals": {
+        "type": "object",
+        "required": [
+          "turns",
+          "input_tokens",
+          "output_tokens",
+          "cache_creation_input_tokens",
+          "cache_read_input_tokens"
+        ],
+        "properties": {
+          "cache_creation_input_tokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "cache_read_input_tokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "input_tokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "output_tokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "turns": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "SessionView": {
+        "type": "object",
+        "description": "A session's row: what `meka session list` prints and what `GET /v1/sessions/{id}` answers with,\nless the facts only the process holding the session can add (`last_turn_at`, `capabilities`,\n`turn_in_flight`), which the HTTP response flattens this under.",
+        "required": ["id", "created_at", "updated_at", "approvals", "profile", "title"],
+        "properties": {
+          "approvals": {
+            "type": "boolean",
+            "description": "Whether calls above the level are submitted for approval."
+          },
+          "created_at": {
+            "type": "string",
+            "description": "RFC 3339, when the row was made."
+          },
+          "cwd": {
+            "type": ["string", "null"],
+            "description": "Omitted when the row recorded none: an archive that carried no working directory is\nimported as it was written."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "parent_id": {
+            "type": ["string", "null"],
+            "format": "uuid",
+            "description": "The session this one was spawned from, for a sub-agent; omitted for a root session."
+          },
+          "permission": {
+            "type": ["string", "null"],
+            "description": "The session's permission level (`none`, `read`, `workspace`, `unrestricted`). Omitted when\nthe row records no level: every door of this meka records one, so a bare row is an outside\nhand's, and inventing a value for it would state a level the session never ran at."
+          },
+          "profile": {
+            "type": "string",
+            "description": "The profile this session runs on."
+          },
+          "title": {
+            "type": "string",
+            "description": "The first user message's words, whitespace collapsed and cut to 80 characters. Empty until\nthe session has run a turn."
+          },
+          "updated_at": {
+            "type": "string",
+            "description": "RFC 3339, moved by any session-level change, a `PATCH` included."
+          }
+        }
+      },
+      "SkillDetail": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/SkillView"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "allowed-tools": {
+                "type": ["string", "null"],
+                "description": "The Agent Skills `allowed-tools` field, verbatim. meka never acts on it; see the skills\nguide."
+              },
+              "body": {
+                "type": ["string", "null"],
+                "description": "The `SKILL.md` body. Present on `GET /v1/skills/{name}` and `meka skill show`, absent\nwherever the palette should stay small."
+              },
+              "license": {
+                "type": ["string", "null"],
+                "description": "The Agent Skills `license` field, verbatim. Informational."
+              }
+            }
+          }
+        ],
+        "description": "One skill in full: what `GET /v1/skills/{name}` answers with, and the core of what `meka skill\nget` and `show` print."
+      },
+      "SkillView": {
+        "type": "object",
+        "description": "A skill in the palette: what `GET /v1/skills` answers with, and the core of every other skill\nview.",
+        "required": ["name", "description", "priority"],
+        "properties": {
+          "author": {
+            "type": ["string", "null"]
+          },
+          "compatibility": {
+            "type": ["string", "null"],
+            "description": "What the skill needs from its environment, from the Agent Skills `compatibility` field: the\none optional spec field that changes how the skill's instructions should be carried out, so\na client rendering a palette has a reason to show it."
+          },
+          "description": {
+            "type": "string",
+            "description": "Rendered as an index for a client to draw, not the file's bytes: the body is the surface\nthat is returned verbatim."
+          },
+          "name": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Listing rank, 0..=9, lower first. Orders the `[Skills]` index the model sees and decides\nwhich entries that index's cap drops.",
+            "minimum": 0
+          },
+          "version": {
+            "type": ["string", "null"]
+          }
+        }
+      },
+      "ToolCallContentView": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": ["text", "type"],
+            "properties": {
+              "text": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": ["text"]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["media_type", "type"],
+            "properties": {
+              "media_type": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": ["image"]
+              }
+            }
+          }
+        ]
+      },
+      "ToolCallView": {
+        "type": "object",
+        "required": ["id", "name", "input", "is_error", "content"],
+        "properties": {
+          "content": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ToolCallContentView"
+            }
+          },
+          "display_summary": {
+            "type": ["string", "null"],
+            "description": "The one-line label a terminal shows for the call, when the tool has one. Omitted otherwise,\nlike every optional field on this API."
+          },
+          "id": {
+            "type": "string"
+          },
+          "input": {
+            "type": "object"
+          },
+          "is_error": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "ToolResultContentView": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": ["text", "type"],
+            "properties": {
+              "text": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": ["text"]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["media_type", "type"],
+            "properties": {
+              "hash": {
+                "type": ["string", "null"],
+                "description": "Content hash of the stored bytes; `GET /v1/sessions/{id}/blobs/{hash}` returns them."
+              },
+              "media_type": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": ["image"]
+              }
+            }
+          }
+        ]
+      },
+      "ToolView": {
+        "type": "object",
+        "description": "One entry of a tool catalog: what `GET /v1/sessions/{id}/tools` answers with, and the core of\nwhat `meka tool list` prints.",
+        "required": ["name", "description", "required_permission", "deferred"],
+        "properties": {
+          "deferred": {
+            "type": "boolean",
+            "description": "Whether the tool is deferred: present in the catalog by name but with its schema withheld\nuntil the model calls `load_tool`."
+          },
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "required_permission": {
+            "type": "string",
+            "description": "Permission level this tool needs: `none`, `read`, `workspace` or `unrestricted`."
+          }
+        }
+      },
+      "ToolsResponse": {
+        "type": "object",
+        "required": ["tools"],
+        "properties": {
+          "tools": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ToolView"
+            }
+          }
+        }
+      },
+      "TurnOptions": {
+        "type": "object",
+        "description": "Per-turn options. `#[serde(deny_unknown_fields)]` here (and only here) so a typo in\n`option.skil` surfaces as a 422 rather than being silently dropped.",
+        "properties": {
+          "skill": {
+            "type": ["string", "null"],
+            "description": "Optional installed-skill name. When set, `message` is combined with the skill's body (user\ntext first, then the skill body) before the agent runs, matching `/skill <name> <prompt>`\nin the REPL and the `--skill` CLI flag. An unknown skill is a 422."
+          },
+          "unanswered_message": {
+            "type": "string",
+            "description": "What becomes of `message` if the turn ends, failed or canceled, before anything from the\nmodel reached the conversation. `keep` (default) leaves it in place, as the REPL does for a\nprompt whose turn failed; `withdraw` takes it back, for a client that will resend it. Once\na partial answer or a tool call is in the conversation, the message stays regardless."
+          }
+        },
+        "additionalProperties": false
+      },
+      "TurnRequest": {
+        "type": "object",
+        "required": ["message"],
+        "properties": {
+          "images": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ImageInput"
+            },
+            "description": "Image attachments for this turn. A sibling of `message` rather than a member of\n[`TurnOptions`] because these are user content, not a per-turn knob. Requires the session's\nprofile to have vision enabled; see [`decode_turn_images`]."
+          },
+          "message": {
+            "type": "string"
+          },
+          "options": {
+            "$ref": "#/components/schemas/TurnOptions",
+            "description": "Per-turn knobs. See [`TurnOptions`]. Omitting the field is the same as `{}`."
+          },
+          "stream": {
+            "type": "boolean",
+            "description": "`false` (default) → blocking JSON response. `true` → SSE."
+          }
+        },
+        "additionalProperties": false
+      },
+      "TurnResponse": {
+        "type": "object",
+        "required": [
+          "turn_id",
+          "session_id",
+          "stop_reason",
+          "final_text",
+          "messages",
+          "tool_calls",
+          "usage",
+          "notices"
+        ],
+        "properties": {
+          "final_text": {
+            "type": "string",
+            "description": "Concatenated assistant text produced this turn. **Excludes** refusal explanation:\nwhen the model refuses, the refusal text rides on the dedicated `refusal_text` field\ninstead. Clients that just want \"what the user sees\" should consume both:\n`final_text` for the normal response, `refusal_text` when `stop_reason == \"refusal\"`."
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MessageView"
+            },
+            "description": "Structured view of the assistant's message(s) produced this turn. Per the spec, this is\nthe \"richer access\" companion to `final_text`. Clients that want the text plus its\nformatting context (text/thinking content blocks) consume this; clients that just want\na single string consume `final_text`. Tool calls live in their own `tool_calls` array."
+          },
+          "notices": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NoticeView"
+            }
+          },
+          "refusal_text": {
+            "type": ["string", "null"],
+            "description": "Refusal explanation when `stop_reason == \"refusal\"`; `None` otherwise. Mirrors the\n`refusal_text` field on the streaming `turn.finished` SSE event, so blocking and\nstreaming clients share the same shape."
+          },
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "stop_reason": {
+            "type": "string"
+          },
+          "tool_calls": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ToolCallView"
+            }
+          },
+          "turn_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "usage": {
+            "$ref": "#/components/schemas/UsageView"
+          }
+        }
+      },
+      "UsageView": {
+        "type": "object",
+        "required": [
+          "input_tokens",
+          "output_tokens",
+          "cache_creation_input_tokens",
+          "cache_read_input_tokens"
+        ],
+        "properties": {
+          "cache_creation_input_tokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "cache_read_input_tokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "input_tokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "output_tokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "WriteMemoryRequest": {
+        "type": "object",
+        "required": ["description"],
+        "properties": {
+          "body": {
+            "type": ["string", "null"],
+            "description": "Omit to keep the existing body when updating; send `\"\"` to clear it."
+          },
+          "description": {
+            "type": "string",
+            "description": "One line saying what this memory is for."
+          },
+          "priority": {
+            "type": ["integer", "null"],
+            "format": "int32",
+            "description": "0..=9, lower first. Omit to keep an existing memory's priority; defaults to 5 on creation.",
+            "minimum": 0
+          },
+          "tags": {
+            "type": ["array", "null"],
+            "items": {
+              "type": "string"
+            },
+            "description": "Lowercase labels (`[a-z0-9-]`, at most 10). Omit to keep an existing memory's tags; send\n`[]` to clear them."
+          }
+        },
+        "additionalProperties": false
+      },
+      "WriteSkillRequest": {
+        "type": "object",
+        "required": ["description"],
+        "properties": {
+          "author": {
+            "type": ["string", "null"],
+            "description": "Attribution. Recorded on creation only; an existing skill keeps whatever author it already\nhad, so editing a hand-written skill never reassigns it."
+          },
+          "body": {
+            "type": ["string", "null"],
+            "description": "The `SKILL.md` body. Omit to keep the existing body when updating; send `\"\"` to clear it.\nThe same semantics as `memory_write` and `skill_write`, which exist so a caller correcting\na description does not have to resend a body it never wanted to touch."
+          },
+          "description": {
+            "type": "string",
+            "description": "One line saying when to reach for this skill. Required; an empty description produces a\nskill that cannot be loaded again."
+          },
+          "priority": {
+            "type": ["integer", "null"],
+            "format": "int32",
+            "description": "0..=9, lower listed first. Omit to keep an existing skill's priority; defaults to 5 on\ncreation.",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Bearer token configured in [[serve.tokens]]. Scopes: sessions:r, sessions:w, skills:r, skills:w, memory:r, memory:w, schedule:r, schedule:w, mcp:r, mcp:w."
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "sessions",
+      "description": "Session CRUD"
+    },
+    {
+      "name": "turn",
+      "description": "Turn lifecycle (submit / re-attach / cancel / mid-turn responses)"
+    },
+    {
+      "name": "conversation",
+      "description": "Compaction, rewind, context occupancy, export / import"
+    },
+    {
+      "name": "schedule",
+      "description": "Scheduled jobs"
+    },
+    {
+      "name": "tasks",
+      "description": "Background tasks"
+    },
+    {
+      "name": "skills",
+      "description": "Skill store CRUD"
+    },
+    {
+      "name": "memory",
+      "description": "Memory store CRUD"
+    },
+    {
+      "name": "discovery",
+      "description": "Server info, tools, instructions, profiles, MCP"
+    },
+    {
+      "name": "health",
+      "description": "Liveness / readiness probes"
+    }
+  ]
+}

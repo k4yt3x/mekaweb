@@ -1,0 +1,11 @@
+node_modules/
+dist/
+coverage/
+playwright-report/
+blob-report/
+test-results/
+.playwright-mcp/
+playwright/.auth/
+.cache/
+.vite/
+package-lock.json

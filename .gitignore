@@ -1,0 +1,40 @@
+# Dependencies and build output
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Test reports, traces, screenshots, and browser state
+coverage/
+playwright-report/
+blob-report/
+test-results/
+.playwright-mcp/
+playwright/.auth/
+
+# Local configuration, credentials, and runtime databases
+.env
+.env.*
+!.env.example
+*.local
+*.token
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
+
+# Tool caches and logs
+.cache/
+.vite/
+.eslintcache
+*.log
+*.log.*
+
+# OS and local editor state
+.DS_Store
+Thumbs.db
+.idea/
+*.swp
+*.swo
+*~
