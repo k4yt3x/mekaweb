@@ -8,6 +8,8 @@ import { Button } from '../components/ui/button';
 import { Dialog } from '../components/ui/dialog';
 import { ConfirmButton, ErrorNotice, Field, Json, Loading } from '../components/common';
 
+const supportedVersions = ['0.59.0', '0.60.0'];
+
 export function ConnectionForm({
   existing,
   onConnected,
@@ -222,8 +224,11 @@ export function SettingsPage() {
           <dt>Version</dt>
           <dd>
             {state.info?.version}
-            {state.info?.version !== '0.59.0' && (
-              <span className="muted"> · Unverified version (tested: 0.59.0).</span>
+            {!supportedVersions.includes(state.info?.version ?? '') && (
+              <span className="muted">
+                {' '}
+                · Unverified version (supported: {supportedVersions.join(', ')}).
+              </span>
             )}
           </dd>
           <dt>Liveness</dt>

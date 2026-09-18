@@ -722,7 +722,7 @@ export interface components {
       started_at: string;
       /** @description `running`, `completed`, `failed`, `canceled`, or `interrupted`. */
       status: string;
-      /** @description The tool that was backgrounded, e.g. `execute_command`. */
+      /** @description The tool that was backgrounded, e.g. `shell_execute`. */
       tool: string;
     };
     BackgroundTasksResponse: {
@@ -974,7 +974,7 @@ export interface components {
        *     it.
        *
        *     The HTTP API withholds it from a token that does not also hold `sessions:r`. A gate command
-       *     is an `execute_command` line that runs unattended, the highest-entropy field in the system
+       *     is a `shell_execute` line that runs unattended, the highest-entropy field in the system
        *     and the one most likely to carry a credential someone pasted into a `curl`, and `GET
        *     /v1/schedule` is server-wide, so a `schedule:r` token would otherwise read every gate on
        *     the box. A tool gate is withheld on the same terms, though it discloses less either
@@ -1618,7 +1618,7 @@ export interface components {
     ToolView: {
       /**
        * @description Whether the tool is deferred: present in the catalog by name but with its schema withheld
-       *     until the model calls `load_tool`.
+       *     until the model calls `tool_load`.
        */
       deferred: boolean;
       description: string;

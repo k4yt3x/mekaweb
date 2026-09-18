@@ -211,7 +211,7 @@ it('keeps approvals attended across navigation and clears a prompt answered in a
   await f.event('turn.started', { turn_id: 'turn-1' });
   await f.event('permission_required', {
     request_id: 'a',
-    tool_name: 'write_file',
+    tool_name: 'file_write',
     input: { path: 'test' },
     expires_in_seconds: 60,
   });
@@ -227,7 +227,7 @@ it('does not send approval responses through a read-only controller', async () =
   const f = await fixture(false);
   await f.event('permission_required', {
     request_id: 'read-only-approval',
-    tool_name: 'write_file',
+    tool_name: 'file_write',
     input: {},
     expires_in_seconds: 60,
   });

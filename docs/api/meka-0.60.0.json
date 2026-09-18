@@ -6,7 +6,7 @@
     "license": {
       "name": "AGPL-3.0-or-later"
     },
-    "version": "0.59.0"
+    "version": "0.60.0"
   },
   "paths": {
     "/v1/health/live": {
@@ -3688,7 +3688,7 @@
           },
           "tool": {
             "type": "string",
-            "description": "The tool that was backgrounded, e.g. `execute_command`."
+            "description": "The tool that was backgrounded, e.g. `shell_execute`."
           }
         }
       },
@@ -3974,7 +3974,7 @@
         "required": ["check"],
         "properties": {
           "check": {
-            "description": "What to run: `{\"command\": \"…\"}` for a shell command, or `{\"tool\": \"mcp__server__tool\",\n\"arguments\": {…}}` for a tool call."
+            "description": "What to run: `{\"command\": \"\u2026\"}` for a shell command, or `{\"tool\": \"mcp__server__tool\",\n\"arguments\": {\u2026}}` for a tool call."
           },
           "when": {
             "description": "When to fire: `\"changed\"` (the default), `\"succeeded\"`, `{\"matches\": \"<regex>\"}`, or\n`{\"at\": \"<json pointer>\", \"is\": \"not_empty\" | \"empty\" | \"changed\"}`.\n\nUntyped here because one parser answers for this field on every door\n([`crate::schedule::GatePredicate::parse_request`]); a second, derived shape would drift\nfrom the tool schema and give different errors for the same mistake."
@@ -4026,7 +4026,7 @@
           },
           "capabilities": {
             "$ref": "#/components/schemas/CapabilitiesBody",
-            "description": "Per-session capability flags. See the HTTP API docs § \"Capabilities\"."
+            "description": "Per-session capability flags. See the HTTP API docs \u00a7 \"Capabilities\"."
           },
           "cwd": {
             "type": ["string", "null"],
@@ -4049,7 +4049,7 @@
         "properties": {
           "cwd": {
             "type": ["string", "null"],
-            "description": "Absolute path for the forked session. Absent → inherit the source's."
+            "description": "Absolute path for the forked session. Absent \u2192 inherit the source's."
           }
         },
         "additionalProperties": false
@@ -4061,7 +4061,7 @@
         "properties": {
           "check": {
             "type": ["string", "null"],
-            "description": "What the gate runs: a shell command, or a tool name. Omitted when the caller may not see\nit.\n\nThe HTTP API withholds it from a token that does not also hold `sessions:r`. A gate command\nis an `execute_command` line that runs unattended, the highest-entropy field in the system\nand the one most likely to carry a credential someone pasted into a `curl`, and `GET\n/v1/schedule` is server-wide, so a `schedule:r` token would otherwise read every gate on\nthe box. A tool gate is withheld on the same terms, though it discloses less either\nway: this carries the bare tool name, and its arguments reach only `schedule_list`. The\ngate's kind and its condition stay visible, so a client can still tell a gated job from\nan ungated one, and a shell gate from a tool gate, without being told what it runs."
+            "description": "What the gate runs: a shell command, or a tool name. Omitted when the caller may not see\nit.\n\nThe HTTP API withholds it from a token that does not also hold `sessions:r`. A gate command\nis a `shell_execute` line that runs unattended, the highest-entropy field in the system\nand the one most likely to carry a credential someone pasted into a `curl`, and `GET\n/v1/schedule` is server-wide, so a `schedule:r` token would otherwise read every gate on\nthe box. A tool gate is withheld on the same terms, though it discloses less either\nway: this carries the bare tool name, and its arguments reach only `schedule_list`. The\ngate's kind and its condition stay visible, so a client can still tell a gated job from\nan ungated one, and a shell gate from a tool gate, without being told what it runs."
           },
           "kind": {
             "type": "string",
@@ -4069,7 +4069,7 @@
           },
           "when": {
             "type": "string",
-            "description": "The fire condition, as `changed`, `succeeded`, `matches /…/` or `/pointer not_empty`."
+            "description": "The fire condition, as `changed`, `succeeded`, `matches /\u2026/` or `/pointer not_empty`."
           }
         }
       },
@@ -4451,7 +4451,7 @@
           },
           "turn_id": {
             "type": ["string", "null"],
-            "description": "Virtual per-conversation turn correlator (`t_001`, `t_002`, …). Derived at query time\nby grouping every user-role message into a new turn that includes the assistant +\ntool-result messages that follow it. `None` on messages from the assembled-response\npath (no turn boundary known yet).\n\nNote: these are dense sequential indexes (`t_0001`, not UUIDs). The UUID-shaped\n`turn_id` on `POST /v1/sessions/{id}/turn` is a different identifier."
+            "description": "Virtual per-conversation turn correlator (`t_001`, `t_002`, \u2026). Derived at query time\nby grouping every user-role message into a new turn that includes the assistant +\ntool-result messages that follow it. `None` on messages from the assembled-response\npath (no turn boundary known yet).\n\nNote: these are dense sequential indexes (`t_0001`, not UUIDs). The UUID-shaped\n`turn_id` on `POST /v1/sessions/{id}/turn` is a different identifier."
           }
         }
       },
@@ -4499,19 +4499,19 @@
         "properties": {
           "approvals": {
             "type": ["boolean", "null"],
-            "description": "Whether calls above the level are submitted for approval. Absent → keep current."
+            "description": "Whether calls above the level are submitted for approval. Absent \u2192 keep current."
           },
           "cwd": {
             "type": ["string", "null"],
-            "description": "New working directory. Must be absolute. Absent → keep current."
+            "description": "New working directory. Must be absolute. Absent \u2192 keep current."
           },
           "permission": {
             "type": ["string", "null"],
-            "description": "New permission level (`none` / `read` / `workspace` / `unrestricted`). Must be in the\nserver's enabled set. Absent → keep current."
+            "description": "New permission level (`none` / `read` / `workspace` / `unrestricted`). Must be in the\nserver's enabled set. Absent \u2192 keep current."
           },
           "profile": {
             "type": ["string", "null"],
-            "description": "Profile to move the session onto. Must name a profile in `config.toml`. Absent → keep\ncurrent.\n\nSwitching mid-conversation is allowed and is the client's call. Thinking blocks are tagged\nwith the profile that produced them and are not replayed to a different one, so the\nreasoning recorded so far stops being visible to the model from the next turn onward."
+            "description": "Profile to move the session onto. Must name a profile in `config.toml`. Absent \u2192 keep\ncurrent.\n\nSwitching mid-conversation is allowed and is the client's call. Thinking blocks are tagged\nwith the profile that produced them and are not replayed to a different one, so the\nreasoning recorded so far stops being visible to the model from the next turn onward."
           }
         },
         "additionalProperties": false
@@ -4739,7 +4739,7 @@
       },
       "SessionCapabilities": {
         "type": "object",
-        "description": "Per-session capabilities flags declared at create time. Defaults match the bot/bridge use\ncase (server handles everything locally; SSE clients get assistant text + tool calls but not\nthinking deltas). See the HTTP API docs § \"Capabilities\".\n\n`Serialize` / `Deserialize` are derived so the value can be persisted on the session row and\nre-hydrated by `reattach::ensure_session_loaded` when a GC-evicted session is reconstructed.\n`ToSchema` is derived so the field can ride on `SessionResponse` in the OpenAPI spec.",
+        "description": "Per-session capabilities flags declared at create time. Defaults match the bot/bridge use\ncase (server handles everything locally; SSE clients get assistant text + tool calls but not\nthinking deltas). See the HTTP API docs \u00a7 \"Capabilities\".\n\n`Serialize` / `Deserialize` are derived so the value can be persisted on the session row and\nre-hydrated by `reattach::ensure_session_loaded` when a GC-evicted session is reconstructed.\n`ToSchema` is derived so the field can ride on `SessionResponse` in the OpenAPI spec.",
         "properties": {
           "supports_permission_prompts": {
             "type": "boolean",
@@ -5021,7 +5021,7 @@
         "properties": {
           "deferred": {
             "type": "boolean",
-            "description": "Whether the tool is deferred: present in the catalog by name but with its schema withheld\nuntil the model calls `load_tool`."
+            "description": "Whether the tool is deferred: present in the catalog by name but with its schema withheld\nuntil the model calls `tool_load`."
           },
           "description": {
             "type": "string"
@@ -5082,7 +5082,7 @@
           },
           "stream": {
             "type": "boolean",
-            "description": "`false` (default) → blocking JSON response. `true` → SSE."
+            "description": "`false` (default) \u2192 blocking JSON response. `true` \u2192 SSE."
           }
         },
         "additionalProperties": false

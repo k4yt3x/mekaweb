@@ -5,7 +5,7 @@ import { ConnectionRuntime } from './runtime';
 import { BrowserStorage } from './storage';
 
 const info: Schema['InfoResponse'] = {
-  version: '0.59.0',
+  version: '0.60.0',
   default_permission: 'read',
   enabled_permissions: ['read'],
   vision: false,
@@ -89,7 +89,7 @@ it('does not reconnect when discovery completes after an explicit disconnect', a
   expect(await connecting).toBe(false);
   expect(runtime.getSnapshot()).toEqual({ busy: false });
 });
-it.each([null, { version: '0.59.0', scopes: [] }, { ...info, enabled_permissions: [null] }])(
+it.each([null, { version: '0.60.0', scopes: [] }, { ...info, enabled_permissions: [null] }])(
   'rejects malformed discovery before saving a connection',
   async (response) => {
     const { runtime, storage } = fixture();

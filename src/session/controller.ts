@@ -397,7 +397,7 @@ export class SessionController {
         ],
       });
     } else if (frame.event === 'notice') {
-      // Notices have no structured replay-gap discriminator in 0.59.0. Conservatively refresh.
+      // Notices have no structured replay-gap discriminator in 0.60.0. Conservatively refresh.
       this.publish(entry, {
         notices: [...state.notices, string(data, 'text')].slice(-20),
         partial: true,

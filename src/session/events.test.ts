@@ -23,7 +23,7 @@ it('rejects malformed approval payloads and ignores unknown events', () => {
   expect(() =>
     parseEvent({
       event: 'permission_required',
-      data: '{"request_id":"id","tool_name":"write_file"}',
+      data: '{"request_id":"id","tool_name":"file_write"}',
     }),
   ).toThrow();
   expect(parseEvent({ event: 'future.event', data: '{}' })).toBeUndefined();

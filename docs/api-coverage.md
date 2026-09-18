@@ -1,8 +1,8 @@
 # API support
 
-mekaweb targets **meka 0.59.0**, commit `22e1f6b3f1a78049429ef2ce2fd9f005e733368a`. The table maps supported HTTP operations to the interface. Available actions depend on the token's scopes and the server's configuration.
+mekaweb targets **meka 0.60.0**, commit `d5f7d219a3d02c109d96862f35fa84ef41f1ccb6`. Meka 0.59.0 remains compatible. The table maps supported HTTP operations to the interface. Available actions depend on the token's scopes and the server's configuration.
 
-See the [captured schema and generation instructions](api/README.md) for the wire contract and the [meka HTTP API reference](https://github.com/k4yt3x/meka/blob/0.59.0/docs/book/src/usage/http-api.md) for server behavior.
+See the [captured schema and generation instructions](api/README.md) for the wire contract and the [meka HTTP API reference](https://github.com/k4yt3x/meka/blob/0.60.0/docs/book/src/usage/http-api.md) for server behavior.
 
 | Method | Endpoint                                   | Interface support                                                           |
 | ------ | ------------------------------------------ | --------------------------------------------------------------------------- |
@@ -56,7 +56,7 @@ See the [captured schema and generation instructions](api/README.md) for the wir
 
 - **Sessions:** Lists use cursor pagination and can include sub-agents. Session-content search is not exposed by this API; the interface does not offer a working-directory filter. Fork supports a working-directory override. Directory/profile changes require an idle session, while permission and approval mode can change during a turn.
 - **Sub-agents:** Their parent drives them. Their history, context, and tasks can be inspected, but they cannot receive direct user turns or independent settings changes.
-- **History:** Compaction and rewind alter model context. Live replay is bounded and cannot serve as a complete transcript. Export supports Markdown transcripts and JSON archives.
+- **History:** Compaction and rewind alter model context. Live replay is bounded and cannot serve as a complete transcript. Export supports Markdown transcripts and JSON archives. Meka 0.60.0 exports archive format 4 and imports formats 3 and 4; older data conversion is handled by the server.
 - **Images and skills:** These use direct turns while idle; the inbox accepts text only. Skill activation is available from composer Settings.
 - **Memory:** Search filters the complete returned index; this release has no memory pagination or server-side filter parameters. Editing preserves omitted-versus-empty body and tag values.
 - **Skills:** Editable fields are those accepted by the write API. Author is creation-only; version, compatibility, license, and allowed-tools metadata are read-only. The server may reject writes to read-only skill locations.
@@ -66,3 +66,5 @@ See the [captured schema and generation instructions](api/README.md) for the wir
 - **Documentation:** OpenAPI and Swagger endpoints are optional and require `[serve].docs` on the server.
 
 See the [README](../README.md) for connection setup, recovery guidance, and browser compatibility, and the [architecture](architecture.md) for credential and state-handling invariants.
+
+Built-in tool names changed in meka 0.60.0, and `tool_search` was added. The interface displays tool names from the server without translating them. Update old names in custom skill bodies, standing instructions, and new tool-gate definitions using the [meka upgrade guide](https://github.com/k4yt3x/meka/blob/0.60.0/docs/book/src/getting-started/upgrading.md#059-to-060). Existing stored sessions, tasks, and gates are migrated by meka.
