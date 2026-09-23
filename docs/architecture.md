@@ -36,15 +36,19 @@ The API client preserves reverse-proxy paths, rejects credentials embedded in UR
 
 Endpoint changes create a new connection identity and remove the replaced connection's credentials and drafts. Credential replacement/removal disposes old requests, feeds, and authenticated caches across tabs. Cross-tab notifications contain invalidation identifiers, not tokens. Changing the selected connection does not navigate another tab.
 
+Connection discovery has a 10-second deadline covering retries and the response body. It can be canceled or superseded by another saved connection. Failed or canceled discovery preserves saved credentials and any already-connected endpoint; late responses cannot replace a newer connection. This deadline does not apply to running turns or event streams.
+
 Browser storage is not encrypted by the application. Forgetting a token removes local access but does not revoke it on the server. Scopes control visible actions; the server remains authoritative. A 401 retires the connection, while a 403 is shown as an actionable refusal.
 
 ## Session coordination and recovery
 
-The session controller monitors the selected session and active work followed by the tab. Approval cards live outside page components so navigation does not abandon them. Idle, unselected feeds are released; disconnecting disposes all feeds. The last attending reader leaving can cancel a pending approval, but accepted inbox work and blocking turns are not tied to a browser request's lifetime.
+The session controller monitors the selected session and active work followed by the tab. Approval cards live outside page components so navigation does not abandon them. Idle, unselected feeds are released; disconnecting disposes all feeds and POST readers. Streaming turns can be canceled by meka after its reattachment grace expires without any readers. Accepted inbox work runs independently of a browser request's lifetime.
 
-Text uses inbox `steer`; queueing uses `followup`; interruption uses `interrupt`. Stop sends the observed turn id to `/cancel`. Accepted submission, provider delivery, and turn completion are separate states.
+The controller routes idle messages through `POST /turn` with `stream: true`. Once that response announces its turn ID, submission is acknowledged and the composer is free for more input. While work is running, text uses inbox `steer`; queueing uses `followup`; interruption uses `interrupt`. The selected inbox mode applies only while busy. Stop sends an observed turn ID to `/cancel`.
 
-Images, skill activation, and explicit direct-turn retention use `/turn` with `stream: false`, while an attending feed supplies live events. These requests start only while idle. A racing 409 retains the draft. Direct-turn idempotency does not survive a server restart.
+The POST stream establishes admission and its own submission's outcome. The attending session feed is the sole renderer of content, tools, and approvals, including externally started turns, so the two streams cannot duplicate displayed events. Completion on either stream reconciles saved history; delayed replay cannot reopen a completed turn or end a newer one. If replay misses a start event, subsequent activity can establish its explicit turn ID for cancellation while the preview stays labeled incomplete. POST readers belong to the controller and survive page navigation or feed reconnection. A dropped POST after admission is recovered through the feed and session/history reads, never a repeated POST.
+
+Images, skill activation, and explicit direct-turn retention require an idle session. A definitive `409 turn-in-flight` can route ordinary text through the selected inbox mode; direct-only inputs retain their draft. Other conflicts and ambiguous network failures never trigger that fallback. Streaming turns ignore idempotency keys; recovery does not rely on a direct-turn retry cache.
 
 Inbox retries preserve their original body and idempotency key. Management mutations are never retried automatically. Lost responses, HTTP timeouts, and server/gateway errors have uncertain outcomes and are reconciled through reads where possible. Read retries and stream reconnects honor server retry timing.
 
@@ -57,6 +61,16 @@ Pending settings and deletion remain controller state through navigation and fee
 The controller establishes the feed before starting work and tracks explicit replay ids and history revisions. Transient command-output and sub-agent activity events do not advance the replay cursor. Terminal events reconcile temporary previews with saved state; turn generations prevent an older fetch from clearing newer output.
 
 Pagination preserves loaded history until its revision changes. Replay gaps, server resets, and ambiguous joins are labeled incomplete. Tool output and sub-agent activity are live previews, not reconstructed transcript entries. Compaction summaries use API metadata and link users to transcript export for earlier history.
+
+New sessions enable reasoning streams by default; available `thinking.delta` events render as they arrive. Capabilities are fixed at session creation, so existing and imported sessions retain their own setting. Injected `turn_context` blocks are hidden unless **Show context added by meka** is enabled in **Settings → Diagnostics**. This browser-local display preference does not alter model context, saved history, or exports.
+
+Saved tool calls and results share a disclosure, paired by explicit tool-call IDs within an assistant round. Pairing is limited to the loaded snapshot and stops at compaction boundaries. Unmatched or ambiguous results stay visible separately; loading earlier messages can supply a missing call. This presentation does not change the saved messages or merge saved history with live output.
+
+Consecutive assistant messages share an Agent heading. Changes in virtual turn indexes remain boundaries unless the intervening rows consist solely of matched tool results, which meka encodes as user-role messages. User input, compaction markers, and unmatched results always keep their boundaries.
+
+Local submissions appear immediately as You previews, interleaved with live output. Routine admitted direct turns need no acceptance banner or queue. Snapshot replacement waits while admission is unknown. A history read begun after confirmed input persistence or completion replaces the preview; a pending-inbox read also recovers missed delivery events without assuming that absence proves delivery. Pending inbox items appear as chat messages with an inline Withdraw action; delivery events refresh that state. Queued items remain previews, and uncertain submissions retain their recovery controls inside the corresponding message. Preview replacement never compares message text. The inbox API exposes metadata without bodies: after a reload, unmatched pending items have an explicit text-unavailable placeholder. Local text is associated only by item ID. Pending requests without an item ID are resolved before showing unmatched placeholders, so an early inbox read cannot duplicate their messages. Composer errors and draft-conflict choices render in the conversation rather than in panels around the input.
+
+Server notices and turn failures appear as inline messages with their severity. The controller keeps the latest 20 notices for each session on the tab's connection; they are live diagnostics, not additions to the saved transcript. Terminal diagnostics can arrive through either stream and are deduplicated by event type and turn ID. Routine client cancellation produces no extra notice, and tool errors remain in their tool cards. A turn failure shown in the conversation does not repeat in the composer's submission problems.
 
 ## Rendering
 

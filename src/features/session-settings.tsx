@@ -28,7 +28,7 @@ export function ComposerSettingsForm({
   return (
     <SessionForm session={session} running={running} onSaved={() => onSaved(draft)}>
       <Field
-        label="Send mode"
+        label="While the agent is working"
         hint={direct ? 'Unavailable with the selected delivery options.' : undefined}
       >
         <select
@@ -36,7 +36,7 @@ export function ComposerSettingsForm({
           disabled={direct || !canWrite}
           onChange={(event) => setDraft({ ...draft, mode: event.target.value })}
         >
-          <option value="steer">Send · steer</option>
+          <option value="steer">Steer</option>
           <option value="followup">Queue</option>
           <option value="interrupt">Interrupt and send</option>
         </select>
@@ -93,7 +93,7 @@ export function SessionForm({
   running?: boolean;
 }) {
   const { api, info, controller } = useConnection();
-  const profiles = useResource<Schema['ProfilesResponse']>('/v1/profiles');
+  const profiles = useResource<Schema['ProfilesResponse']>('/v1/profiles', undefined, !session);
   const [initial] = useState(session);
   const canWrite = useCan('sessions:w') && !session?.parent_id;
   const activeTurn = running || session?.turn_in_flight;
@@ -101,7 +101,7 @@ export function SessionForm({
   const [profile, setProfile] = useState(session?.profile ?? '');
   const [permission, setPermission] = useState(session?.permission ?? '');
   const [approvals, setApprovals] = useState(session ? String(session.approvals) : '');
-  const [reasoning, setReasoning] = useState(false);
+  const [reasoning, setReasoning] = useState(true);
   const [prompts, setPrompts] = useState(true);
   const action = useAction();
   async function submit(event: FormEvent) {
@@ -112,7 +112,6 @@ export function SessionForm({
       if (session) {
         const body: Schema['PatchSessionRequest'] = {
           ...(cwd !== (initial?.cwd ?? '') ? { cwd } : {}),
-          ...(profile !== initial?.profile ? { profile } : {}),
           ...(approvals !== String(initial?.approvals) ? { approvals: approvals === 'true' } : {}),
         };
         if (!controller) throw new Error('Reconnect before changing session settings.');
@@ -138,7 +137,7 @@ export function SessionForm({
       <fieldset className="form-stack" disabled={action.busy}>
         <Field
           label="Working directory"
-          hint={activeTurn ? 'Directory and profile are locked during a turn.' : undefined}
+          hint={activeTurn ? 'Directory is locked during a turn.' : undefined}
         >
           <input
             value={cwd}
@@ -147,23 +146,22 @@ export function SessionForm({
             placeholder="Server default"
           />
         </Field>
-        <Field label="Profile">
-          <select
-            value={profile}
-            disabled={!canWrite || activeTurn}
-            onChange={(event) => setProfile(event.target.value)}
-          >
-            {!session && <option value="">Server default</option>}
-            {session && !profiles.data?.profiles.some((p) => p.name === session.profile) && (
-              <option value={session.profile}>{session.profile} (unavailable)</option>
-            )}
-            {profiles.data?.profiles.map((p) => (
-              <option key={p.name} value={p.name}>
-                {p.name} · {p.model ?? 'No model'}
-              </option>
-            ))}
-          </select>
-        </Field>
+        {!session && (
+          <Field label="Profile">
+            <select
+              value={profile}
+              disabled={!canWrite || activeTurn}
+              onChange={(event) => setProfile(event.target.value)}
+            >
+              <option value="">Server default</option>
+              {profiles.data?.profiles.map((p) => (
+                <option key={p.name} value={p.name}>
+                  {p.name} · {p.model ?? 'No model'}
+                </option>
+              ))}
+            </select>
+          </Field>
+        )}
         <div className={session ? undefined : 'form-grid'}>
           {!session && (
             <Field label="Permission">
@@ -215,7 +213,7 @@ export function SessionForm({
           </details>
         )}
         {children}
-        <ErrorNotice error={action.error ?? profiles.error} />
+        <ErrorNotice error={action.error ?? (!session ? profiles.error : undefined)} />
         <Button type="submit" disabled={action.busy || !canWrite}>
           {action.busy ? 'Saving…' : session ? 'Save settings' : 'Create session'}
         </Button>

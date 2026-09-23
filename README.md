@@ -80,14 +80,16 @@ The interface has been checked in Chromium and Firefox, including narrow layouts
 
 ## Using mekaweb
 
-- **Messages:** Enter sends; Shift+Enter adds a newline. The default send mode steers the agent, including during a turn. Queue and Interrupt and send are available in the composer's Settings. Stop cancels the current observed turn.
-- **Permissions:** Change permission mode directly beside Send. Settings contains approval mode, profile, working directory, skills, and delivery options. Images and skills can be sent while the session is idle.
+- **Messages:** Enter sends; Shift+Enter adds a newline. Drag the composer’s top grip upward for longer drafts, or focus it and use arrow keys. Its height resets after a successful send. When idle, a message starts a direct streaming turn. While the agent works, messages use Steer by default; choose Queue or Interrupt in the composer's Settings. When a turn is running and the input is empty, Send becomes a red Stop button for that turn.
+- **Permissions:** Change permission mode directly beside Send, or press Shift+Tab in the message input to cycle through enabled modes. Select the profile beside permissions while the session is idle. Settings contains approval mode, working directory, skills, and delivery options. Images and skills can be sent while the session is idle.
 - **Approvals:** Pending tool approvals remain visible when you move to another screen.
 - **Workspace:** Collapse the navigation or session list to focus on a conversation. The details panel stays open until closed. Drag a panel divider to resize it, or use arrow keys when the divider has keyboard focus. Double-click resets its width.
 - **Sessions:** The session menu offers fork, compact, rewind, export, and delete. Import accepts a meka JSON archive. Session-row deletion asks for confirmation; **Shift-click deletes immediately**, including sub-agent sessions.
 - **History:** The conversation shows meka's current model context. Compaction and rewind can replace it. Export the full transcript when you need earlier history.
 
-If a submission has an uncertain outcome, inspect saved state before sending again. Use **Retry same submission** when offered to preserve the original inbox submission key.
+New sessions stream thinking when the provider supplies it. Injected context is hidden by default; enable **Show context added by meka** under **Settings → Diagnostics** to inspect it.
+
+Withdraw and delivery-recovery controls appear inside their messages. If a submission has an uncertain outcome, inspect saved state before sending again. Use **Retry same submission** when offered for an inbox message; streaming direct turns cannot be safely retried automatically.
 
 The interface supports Markdown tables, code highlighting and copying, math, diagrams, and authenticated image attachments. See [API support](docs/api-coverage.md) for available operations and backend limitations.
 

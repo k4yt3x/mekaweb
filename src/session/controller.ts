@@ -8,8 +8,10 @@ import {
   UncertainMutationError,
   type Schema,
 } from '../api/client';
-import { parseEvent, record, SseParser, string, type EventData, type SseFrame } from './events';
+import { parseEvent, SseParser, string, type EventData, type SseFrame } from './events';
 import { createId } from '../identifiers';
+import { readTurnStream } from './turn-stream';
+import { sessionNotice, type SessionNotice } from './notices';
 
 export interface LiveTool {
   id: string;
@@ -21,7 +23,10 @@ export interface LiveTool {
   activity: string;
   progress: string;
 }
-export type LiveBlock = { kind: 'text' | 'thinking'; text: string } | { kind: 'tool'; id: string };
+export type LiveBlock =
+  | { kind: 'text' | 'thinking'; text: string }
+  | { kind: 'tool'; id: string }
+  | { kind: 'submission'; key: string };
 export interface Approval {
   id: string;
   sessionId: string;
@@ -35,10 +40,13 @@ export interface Submission {
   key: string;
   kind: 'inbox' | 'turn';
   body: Schema['InboxRequest'] | Schema['TurnRequest'];
+  createdAt: string;
+  preview: boolean;
   state:
     | 'sending'
     | 'uncertain'
     | 'accepted'
+    | 'running'
     | 'delivered'
     | 'completed'
     | 'withdrawn'
@@ -62,11 +70,12 @@ export interface SessionState {
   settingsPending: boolean;
   turnId?: string;
   running: boolean;
+  textStreaming: boolean;
   partial: boolean;
   blocks: LiveBlock[];
   tools: Record<string, LiveTool>;
   approvals: Approval[];
-  notices: string[];
+  notices: SessionNotice[];
   submissions: Submission[];
   revision: number;
 }
@@ -85,11 +94,16 @@ interface Entry {
   followed: boolean;
   epoch: number;
   snapshotEpoch: number;
+  snapshotDeferred?: boolean;
   reconcileEpoch?: number;
   retry: number;
   ready: Promise<void>;
   deliveries: Map<string, { state: Submission['state']; turnId?: string }>;
   outcomes: Map<string, Submission['state']>;
+  textIdleTimer?: ReturnType<typeof setTimeout>;
+}
+export function isSessionRunning(state: SessionState) {
+  return state.running || state.submissions.some((submission) => submission.state === 'running');
 }
 function initial(id: string): SessionState {
   return {
@@ -100,6 +114,7 @@ function initial(id: string): SessionState {
     deleting: false,
     settingsPending: false,
     running: false,
+    textStreaming: false,
     partial: false,
     blocks: [],
     tools: {},
@@ -109,7 +124,14 @@ function initial(id: string): SessionState {
     revision: 0,
   };
 }
+function needsFollowing(submission: Submission) {
+  return (
+    ['sending', 'uncertain', 'running'].includes(submission.state) ||
+    (submission.state === 'accepted' && submission.preview)
+  );
+}
 export class SessionController {
+  private lifetime = new AbortController();
   private entries = new Map<string, Entry>();
   private drafts = new Map<string, ComposerOptions>();
   private deletions = new Map<string, Promise<string[]>>();
@@ -140,8 +162,41 @@ export class SessionController {
   private publish(entry: Entry, patch: Partial<SessionState> = {}) {
     if (this.disposed || this.entries.get(entry.state.id) !== entry) return;
     entry.state = { ...entry.state, ...patch, revision: entry.state.revision + 1 };
+    if (
+      !entry.state.textStreaming ||
+      !isSessionRunning(entry.state) ||
+      entry.state.feed !== 'connected'
+    ) {
+      clearTimeout(entry.textIdleTimer);
+      delete entry.textIdleTimer;
+      entry.state.textStreaming = false;
+    }
     this.snapshot = [...this.entries.values()].map((e) => e.state);
     for (const listener of this.listeners) listener();
+  }
+  private noteTextStreaming(entry: Entry) {
+    clearTimeout(entry.textIdleTimer);
+    // The API has text deltas but no text-end event. Treat a short quiet interval as a pause,
+    // not a finished turn; thinking/tool events end text activity immediately.
+    entry.textIdleTimer = setTimeout(() => {
+      delete entry.textIdleTimer;
+      this.publish(entry, { textStreaming: false });
+    }, 1000);
+  }
+  private withNotice(entry: Entry, event: string, data: EventData) {
+    const notice = sessionNotice(event, data);
+    const notices = entry.state.notices;
+    if (!notice) return notices;
+    // A terminal belongs to one explicit turn, even if the server replays it again.
+    if (
+      notice.event !== 'notice' &&
+      notice.turnId &&
+      notices.some(
+        (existing) => existing.event === notice.event && existing.turnId === notice.turnId,
+      )
+    )
+      return notices;
+    return [...notices, { ...notice, id: createId() }].slice(-20);
   }
   select(id: string | undefined) {
     this.selected = id;
@@ -159,9 +214,7 @@ export class SessionController {
       !entry.state.settingsPending &&
       !entry.followed &&
       !entry.state.approvals.length &&
-      !entry.state.submissions.some(
-        (s) => s.state === 'sending' || s.state === 'uncertain' || s.state === 'accepted',
-      )
+      !entry.state.submissions.some(needsFollowing)
     ) {
       entry.abort.abort();
       this.publish(entry, { feed: 'closed' });
@@ -182,11 +235,17 @@ export class SessionController {
       abort: new AbortController(),
       selected: this.selected === id,
       followed: false,
-      epoch: 0,
+      epoch: entry?.epoch ?? 0,
       snapshotEpoch: 0,
+      ...(entry?.reconcileEpoch !== undefined ? { reconcileEpoch: entry.reconcileEpoch } : {}),
+      ...(entry?.snapshotDeferred ? { snapshotDeferred: true } : {}),
       retry: 1000,
       ready: Promise.resolve(),
     };
+    const activeEntry = entry;
+    entry.abort.signal.addEventListener('abort', () => clearTimeout(activeEntry.textIdleTimer), {
+      once: true,
+    });
     this.entries.set(id, entry);
     this.publish(entry, { feed: 'connecting' });
     entry.ready = this.open(entry);
@@ -311,14 +370,21 @@ export class SessionController {
     }
     if (!data) return;
     const turnId = string(data, 'turn_id');
+    // A POST terminal can reach us before the attending feed's replay. Its saved snapshot
+    // supersedes those old deltas; replay must not reopen work or duplicate the saved answer.
+    if (entry.outcomes.has(turnId) && !frame.event.startsWith('inbox.') && frame.event !== 'notice')
+      return;
     if (frame.event === 'turn.started') {
       if (entry.state.turnId !== turnId) {
         entry.epoch++;
         this.publish(entry, {
           turnId,
           running: true,
+          textStreaming: false,
           partial: data.resumed === true || !entry.state.saved || entry.state.loading,
-          blocks: [],
+          blocks: entry.state.submissions
+            .filter((submission) => submission.preview)
+            .map((submission) => ({ kind: 'submission', key: submission.key })),
           tools: {},
           approvals: [],
         });
@@ -327,20 +393,57 @@ export class SessionController {
     }
     if (
       turnId &&
+      (!entry.state.turnId || entry.outcomes.has(entry.state.turnId)) &&
+      (frame.event.startsWith('tool_call.') ||
+        [
+          'assistant_text.delta',
+          'thinking.delta',
+          'permission_required',
+          'subagent.activity',
+          'progress',
+        ].includes(frame.event))
+    ) {
+      // A truncated replay may start in the middle of work. Its explicit turn ID is enough
+      // to target Stop safely, but never enough to claim that the preview is complete.
+      entry.epoch++;
+      this.publish(entry, {
+        turnId,
+        running: true,
+        partial: true,
+        blocks: entry.state.blocks.filter((block) => block.kind === 'submission'),
+        tools: {},
+        approvals: [],
+      });
+    }
+    if (
+      turnId &&
       entry.state.turnId &&
       turnId !== entry.state.turnId &&
       !frame.event.startsWith('inbox.')
     )
       return;
+    if (
+      [
+        'assistant_text.delta',
+        'thinking.delta',
+        'tool_call.composing',
+        'tool_call.executing',
+      ].includes(frame.event)
+    )
+      this.markTurnProgress(entry, turnId);
     const state = entry.state;
     if (frame.event === 'assistant_text.delta' || frame.event === 'thinking.delta') {
       const kind = frame.event === 'thinking.delta' ? 'thinking' : 'text';
       const blocks = [...state.blocks];
       const last = blocks.at(-1);
       const text = string(data, 'text');
+      if (!text) return;
       if (last?.kind === kind) blocks[blocks.length - 1] = { kind, text: last.text + text };
       else blocks.push({ kind, text });
-      this.publish(entry, { blocks });
+      const tail = blocks.at(-1);
+      const textStreaming = tail?.kind === 'text' && Boolean(tail.text.trim());
+      if (textStreaming) this.noteTextStreaming(entry);
+      this.publish(entry, { blocks, textStreaming });
     } else if (
       frame.event.startsWith('tool_call.') ||
       frame.event === 'subagent.activity' ||
@@ -378,12 +481,14 @@ export class SessionController {
           .filter((v) => v !== undefined)
           .join(' ');
       this.publish(entry, {
+        textStreaming: false,
         tools: { ...entry.state.tools, [id]: tool },
         ...(!old ? { blocks: [...state.blocks, { kind: 'tool', id }] } : {}),
       });
     } else if (frame.event === 'permission_required') {
       const id = string(data, 'request_id');
       this.publish(entry, {
+        textStreaming: false,
         approvals: [
           ...state.approvals.filter((a) => a.id !== id),
           {
@@ -399,12 +504,12 @@ export class SessionController {
     } else if (frame.event === 'notice') {
       // Notices have no structured replay-gap discriminator in 0.60.0. Conservatively refresh.
       this.publish(entry, {
-        notices: [...state.notices, string(data, 'text')].slice(-20),
+        notices: this.withNotice(entry, frame.event, data),
         partial: true,
       });
       void this.refresh(state.id);
     } else if (frame.event === 'context.compacted') {
-      this.publish(entry, { partial: true });
+      this.publish(entry, { partial: true, textStreaming: false });
       void this.refresh(state.id);
     } else if (frame.event.startsWith('inbox.')) {
       const ids = Array.isArray(data.item_ids) ? data.item_ids : [data.item_id];
@@ -439,42 +544,61 @@ export class SessionController {
                     : frame.event === 'inbox.failed'
                       ? 'failed'
                       : 'withdrawn',
+                ...(frame.event === 'inbox.withdrawn' || frame.event === 'inbox.failed'
+                  ? { preview: false }
+                  : {}),
               }
             : s,
         ),
       });
+      this.invalidated(state.id);
     } else if (['turn.finished', 'turn.failed', 'turn.canceled'].includes(frame.event)) {
-      entry.followed = false;
-      const outcome =
-        frame.event === 'turn.finished'
-          ? 'completed'
-          : frame.event === 'turn.failed'
-            ? 'failed'
-            : 'canceled';
-      entry.outcomes.set(turnId, outcome);
-      if (entry.outcomes.size > 50) entry.outcomes.delete(entry.outcomes.keys().next().value!);
-      const message = record(data.error)
-        ? string(data.error, 'detail') || string(data.error, 'title')
-        : string(data, 'refusal_text') || string(data, 'reason');
-      this.publish(entry, {
-        running: false,
-        approvals: [],
-        tools: Object.fromEntries(
-          Object.entries(state.tools).map(([id, t]) => [
-            id,
-            { ...t, state: ['composing', 'executing'].includes(t.state) ? 'ended' : t.state },
-          ]),
-        ),
-        submissions: state.submissions.map((s) =>
-          s.turnId === turnId ? { ...s, state: outcome } : s,
-        ),
-        ...(message ? { notices: [...state.notices, message].slice(-20) } : {}),
-      });
-      void this.refresh(state.id, true).then(() => {
-        this.invalidated(state.id);
-        this.release(entry);
-      });
+      this.finishTurn(entry, frame.event, data);
     }
+  }
+  private finishTurn(entry: Entry, event: string, data: EventData) {
+    const turnId = string(data, 'turn_id');
+    if (entry.outcomes.has(turnId)) return;
+    const outcome =
+      event === 'turn.finished' ? 'completed' : event === 'turn.failed' ? 'failed' : 'canceled';
+    const state = entry.state;
+    const current = !state.turnId || state.turnId === turnId;
+    if (current) entry.followed = false;
+    entry.outcomes.set(turnId, outcome);
+    if (entry.outcomes.size > 50) entry.outcomes.delete(entry.outcomes.keys().next().value!);
+    const message = sessionNotice(event, data)?.text;
+    this.publish(entry, {
+      ...(current
+        ? {
+            running: false,
+            textStreaming: false,
+            approvals: [],
+            tools: Object.fromEntries(
+              Object.entries(state.tools).map(([id, tool]) => [
+                id,
+                {
+                  ...tool,
+                  state: ['composing', 'executing'].includes(tool.state) ? 'ended' : tool.state,
+                },
+              ]),
+            ),
+          }
+        : {}),
+      submissions: state.submissions.map((submission) =>
+        submission.turnId === turnId
+          ? {
+              ...submission,
+              state: outcome,
+              ...(outcome === 'failed' && message ? { error: message } : {}),
+            }
+          : submission,
+      ),
+      notices: this.withNotice(entry, event, data),
+    });
+    void this.refresh(state.id, current).then(() => {
+      this.invalidated(state.id);
+      this.release(entry);
+    });
   }
   deleteSession(id: string): Promise<string[]> {
     const pending = this.deletions.get(id);
@@ -496,7 +620,8 @@ export class SessionController {
     if (this.disposed) throw new Error('The connection changed before the session was deleted.');
     if (!this.canWrite) throw new Error('Deleting sessions requires sessions:w.');
     const state = this.entries.get(id)?.state;
-    if (state?.running) throw new Error('Stop the current turn before deleting this session.');
+    if (state && isSessionRunning(state))
+      throw new Error('Stop the current turn before deleting this session.');
     if (state?.settingsPending) throw new Error('Wait for the settings change to finish.');
     try {
       await this.api.mutate('DELETE', sessionPath(id));
@@ -578,10 +703,48 @@ export class SessionController {
     const entry = this.entries.get(id);
     if (!entry || entry.abort.signal.aborted) return;
     const epoch = entry.epoch;
+    const wasFollowed = entry.followed;
     if (replacePreview) entry.reconcileEpoch = epoch;
     const request = ++entry.snapshotEpoch;
+    // Capture receipts before reading history. Later acknowledgments cannot establish whether
+    // that snapshot included a message. Uncertain receipts move back to the delivery controls.
+    const receipts = new Set(
+      entry.state.submissions
+        .filter(
+          (submission) =>
+            submission.preview &&
+            ([
+              'delivered',
+              'completed',
+              'failed',
+              'canceled',
+              'withdrawn',
+              'reviewed',
+              'uncertain',
+            ].includes(submission.state) ||
+              submission.delivery === 'appended' ||
+              (submission.kind === 'turn' && submission.delivery === 'delivered')),
+        )
+        .map((submission) => submission.key),
+    );
+    const pendingInbox = entry.state.submissions.filter(
+      (submission) => submission.preview && submission.state === 'accepted' && submission.itemId,
+    );
     this.publish(entry, { loading: true });
     try {
+      if (pendingInbox.length) {
+        // A reconnect may have missed delivery events. Appended items are already in history;
+        // absent items have left the pending queue, but absence alone does not prove delivery.
+        const inbox = await this.api.get<Schema['InboxListResponse']>(
+          sessionPath(id) + '/inbox',
+          undefined,
+          entry.abort.signal,
+        );
+        for (const submission of pendingInbox) {
+          const item = inbox.items.find((item) => item.id === submission.itemId);
+          if (!item || item.state !== 'pending') receipts.add(submission.key);
+        }
+      }
       const { saved, offset, ambiguous } = await this.loadSnapshot(entry);
       const session = await this.api.get<Schema['SessionResponse']>(
         sessionPath(id),
@@ -590,11 +753,20 @@ export class SessionController {
       );
       if (entry.snapshotEpoch !== request || entry.abort.signal.aborted) return;
       if (
-        epoch === entry.epoch &&
-        !session.turn_in_flight &&
-        !entry.state.submissions.some((s) => ['sending', 'uncertain', 'accepted'].includes(s.state))
-      )
-        entry.followed = false;
+        entry.state.submissions.some(
+          (submission) =>
+            submission.preview &&
+            (submission.state === 'sending' ||
+              (submission.state === 'running' && !receipts.has(submission.key))),
+        )
+      ) {
+        // The POST may have committed without returning its receipt yet. Keep the local view
+        // intact until acknowledgment or an uncertain outcome lets a fresh read replace it.
+        entry.snapshotDeferred = true;
+        this.publish(entry, { session, loading: false });
+        return;
+      }
+      delete entry.snapshotDeferred;
       delete entry.state.error;
       // Completion belongs to the turn, not to whichever snapshot request happens to finish.
       const reconciled =
@@ -603,15 +775,27 @@ export class SessionController {
         !session.turn_in_flight &&
         !ambiguous;
       if (reconciled) delete entry.reconcileEpoch;
+      const submissions = entry.state.submissions.map((submission) =>
+        !ambiguous && receipts.has(submission.key) ? { ...submission, preview: false } : submission,
+      );
+      if (epoch === entry.epoch && !session.turn_in_flight && !submissions.some(needsFollowing))
+        entry.followed = false;
+      const pendingPreviews = new Set(submissions.filter((s) => s.preview).map((s) => s.key));
+      const blocks = entry.state.blocks.filter((block) =>
+        block.kind === 'submission' ? pendingPreviews.has(block.key) : !reconciled,
+      );
       this.publish(entry, {
         saved,
         offset,
         ...(ambiguous ? { partial: true } : {}),
         session,
         loading: false,
+        submissions,
+        blocks,
         ...(epoch === entry.epoch ? { running: session.turn_in_flight } : {}),
-        ...(reconciled ? { blocks: [], tools: {}, partial: false } : {}),
+        ...(reconciled ? { tools: {}, partial: false } : {}),
       });
+      if (pendingInbox.length || wasFollowed) this.release(entry);
     } catch (error) {
       if (!entry.abort.signal.aborted && request === entry.snapshotEpoch)
         this.publish(entry, { loading: false, error: errorMessage(error) });
@@ -681,10 +865,42 @@ export class SessionController {
       this.publish(entry, { error: errorMessage(error) });
     }
   }
+  async submitMessage(id: string, message: string, options: ComposerOptions): Promise<boolean> {
+    const entry = await this.ensure(id);
+    const requiresDirect =
+      options.images.length > 0 || Boolean(options.skill) || options.retention !== 'keep';
+    const inbox: Schema['InboxRequest'] = {
+      message,
+      class: options.mode,
+      ...(options.source ? { source: options.source } : {}),
+    };
+    if (isSessionRunning(entry.state) && !requiresDirect) return this.submit(id, inbox, 'inbox');
+    return this.submit(
+      id,
+      {
+        message,
+        stream: true,
+        ...(options.images.length
+          ? { images: options.images.map(({ media_type, data }) => ({ media_type, data })) }
+          : {}),
+        ...(options.skill || options.retention !== 'keep'
+          ? {
+              options: {
+                ...(options.skill ? { skill: options.skill } : {}),
+                ...(options.retention !== 'keep' ? { unanswered_message: options.retention } : {}),
+              },
+            }
+          : {}),
+      },
+      'turn',
+      requiresDirect ? undefined : inbox,
+    );
+  }
   async submit(
     id: string,
     body: Schema['InboxRequest'] | Schema['TurnRequest'],
     kind: 'inbox' | 'turn',
+    busyFallback?: Schema['InboxRequest'],
   ): Promise<boolean> {
     if (!this.canWrite) throw new Error('This token needs sessions:w to send messages.');
     const entry = await this.ensure(id);
@@ -696,30 +912,49 @@ export class SessionController {
       throw new Error(
         'Wait for an attending session feed before sending. Sub-agent sessions are controlled by their parent.',
       );
-    if (kind === 'turn' && entry.state.running)
-      throw new Error(
-        'Images and skills can be sent when this session is idle. Your draft is retained.',
-      );
+    if (kind === 'turn' && isSessionRunning(entry.state)) {
+      if (busyFallback) {
+        body = busyFallback;
+        kind = 'inbox';
+      } else
+        throw new Error(
+          'Images, skills, and direct-turn options require an idle session. Your draft is retained.',
+        );
+    }
     if (entry.state.submissions.some((s) => s.state === 'sending' || s.state === 'uncertain'))
       throw new Error('Resolve the pending submission before sending another message.');
     const submission: Submission = {
       key: createId(),
       kind,
       body: structuredClone(body),
+      createdAt: new Date().toISOString(),
+      preview: true,
       state: 'sending',
     };
     entry.followed = true;
     this.publish(entry, { submissions: [...entry.state.submissions.slice(-49), submission] });
-    return this.send(entry, submission);
+    return this.send(entry, submission, busyFallback);
   }
-  private async send(entry: Entry, submission: Submission): Promise<boolean> {
+  private async send(
+    entry: Entry,
+    submission: Submission,
+    busyFallback?: Schema['InboxRequest'],
+  ): Promise<boolean> {
     const update = (patch: Partial<Submission>) =>
       this.publish(entry, {
         submissions: entry.state.submissions.map((s) =>
           s.key === submission.key ? { ...s, ...patch } : s,
         ),
       });
-    update({ state: 'sending' });
+    update({ state: 'sending', preview: true });
+    if (
+      !entry.state.blocks.some(
+        (block) => block.kind === 'submission' && block.key === submission.key,
+      )
+    )
+      this.publish(entry, {
+        blocks: [...entry.state.blocks, { kind: 'submission', key: submission.key }],
+      });
     try {
       if (submission.kind === 'inbox') {
         const result = await this.api.mutate<Schema['InboxResponse']>(
@@ -728,6 +963,11 @@ export class SessionController {
           submission.body,
           submission.key,
         );
+        const current = this.entries.get(entry.state.id);
+        if (this.disposed || !current) return false;
+        // Reopening a feed replaces its entry, but the in-flight POST still belongs to this
+        // controller and must update the replacement rather than leaving it stuck sending.
+        entry = current;
         const delivery = entry.deliveries.get(result.item_id);
         const outcome = delivery?.turnId ? entry.outcomes.get(delivery.turnId) : undefined;
         update({
@@ -744,7 +984,19 @@ export class SessionController {
           ...(delivery?.turnId ? { turnId: delivery.turnId } : {}),
         });
         if (outcome) entry.followed = false;
-        this.release(entry);
+        // Delivery or completion can race ahead of the POST response. Once its item ID is
+        // known, a fresh snapshot can replace this receipt, including after a safe retry.
+        if (
+          outcome ||
+          result.state === 'delivered' ||
+          result.state === 'appended' ||
+          entry.snapshotDeferred ||
+          !entry.state.running
+        )
+          void this.refresh(entry.state.id, Boolean(outcome)).then(() => this.release(entry));
+        else this.release(entry);
+      } else if ('stream' in submission.body && submission.body.stream) {
+        return await this.startStreamingTurn(entry, submission);
       } else {
         const result = await this.api.mutate<Schema['TurnResponse']>(
           'POST',
@@ -752,6 +1004,9 @@ export class SessionController {
           submission.body,
           submission.key,
         );
+        const current = this.entries.get(entry.state.id);
+        if (this.disposed || !current) return false;
+        entry = current;
         update({ state: 'completed', turnId: result.turn_id });
         entry.followed = false;
         await this.refresh(entry.state.id, true);
@@ -759,12 +1014,156 @@ export class SessionController {
       this.invalidated(entry.state.id);
       return true;
     } catch (error) {
+      const current = this.entries.get(entry.state.id);
+      if (this.disposed || !current) return false;
+      entry = current;
+      if (
+        submission.kind === 'turn' &&
+        busyFallback &&
+        error instanceof ApiError &&
+        error.status === 409 &&
+        error.is('turn-in-flight')
+      ) {
+        const queued: Submission = {
+          ...submission,
+          kind: 'inbox',
+          body: structuredClone(busyFallback),
+        };
+        update({ kind: 'inbox', body: queued.body });
+        return this.send(entry, queued);
+      }
       const uncertain = error instanceof UncertainMutationError || !(error instanceof ApiError);
-      update({ state: uncertain ? 'uncertain' : 'failed', error: errorMessage(error) });
+      update({
+        state: uncertain ? 'uncertain' : 'failed',
+        error: errorMessage(error),
+        ...(!uncertain ? { preview: false } : {}),
+      });
       if (!uncertain) entry.followed = false;
       void this.refresh(entry.state.id);
       return false;
     }
+  }
+  private async startStreamingTurn(entry: Entry, submission: Submission): Promise<boolean> {
+    // Streaming turns do not honor idempotency keys. This request is never automatically retried.
+    const response = await this.api.response('POST', sessionPath(entry.state.id) + '/turn', {
+      body: submission.body,
+      accept: 'text/event-stream',
+      signal: this.lifetime.signal,
+    });
+    let admitted = false;
+    let turnId: string | undefined;
+    let accept!: (value: boolean) => void;
+    let refuse!: (error: unknown) => void;
+    const admission = new Promise<boolean>((resolve, reject) => {
+      accept = resolve;
+      refuse = reject;
+    });
+    const id = entry.state.id;
+    const update = (current: Entry, patch: Partial<Submission>) => {
+      this.publish(current, {
+        submissions: current.state.submissions.map((item) =>
+          item.key === submission.key ? { ...item, ...patch } : item,
+        ),
+      });
+    };
+    // The session feed alone renders content and approvals. The POST stream owns admission and
+    // this submission's outcome, so simultaneous copies cannot duplicate text or tool results.
+    void readTurnStream(response, this.lifetime.signal, (frame, data) => {
+      const current = this.entries.get(id);
+      if (this.disposed || !current) return;
+      if (data.session_id && data.session_id !== id)
+        throw new Error('The turn stream named another session.');
+      const eventTurn = string(data, 'turn_id');
+      if (turnId && eventTurn && eventTurn !== turnId)
+        throw new Error('The turn stream changed its turn ID.');
+      const terminal = ['turn.finished', 'turn.failed', 'turn.canceled'].includes(frame.event);
+      if (!admitted) {
+        if (frame.event !== 'turn.started' && !terminal) return;
+        if (!eventTurn) throw new Error('The turn stream did not identify its turn.');
+        turnId = eventTurn;
+        admitted = true;
+        const outcome = current.outcomes.get(turnId);
+        update(current, { turnId, state: outcome ?? 'running' });
+        accept(true);
+        this.invalidated(id);
+        if (outcome) void this.refresh(id, current.state.turnId === turnId);
+      }
+      if (
+        [
+          'assistant_text.delta',
+          'thinking.delta',
+          'tool_call.composing',
+          'tool_call.executing',
+        ].includes(frame.event)
+      )
+        this.markTurnProgress(current, eventTurn);
+      if (terminal && turnId) {
+        this.finishTurn(current, frame.event, data);
+      }
+    })
+      .then((terminal) => {
+        if (!admitted) refuse(new UncertainMutationError());
+        // A dropped POST after admission does not cancel accepted work. Keep following the feed.
+        else if (!terminal && turnId) void this.recoverStreamingTurn(id, submission.key, turnId);
+      })
+      .catch((error: unknown) => {
+        if (!admitted) refuse(new UncertainMutationError(error));
+        else if (turnId) void this.recoverStreamingTurn(id, submission.key, turnId);
+      });
+    return admission;
+  }
+  private async recoverStreamingTurn(id: string, key: string, turnId: string) {
+    const entry = this.entries.get(id);
+    if (this.disposed || !entry || entry.outcomes.has(turnId)) return;
+    try {
+      const session = await this.api.get<Schema['SessionResponse']>(
+        sessionPath(id),
+        undefined,
+        this.lifetime.signal,
+      );
+      const current = this.entries.get(id);
+      if (this.disposed || !current || current.outcomes.has(turnId)) return;
+      if (!session.turn_in_flight) {
+        this.publish(current, {
+          submissions: current.state.submissions.map((submission) =>
+            submission.key === key && submission.state === 'running'
+              ? {
+                  ...submission,
+                  state: 'uncertain',
+                  error:
+                    'The turn started, but its final status could not be confirmed. Review the saved conversation before sending again.',
+                }
+              : submission,
+          ),
+        });
+        await this.refresh(id, current.state.turnId === turnId);
+      } else if (current.state.feed === 'unavailable') {
+        await this.reconnect(id);
+      }
+    } catch (error) {
+      const current = this.entries.get(id);
+      if (!this.disposed && current && current.state.feed !== 'connected')
+        this.publish(current, { error: errorMessage(error), partial: true });
+      // A healthy session feed remains authoritative if this supplementary read also fails.
+    }
+  }
+  private markTurnProgress(entry: Entry, turnId: string) {
+    if (
+      !entry.state.submissions.some(
+        (submission) =>
+          submission.kind === 'turn' &&
+          submission.turnId === turnId &&
+          submission.delivery !== 'delivered',
+      )
+    )
+      return;
+    this.publish(entry, {
+      submissions: entry.state.submissions.map((submission) =>
+        submission.kind === 'turn' && submission.turnId === turnId
+          ? { ...submission, delivery: 'delivered' }
+          : submission,
+      ),
+    });
   }
   async retryInbox(id: string, key: string) {
     const entry = await this.ensure(id);
@@ -780,6 +1179,50 @@ export class SessionController {
     entry.followed = true;
     return this.send(entry, submission);
   }
+  async withdrawInbox(id: string, itemId: string) {
+    if (this.disposed || !this.canWrite)
+      throw new Error('Withdrawing a message requires an active connection with sessions:w.');
+    const entry = this.entries.get(id);
+    if (entry?.state.session?.parent_id)
+      throw new Error('Sub-agent sessions are controlled by their parent.');
+    if (entry?.state.deleting || this.deletions.has(id))
+      throw new Error('Wait for session deletion to finish.');
+    try {
+      await this.api.mutate('DELETE', sessionPath(id) + '/inbox/' + segment(itemId));
+    } catch (error) {
+      if (!this.disposed) {
+        this.invalidated(id);
+        await this.refresh(id);
+      }
+      // A missing/consumed item is not proof that this request withdrew it.
+      if (error instanceof ApiError && error.status === 409 && error.is('inbox-appended'))
+        throw new Error('This message already reached the conversation and cannot be withdrawn.', {
+          cause: error,
+        });
+      if (error instanceof ApiError && error.status === 404) {
+        if (this.entries.get(id)?.deliveries.get(itemId)?.state === 'withdrawn') return;
+        throw new Error(
+          'This queued message is no longer available. Check the saved conversation.',
+          { cause: error },
+        );
+      }
+      throw error;
+    }
+    const current = this.entries.get(id);
+    if (this.disposed || !current) return;
+    current.deliveries.set(itemId, { state: 'withdrawn' });
+    if (current.deliveries.size > 200)
+      current.deliveries.delete(current.deliveries.keys().next().value!);
+    this.publish(current, {
+      submissions: current.state.submissions.map((submission) =>
+        submission.itemId === itemId
+          ? { ...submission, state: 'withdrawn', delivery: 'withdrawn', preview: false }
+          : submission,
+      ),
+    });
+    this.invalidated(id);
+    void this.refresh(id).then(() => this.release(current));
+  }
   resolveUncertain(id: string, key: string) {
     const entry = this.entries.get(id);
     if (!entry) return;
@@ -790,6 +1233,7 @@ export class SessionController {
           ? {
               ...s,
               state: 'reviewed',
+              preview: false,
               error:
                 'Outcome reviewed. The submission result is still unknown; original content remains available below.',
             }
@@ -809,9 +1253,19 @@ export class SessionController {
     await this.ensure(id);
   }
   async cancel(id: string) {
+    if (this.disposed || !this.canWrite)
+      throw new Error('Stopping a turn requires an active connection with sessions:w.');
     const entry = this.entries.get(id);
-    const turnId = entry?.state.turnId;
-    if (!turnId || !entry.state.running)
+    if (entry?.state.session?.parent_id)
+      throw new Error('Sub-agent sessions are controlled by their parent.');
+    const owned = entry?.state.submissions.find(
+      (submission) => submission.state === 'running',
+    )?.turnId;
+    const turnId =
+      entry?.state.running && entry.state.turnId && !entry.outcomes.has(entry.state.turnId)
+        ? entry.state.turnId
+        : owned;
+    if (!entry || !turnId || !isSessionRunning(entry.state))
       throw new Error('Wait until the current turn is observed before stopping it.');
     await this.api.mutate('POST', sessionPath(id) + '/cancel', {
       turn_id: turnId,
@@ -845,6 +1299,7 @@ export class SessionController {
   }
   dispose() {
     this.disposed = true;
+    this.lifetime.abort();
     for (const entry of this.entries.values()) entry.abort.abort();
     this.entries.clear();
     this.drafts.clear();

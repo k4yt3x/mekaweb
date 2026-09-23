@@ -1,5 +1,5 @@
 import { useState } from 'react';
-export function useAction() {
+export function useAction(onError?: (error: unknown) => void) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>();
   const [result, setResult] = useState<unknown>();
@@ -17,12 +17,14 @@ export function useAction() {
       setBusy(true);
       setError(undefined);
       setResult(undefined);
+      onError?.(undefined);
       try {
         const value = await action();
         setResult(value);
         return value;
       } catch (error) {
         setError(error);
+        onError?.(error);
         return undefined;
       } finally {
         setBusy(false);

@@ -71,10 +71,22 @@ export function Diagram({ source }: { source: string }) {
       )}
       <details className="diagram-source">
         <summary>Diagram source</summary>
-        <CopyButton text={source} label="Copy diagram source" />
-        <pre tabIndex={0} role="group" aria-label="Diagram source code" onKeyDown={scrollRegion}>
-          <code>{source}</code>
-        </pre>
+        <div className="code-block">
+          <div className="code-toolbar">
+            <span>mermaid</span>
+            <CopyButton text={source} label="Copy diagram source" />
+          </div>
+          <pre>
+            <code
+              tabIndex={0}
+              role="group"
+              aria-label="Diagram source code"
+              onKeyDown={scrollRegion}
+            >
+              {source}
+            </code>
+          </pre>
+        </div>
         {current?.error && <p className="muted small">{current.error}</p>}
       </details>
       <Dialog open={expanded} onOpenChange={setExpanded} title="Diagram" wide>

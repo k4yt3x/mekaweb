@@ -1,5 +1,5 @@
 import { useAction } from '../components/actions';
-import { useState, type FormEvent } from 'react';
+import { useRef, useState, type FormEvent } from 'react';
 import { ArrowRight, Plus, Unplug, KeyRound } from 'lucide-react';
 import { useConnection, useResource, useRuntime, useSettings } from '../connections/context';
 import type { Connection } from '../connections/storage';
@@ -24,6 +24,7 @@ export function ConnectionForm({
   const [endpoint, setEndpoint] = useState(existing?.endpoint ?? '');
   const [token, setToken] = useState('');
   const [remember, setRemember] = useState(existing?.remember ?? true);
+  const connectButton = useRef<HTMLButtonElement>(null);
   let endpointChanged = false;
   if (existing) {
     try {
@@ -90,22 +91,36 @@ export function ConnectionForm({
         </select>
       </Field>
       <ErrorNotice error={action.error ?? (state.error ? new Error(state.error) : undefined)} />
-      <Button type="submit" disabled={state.busy || action.busy}>
-        {state.busy ? (
-          <Loading label="Connecting…" />
-        ) : (
-          <>
-            Connect <ArrowRight size={16} />
-          </>
+      <div className="connection-actions">
+        <Button ref={connectButton} type="submit" disabled={state.busy || action.busy}>
+          {state.busy ? (
+            <Loading label="Connecting…" />
+          ) : (
+            <>
+              Connect <ArrowRight size={16} />
+            </>
+          )}
+        </Button>
+        {state.busy && (
+          <Button
+            type="button"
+            variant="secondary"
+            aria-label="Cancel connection"
+            onClick={() => {
+              runtime.cancelConnect();
+              requestAnimationFrame(() => connectButton.current?.focus());
+            }}
+          >
+            Cancel
+          </Button>
         )}
-      </Button>
+      </div>
     </form>
   );
 }
 export function Welcome() {
   const settings = useSettings();
   const runtime = useRuntime();
-  const state = useConnection();
   const [existing, setExisting] = useState<Connection>();
   return (
     <main className="welcome">
@@ -117,10 +132,12 @@ export function Welcome() {
               <Button
                 key={c.id}
                 variant="secondary"
-                disabled={state.busy}
                 onClick={() => {
                   if (runtime.storage.token(c)) void runtime.connect(c);
-                  else setExisting(c);
+                  else {
+                    runtime.cancelConnect();
+                    setExisting(c);
+                  }
                 }}
               >
                 {c.name} <span className="muted small">{new URL(c.endpoint).host}</span>
@@ -297,6 +314,16 @@ export function SettingsPage() {
           )}
         </div>
         <ErrorNotice error={action.error} />
+        <div className="panel-footer">
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={settings.showTurnContext}
+              onChange={(event) => runtime.storage.showTurnContext(event.target.checked)}
+            />
+            Show context added by meka
+          </label>
+        </div>
       </section>
       <section className="panel">
         <h2>Profiles</h2>

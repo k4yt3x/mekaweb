@@ -119,6 +119,37 @@ it('clears an accepted draft for remounted composers and preserves newer edits',
   expect(adapter.draft(connection.id, 's')?.text).toBe('newer edit');
   expect(adapter.draft(connection.id, 's')?.clearedRevision).toBeUndefined();
 });
+it('keeps injected context hidden for old settings and rejects non-boolean opt-ins', () => {
+  const local = storage();
+  for (const value of [undefined, false, 'true', 1, null]) {
+    local.setItem(
+      'mekaweb:v1:settings',
+      JSON.stringify({ version: 1, connections: [], showTurnContext: value }),
+    );
+    expect(new BrowserStorage(local, storage()).getSnapshot().showTurnContext).toBe(false);
+  }
+});
+
+it('persists the context display preference across tabs without replacing other settings', () => {
+  const local = storage();
+  const first = new BrowserStorage(local, storage());
+  const connection = first.saveConnection('test', 'https://example.org', 'dummy', true);
+  const other = new BrowserStorage(local, storage());
+  first.showTurnContext(true);
+  other.theme('dark');
+  first.refresh();
+  expect(first.getSnapshot()).toMatchObject({
+    showTurnContext: true,
+    theme: 'dark',
+    connections: [connection],
+  });
+  expect(new BrowserStorage(local, storage()).getSnapshot().showTurnContext).toBe(true);
+  other.showTurnContext(false);
+  first.refresh();
+  expect(first.getSnapshot().showTurnContext).toBe(false);
+  expect(first.token(connection)).toBe('dummy');
+});
+
 it('adds layout preferences to older settings and merges later changes without losing connections', () => {
   const local = storage();
   local.setItem(

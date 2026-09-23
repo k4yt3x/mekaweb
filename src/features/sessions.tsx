@@ -16,7 +16,6 @@ import {
   X,
   RefreshCw,
   Plus,
-  Square,
   Share as Export,
 } from 'lucide-react';
 import { download, sessionPath, type Schema } from '../api/client';
@@ -28,6 +27,7 @@ import {
   useSettings,
 } from '../connections/context';
 import { useSessionStates } from '../session/hooks';
+import { isSessionRunning } from '../session/controller';
 import { useParams } from '@tanstack/react-router';
 import { Button } from '../components/ui/button';
 import { Dialog } from '../components/ui/dialog';
@@ -101,6 +101,7 @@ export function SessionsPage({ id }: { id?: string | undefined }) {
   const action = useAction();
   const sessions = useSessionStates();
   const selected = sessions.find((s) => s.id === id);
+  const selectedRunning = selected ? isSessionRunning(selected) : false;
   const list = useInfiniteQuery({
     queryKey: [state.connection?.id, state.connection?.authority, 'session-list', children],
     initialPageParam: undefined as string | undefined,
@@ -173,7 +174,7 @@ export function SessionsPage({ id }: { id?: string | undefined }) {
               session={item}
               selected={item.id === id}
               running={
-                item.turn_in_flight || Boolean(sessions.find((s) => s.id === item.id)?.running)
+                item.turn_in_flight || sessions.some((s) => s.id === item.id && isSessionRunning(s))
               }
             />
           ))}
@@ -271,12 +272,12 @@ export function SessionsPage({ id }: { id?: string | undefined }) {
                       aria-label="Back to parent session"
                       title="Back to parent session"
                     >
-                      <CornerUpLeft size={12} />
+                      <CornerUpLeft size={12} aria-hidden="true" />
                       <span>Parent session</span>
                     </a>
                   ) : (
                     <>
-                      <Folder size={12} />
+                      <Folder size={12} aria-hidden="true" />
                       <span>{selected?.session?.cwd ?? 'Working directory not recorded'}</span>
                     </>
                   )}
@@ -297,14 +298,6 @@ export function SessionsPage({ id }: { id?: string | undefined }) {
                     <RefreshCw size={18} />
                   </Button>
                 )}
-                <span className="badge profile-badge">{selected.session.profile}</span>
-                <span
-                  className={`activity-label ${selected.running ? 'active' : ''}`}
-                  role="status"
-                >
-                  <span className="status-dot" />
-                  {selected.running ? 'Working' : 'Idle'}
-                </span>
                 <Button
                   size="icon"
                   variant="ghost"
@@ -317,24 +310,10 @@ export function SessionsPage({ id }: { id?: string | undefined }) {
                 >
                   <PanelRight size={18} />
                 </Button>
-                {selected.running && (
-                  <Button
-                    size="icon"
-                    variant="secondary"
-                    aria-label="Stop"
-                    title="Stop current turn"
-                    disabled={!canWrite || !selected.turnId}
-                    onClick={() =>
-                      void action.run(async () => state.controller?.cancel(selected.id))
-                    }
-                  >
-                    <Square size={14} />
-                  </Button>
-                )}
                 <SessionActions
                   key={`${state.connection?.id}:${state.connection?.authority}:${selected.id}`}
                   session={selected.session}
-                  running={selected.running}
+                  running={selectedRunning}
                   deleting={selected.deleting}
                 />
               </div>
@@ -354,7 +333,10 @@ export function SessionsPage({ id }: { id?: string | undefined }) {
             </Button>
           </div>
         ) : selected?.session ? (
-          <Conversation key={selected.id} state={selected} />
+          <Conversation
+            key={`${state.connection?.id}:${state.connection?.authority}:${selected.id}`}
+            state={selected}
+          />
         ) : (
           <div className="page">
             {selected?.error ? (

@@ -1,15 +1,45 @@
 import * as Select from '@radix-ui/react-select';
-import { Check, ChevronDown, Shield } from 'lucide-react';
+import {
+  Check,
+  ChevronDown,
+  CircleSlash,
+  Eye,
+  FolderLock,
+  Shield,
+  TriangleAlert,
+} from 'lucide-react';
+
+function PermissionIcon({ value }: { value: string | undefined }) {
+  const Icon =
+    value === 'none'
+      ? CircleSlash
+      : value === 'read'
+        ? Eye
+        : value === 'workspace'
+          ? FolderLock
+          : value === 'unrestricted'
+            ? TriangleAlert
+            : Shield;
+  return (
+    <Icon
+      size={14}
+      className={value === 'unrestricted' ? 'permission-warning' : undefined}
+      aria-hidden="true"
+    />
+  );
+}
 
 export function PermissionSelect({
   value,
   options,
   disabled,
+  busy = false,
   onChange,
 }: {
   value: string | undefined;
   options: string[];
   disabled: boolean;
+  busy?: boolean;
   onChange: (value: string) => void;
 }) {
   const values = value && !options.includes(value) ? [value, ...options] : options;
@@ -18,11 +48,15 @@ export function PermissionSelect({
       <Select.Trigger
         className="permission-trigger"
         aria-label="Permission mode"
-        title={`Permission mode: ${value ?? 'not reported'}`}
+        aria-busy={busy || undefined}
+        data-saving={busy || undefined}
+        title={`Permission mode: ${value ?? 'not reported'} (Shift+Tab in message input)`}
       >
-        <Shield size={14} aria-hidden="true" />
-        <Select.Value placeholder="Not reported" />
-        <Select.Icon>
+        <span className="composer-select-label">
+          <PermissionIcon value={value} />
+          <Select.Value placeholder="Not reported" />
+        </span>
+        <Select.Icon className="composer-select-chevron">
           <ChevronDown size={14} />
         </Select.Icon>
       </Select.Trigger>
@@ -39,13 +73,16 @@ export function PermissionSelect({
           <Select.Viewport>
             {values.map((option) => (
               <Select.Item
-                className="permission-option"
+                className="composer-select-option"
                 key={option}
                 value={option}
                 disabled={!options.includes(option)}
               >
-                <Select.ItemText>{option}</Select.ItemText>
-                <Select.ItemIndicator>
+                <span className="composer-select-label">
+                  <PermissionIcon value={option} />
+                  <Select.ItemText>{option}</Select.ItemText>
+                </span>
+                <Select.ItemIndicator className="composer-select-check">
                   <Check size={14} />
                 </Select.ItemIndicator>
               </Select.Item>

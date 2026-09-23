@@ -15,6 +15,7 @@ export interface Settings {
   connections: Connection[];
   lastConnection?: string;
   theme: 'system' | 'light' | 'dark';
+  showTurnContext: boolean;
   layout: LayoutPreferences;
 }
 export interface LayoutPreferences {
@@ -34,6 +35,7 @@ const defaults = (): Settings => ({
   version: 1,
   connections: [],
   theme: 'system',
+  showTurnContext: false,
   layout: { navigationCollapsed: false, sessionsCollapsed: false, detailsOpen: false },
 });
 function object(value: unknown): value is Record<string, unknown> {
@@ -115,6 +117,7 @@ export class BrowserStorage {
       version: 1,
       connections: value.connections.filter(connection).slice(0, 40),
       theme: value.theme === 'light' || value.theme === 'dark' ? value.theme : 'system',
+      showTurnContext: value.showTurnContext === true,
       layout: {
         navigationCollapsed: object(value.layout) && value.layout.navigationCollapsed === true,
         sessionsCollapsed: object(value.layout) && value.layout.sessionsCollapsed === true,
@@ -272,6 +275,9 @@ export class BrowserStorage {
   }
   theme(theme: Settings['theme']) {
     this.save({ ...this.readSettings(), theme });
+  }
+  showTurnContext(showTurnContext: boolean) {
+    this.save({ ...this.readSettings(), showTurnContext });
   }
   layout(patch: Partial<LayoutPreferences>) {
     const settings = this.readSettings();

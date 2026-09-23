@@ -31,8 +31,12 @@ async function fixture(canWrite = true) {
     revision: 0,
   };
   const api = new ApiClient('https://example.org', 'dummy');
+  const inbox: Schema['InboxListResponse'] = { session_id: 's', items: [] };
   vi.spyOn(api, 'get').mockImplementation(
-    async <T>(path: string) => structuredClone(path.endsWith('/messages') ? saved : session) as T,
+    async <T>(path: string) =>
+      structuredClone(
+        path.endsWith('/messages') ? saved : path.endsWith('/inbox') ? inbox : session,
+      ) as T,
   );
   let writer: ReadableStreamDefaultController<Uint8Array>;
   const body = new ReadableStream<Uint8Array>({
@@ -63,10 +67,94 @@ async function fixture(canWrite = true) {
     event,
     session,
     saved,
+    inbox,
     closeFeed: () => writer.close(),
     state: () => controller.getSnapshot()[0]!,
   };
 }
+it('tracks text bursts and quiet intervals without treating a pause as turn completion', async () => {
+  const f = await fixture();
+  vi.useFakeTimers();
+  await f.event('turn.started', { turn_id: 'turn' });
+  await f.event('assistant_text.delta', { turn_id: 'turn', text: ' \n' });
+  expect(f.state().textStreaming).toBe(false);
+  await f.event('assistant_text.delta', { turn_id: 'turn', text: 'First' });
+  expect(f.state().textStreaming).toBe(true);
+  await vi.advanceTimersByTimeAsync(800);
+  await f.event('assistant_text.delta', { turn_id: 'turn', text: ' reply' });
+  await vi.advanceTimersByTimeAsync(800);
+  expect(f.state().textStreaming).toBe(true);
+  // Empty deltas and events for another turn must not keep the activity cue hidden.
+  await f.event('assistant_text.delta', { turn_id: 'turn', text: '' });
+  await f.event('assistant_text.delta', { turn_id: 'other', text: 'Unrelated' });
+  await vi.advanceTimersByTimeAsync(200);
+  expect(f.state().textStreaming).toBe(false);
+  expect(f.state().running).toBe(true);
+  await f.event('assistant_text.delta', { turn_id: 'turn', text: ' continued' });
+  expect(f.state().textStreaming).toBe(true);
+});
+
+it.each([
+  ['thinking.delta', { text: 'Considering the result' }],
+  ['tool_call.composing', { id: 'tool', name: 'file_read' }],
+  ['tool_call.executing', { id: 'tool', name: 'file_read', input: {} }],
+  [
+    'permission_required',
+    { request_id: 'approval', tool_name: 'file_write', input: {}, expires_in_seconds: 60 },
+  ],
+] as const)('ends text activity immediately on %s', async (name, payload) => {
+  const f = await fixture();
+  vi.useFakeTimers();
+  await f.event('turn.started', { turn_id: 'turn' });
+  await f.event('assistant_text.delta', { turn_id: 'turn', text: 'Let me check.' });
+  expect(f.state().textStreaming).toBe(true);
+  await f.event(name, { turn_id: 'turn', ...payload });
+  expect(f.state().textStreaming).toBe(false);
+  expect(f.state().running).toBe(true);
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it.each(['turn.finished', 'turn.failed', 'turn.canceled'])(
+  'clears text activity and its timeout on %s',
+  async (name) => {
+    const f = await fixture();
+    vi.useFakeTimers();
+    await f.event('turn.started', { turn_id: 'turn' });
+    await f.event('assistant_text.delta', { turn_id: 'turn', text: 'Reply' });
+    await f.event(name, { turn_id: 'turn' });
+    expect(f.state().running).toBe(false);
+    expect(f.state().textStreaming).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+  },
+);
+
+it('clears stale text activity on a new turn, disconnection, and controller disposal', async () => {
+  const f = await fixture();
+  vi.useFakeTimers();
+  await f.event('turn.started', { turn_id: 'first' });
+  await f.event('assistant_text.delta', { turn_id: 'first', text: 'First reply' });
+  await f.event('turn.started', { turn_id: 'second' });
+  expect(f.state().textStreaming).toBe(false);
+  expect(vi.getTimerCount()).toBe(0);
+  await f.event('assistant_text.delta', { turn_id: 'second', text: 'Second reply' });
+  f.closeFeed();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(f.state().feed).toBe('reconnecting');
+  expect(f.state().textStreaming).toBe(false);
+  f.controller.dispose();
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it('cancels an active text timeout when the connection is disposed', async () => {
+  const f = await fixture();
+  vi.useFakeTimers();
+  await f.event('turn.started', { turn_id: 'turn' });
+  await f.event('assistant_text.delta', { turn_id: 'turn', text: 'Reply' });
+  expect(vi.getTimerCount()).toBe(1);
+  f.controller.dispose();
+  expect(vi.getTimerCount()).toBe(0);
+});
+
 it('waits for Retry-After before reconnecting a throttled stream', async () => {
   const f = await fixture();
   vi.useFakeTimers();
@@ -179,12 +267,290 @@ it('records delivery and completion arriving before an inbox POST response', asy
   await vi.waitFor(() => expect(f.state().submissions).toHaveLength(1));
   await f.event('turn.started', { turn_id: 'turn-1' });
   await f.event('inbox.delivered', { item_ids: ['item'], turn_id: 'turn-1' });
+  f.saved.messages = [{ role: 'user', content: [{ type: 'text', text: 'hello' }] }];
+  f.saved.total = 1;
   await f.event('turn.finished', { turn_id: 'turn-1' });
+  await vi.waitFor(() => expect(f.state().loading).toBe(false));
+  expect(f.state().saved?.messages).toEqual([]);
+  expect(f.state().submissions[0]?.preview).toBe(true);
   resolve({ item_id: 'item', session_id: 's', class: 'steer', state: 'pending', replayed: false });
   expect(await sending).toBe(true);
   expect(f.state().submissions[0]?.state).toBe('completed');
+  await vi.waitFor(() => expect(f.state().submissions[0]?.preview).toBe(false));
+  expect(f.state().saved?.messages).toEqual(f.saved.messages);
   f.controller.select(undefined);
   expect(f.state().feed).toBe('closed');
+});
+
+it('applies a pending POST receipt to the replacement entry after reconnecting the feed', async () => {
+  const f = await fixture();
+  let finish!: (response: Schema['InboxResponse']) => void;
+  vi.spyOn(f.api, 'mutate').mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const sending = f.controller.submit('s', { message: 'Hello.', class: 'steer' }, 'inbox');
+  await vi.waitFor(() => expect(f.state().submissions).toHaveLength(1));
+  const key = f.state().submissions[0]!.key;
+  f.inbox.items = [
+    {
+      id: 'item',
+      session_id: 's',
+      class: 'steer',
+      state: 'pending',
+      created_at: '',
+      source: 'client',
+    },
+  ];
+  vi.mocked(f.api.stream).mockResolvedValueOnce(
+    new Response(new ReadableStream(), { headers: { 'Content-Type': 'text/event-stream' } }),
+  );
+
+  await f.controller.reconnect('s');
+  finish({ item_id: 'item', session_id: 's', class: 'steer', state: 'pending', replayed: false });
+  expect(await sending).toBe(true);
+  await vi.waitFor(() => expect(f.state().loading).toBe(false));
+  expect(f.state().submissions[0]).toMatchObject({ key, state: 'accepted', preview: true });
+  expect(f.state().blocks).toEqual([{ kind: 'submission', key }]);
+  expect(f.api.mutate).toHaveBeenCalledOnce();
+});
+
+it('acknowledges an accepted send without waiting for a stalled history read', async () => {
+  const f = await fixture();
+  let finish!: (response: Schema['InboxListResponse']) => void;
+  const get = vi.mocked(f.api.get).getMockImplementation()!;
+  vi.spyOn(f.api, 'get').mockImplementation(
+    async <T>(path: string, query?: Query, signal?: AbortSignal) => {
+      if (path.endsWith('/inbox'))
+        return (await new Promise<Schema['InboxListResponse']>((resolve) => {
+          finish = resolve;
+        })) as T;
+      return (await get(path, query, signal)) as T;
+    },
+  );
+  vi.spyOn(f.api, 'mutate').mockResolvedValueOnce({ item_id: 'item', state: 'pending' });
+
+  expect(await f.controller.submit('s', { message: 'Hello.', class: 'steer' }, 'inbox')).toBe(true);
+  expect(f.state().submissions[0]).toMatchObject({ state: 'accepted', preview: true });
+  finish({
+    session_id: 's',
+    items: [
+      {
+        id: 'item',
+        session_id: 's',
+        class: 'steer',
+        state: 'pending',
+        created_at: '',
+        source: 'client',
+      },
+    ],
+  });
+  await vi.waitFor(() => expect(f.state().loading).toBe(false));
+});
+
+it('shows a submission before POST acknowledgment, preserves it across navigation, then replaces it with history', async () => {
+  const f = await fixture();
+  let acknowledge!: (response: Schema['InboxResponse']) => void;
+  const mutate = vi.spyOn(f.api, 'mutate').mockImplementation(
+    () =>
+      new Promise<Schema['InboxResponse']>((resolve) => {
+        acknowledge = resolve;
+      }),
+  );
+  const sending = f.controller.submit(
+    's',
+    { message: 'Check the workspace.', class: 'steer' },
+    'inbox',
+  );
+  await vi.waitFor(() => expect(f.state().blocks).toHaveLength(1));
+  const submission = f.state().submissions[0]!;
+  expect(submission).toMatchObject({
+    state: 'sending',
+    preview: true,
+    body: { message: 'Check the workspace.' },
+  });
+  expect(Number.isFinite(Date.parse(submission.createdAt))).toBe(true);
+  expect(f.state().blocks).toEqual([{ kind: 'submission', key: submission.key }]);
+  f.controller.select(undefined);
+  f.controller.select('s');
+  expect(f.state().feed).toBe('connected');
+  expect(mutate).toHaveBeenCalledOnce();
+
+  f.session.turn_in_flight = true;
+  await f.event('turn.started', { turn_id: 'turn' });
+  await f.event('assistant_text.delta', { turn_id: 'turn', text: 'Checking.' });
+  expect(f.state().blocks).toEqual([
+    { kind: 'submission', key: submission.key },
+    { kind: 'text', text: 'Checking.' },
+  ]);
+  acknowledge({
+    item_id: 'item',
+    session_id: 's',
+    class: 'steer',
+    state: 'pending',
+    replayed: false,
+  });
+  expect(await sending).toBe(true);
+  await f.event('inbox.delivered', { item_ids: ['item'], turn_id: 'turn' });
+  expect(f.state().submissions[0]?.preview).toBe(true);
+  f.saved.messages = [
+    { role: 'user', content: [{ type: 'text', text: '[Server envelope]\nCheck the workspace.' }] },
+    { role: 'assistant', content: [{ type: 'text', text: 'Done.' }] },
+  ];
+  f.saved.total = 2;
+  f.session.turn_in_flight = false;
+  await f.event('turn.finished', { turn_id: 'turn' });
+  await vi.waitFor(() => expect(f.state().submissions[0]?.preview).toBe(false));
+  expect(f.state().saved?.messages).toEqual(f.saved.messages);
+  expect(f.state().blocks).toEqual([]);
+});
+
+it('keeps a queued identical message while the preceding message is reconciled', async () => {
+  const f = await fixture();
+  f.session.turn_in_flight = true;
+  await f.event('turn.started', { turn_id: 'first-turn' });
+  vi.spyOn(f.api, 'mutate')
+    .mockResolvedValueOnce({ item_id: 'first', state: 'pending' })
+    .mockResolvedValueOnce({ item_id: 'queued', state: 'pending' });
+  await f.controller.submit('s', { message: 'Again.', class: 'steer' }, 'inbox');
+  await f.controller.submit('s', { message: 'Again.', class: 'followup' }, 'inbox');
+  const queued = f.state().submissions[1]!;
+  f.inbox.items = [
+    {
+      id: 'queued',
+      session_id: 's',
+      class: 'followup',
+      state: 'pending',
+      created_at: queued.createdAt,
+      source: 'client',
+    },
+  ];
+  f.saved.messages = [{ role: 'user', content: [{ type: 'text', text: 'Again.' }] }];
+  f.saved.total = 1;
+  await f.event('inbox.delivered', { item_ids: ['first'], turn_id: 'first-turn' });
+  f.session.turn_in_flight = false;
+  await f.event('turn.finished', { turn_id: 'first-turn' });
+  await vi.waitFor(() => expect(f.state().loading).toBe(false));
+  expect(f.state().submissions.map((s) => s.preview)).toEqual([false, true]);
+  expect(f.state().blocks).toEqual([{ kind: 'submission', key: queued.key }]);
+  await f.event('turn.started', { turn_id: 'queued-turn' });
+  expect(f.state().blocks).toEqual([{ kind: 'submission', key: queued.key }]);
+});
+
+it.each(['appended', 'absent'])(
+  'recovers a missed delivery from an %s inbox item without inventing its outcome',
+  async (state) => {
+    const f = await fixture();
+    f.session.turn_in_flight = true;
+    await f.event('turn.started', { turn_id: 'turn' });
+    vi.spyOn(f.api, 'mutate').mockResolvedValueOnce({ item_id: 'item', state: 'pending' });
+    await f.controller.submit('s', { message: 'Hello.', class: 'steer' }, 'inbox');
+    f.inbox.items =
+      state === 'absent'
+        ? []
+        : [
+            {
+              id: 'item',
+              session_id: 's',
+              class: 'steer',
+              state: 'appended',
+              created_at: '2026-09-23T00:00:00Z',
+              source: 'client',
+            },
+          ];
+    f.saved.messages = [
+      { role: 'user', content: [{ type: 'text', text: 'Persisted envelope: Hello.' }] },
+    ];
+    f.saved.total = 1;
+
+    f.controller.select(undefined);
+    await f.controller.refresh('s');
+
+    expect(f.state().submissions[0]).toMatchObject({ preview: false, state: 'accepted' });
+    expect(f.state().saved?.messages).toEqual(f.saved.messages);
+    expect(f.state().blocks.some((block) => block.kind === 'submission')).toBe(false);
+    f.session.turn_in_flight = false;
+    await f.controller.refresh('s');
+    expect(f.state().feed).toBe('closed');
+  },
+);
+
+it('does not retire a preview using a snapshot begun before delivery', async () => {
+  const f = await fixture();
+  f.session.turn_in_flight = true;
+  await f.event('turn.started', { turn_id: 'turn' });
+  vi.spyOn(f.api, 'mutate').mockResolvedValueOnce({ item_id: 'item', state: 'pending' });
+  await f.controller.submit('s', { message: 'Hello.', class: 'steer' }, 'inbox');
+  f.inbox.items = [
+    {
+      id: 'item',
+      session_id: 's',
+      class: 'steer',
+      state: 'pending',
+      created_at: '',
+      source: 'client',
+    },
+  ];
+  const get = vi.mocked(f.api.get).getMockImplementation()!;
+  let finish!: (response: Schema['MessagesResponse']) => void;
+  vi.spyOn(f.api, 'get').mockImplementation(
+    async <T>(path: string, query?: Query, signal?: AbortSignal) => {
+      if (path.endsWith('/messages'))
+        return (await new Promise<Schema['MessagesResponse']>((resolve) => {
+          finish = resolve;
+        })) as T;
+      return (await get(path, query, signal)) as T;
+    },
+  );
+  const reading = f.controller.refresh('s');
+  await vi.waitFor(() => expect(finish).toBeDefined());
+  await f.event('inbox.delivered', { item_ids: ['item'], turn_id: 'turn' });
+  finish({ ...f.saved, total: 0, messages: [] });
+  await reading;
+  expect(f.state().submissions[0]?.preview).toBe(true);
+  vi.mocked(f.api.get).mockImplementation(get);
+  await f.controller.refresh('s');
+  expect(f.state().submissions[0]?.preview).toBe(false);
+});
+
+it('keeps the preview until a failed history refresh can recover', async () => {
+  const f = await fixture();
+  f.session.turn_in_flight = true;
+  await f.event('turn.started', { turn_id: 'turn' });
+  vi.spyOn(f.api, 'mutate').mockResolvedValueOnce({ item_id: 'item', state: 'pending' });
+  await f.controller.submit('s', { message: 'Hello.', class: 'steer' }, 'inbox');
+  await f.event('inbox.delivered', { item_ids: ['item'], turn_id: 'turn' });
+  vi.mocked(f.api.get).mockRejectedValueOnce(new Error('History temporarily unavailable'));
+  await f.controller.refresh('s');
+  expect(f.state().submissions[0]?.preview).toBe(true);
+  expect(f.state().error).toContain('History temporarily unavailable');
+  await f.controller.refresh('s');
+  expect(f.state().submissions[0]?.preview).toBe(false);
+});
+
+it('shows direct-turn text and image metadata before the blocking POST completes', async () => {
+  const f = await fixture();
+  let finish!: (response: { turn_id: string }) => void;
+  vi.spyOn(f.api, 'mutate').mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const body: Schema['TurnRequest'] = {
+    message: 'Inspect this.',
+    stream: false,
+    images: [{ media_type: 'image/png', data: 'synthetic-image-data' }],
+  };
+  const sending = f.controller.submit('s', body, 'turn');
+  await vi.waitFor(() => expect(f.state().blocks).toHaveLength(1));
+  expect(f.state().submissions[0]).toMatchObject({ body, preview: true, state: 'sending' });
+  finish({ turn_id: 'direct-turn' });
+  expect(await sending).toBe(true);
+  expect(f.state().submissions[0]?.preview).toBe(false);
+  expect(f.state().blocks).toEqual([]);
 });
 it('retries uncertain inbox submissions with the same body and key', async () => {
   const f = await fixture();
@@ -253,6 +619,140 @@ it('does not repeat an acknowledged inbox submission', async () => {
   );
   expect(mutate).toHaveBeenCalledOnce();
 });
+async function queuedFixture() {
+  const f = await fixture();
+  f.session.turn_in_flight = true;
+  await f.event('turn.started', { turn_id: 'turn' });
+  f.inbox.items = [
+    {
+      id: 'item',
+      session_id: 's',
+      class: 'followup',
+      source: 'client',
+      created_at: '2026-09-23T12:00:00Z',
+      state: 'pending',
+    },
+  ];
+  const mutate = vi.spyOn(f.api, 'mutate').mockResolvedValue({ item_id: 'item', state: 'pending' });
+  await f.controller.submit('s', { message: 'Queued work', class: 'followup' }, 'inbox');
+  return { ...f, mutate };
+}
+
+it('withdraws a queued message immediately without requiring its SSE acknowledgment', async () => {
+  const f = await queuedFixture();
+  f.mutate.mockImplementationOnce(async () => {
+    f.inbox.items = [];
+  });
+  await f.controller.withdrawInbox('s', 'item');
+  expect(f.mutate).toHaveBeenLastCalledWith('DELETE', '/v1/sessions/s/inbox/item');
+  expect(f.state().submissions[0]).toMatchObject({
+    state: 'withdrawn',
+    delivery: 'withdrawn',
+    preview: false,
+  });
+});
+
+it.each([404, 409])(
+  'reconciles a %s withdrawal race without claiming the message was withdrawn',
+  async (status) => {
+    const f = await queuedFixture();
+    f.mutate.mockImplementationOnce(async () => {
+      f.inbox.items = [];
+      if (status === 409) {
+        f.saved.messages = [{ role: 'user', content: [{ type: 'text', text: 'Queued work' }] }];
+        f.saved.total = 1;
+      }
+      throw new ApiError(status, {
+        type: `https://meka.run/errors/${status === 409 ? 'inbox-appended' : 'not-found'}`,
+      });
+    });
+    await expect(f.controller.withdrawInbox('s', 'item')).rejects.toThrow(
+      status === 409 ? 'already reached' : 'no longer available',
+    );
+    expect(f.mutate).toHaveBeenCalledTimes(2);
+    expect(f.state().submissions[0]?.state).not.toBe('withdrawn');
+    expect(f.state().submissions[0]?.preview).toBe(false);
+    if (status === 409) expect(f.state().saved?.messages).toEqual(f.saved.messages);
+  },
+);
+
+it('does not repeat an uncertain DELETE or hide a message still confirmed pending', async () => {
+  const f = await queuedFixture();
+  f.mutate.mockRejectedValueOnce(new UncertainMutationError());
+  await expect(f.controller.withdrawInbox('s', 'item')).rejects.toBeInstanceOf(
+    UncertainMutationError,
+  );
+  expect(f.mutate).toHaveBeenCalledTimes(2);
+  expect(f.state().submissions[0]).toMatchObject({ state: 'accepted', preview: true });
+});
+
+it('finishes withdrawal on the replacement feed and refuses writes after disconnect', async () => {
+  const f = await queuedFixture();
+  let finish!: () => void;
+  f.mutate.mockImplementationOnce(async () => {
+    await new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+  });
+  const pending = f.controller.withdrawInbox('s', 'item');
+  vi.mocked(f.api.stream).mockImplementation(
+    async () =>
+      new Response(new ReadableStream(), { headers: { 'Content-Type': 'text/event-stream' } }),
+  );
+  await f.controller.reconnect('s');
+  f.inbox.items = [];
+  finish();
+  await pending;
+  expect(f.state().submissions[0]).toMatchObject({ state: 'withdrawn', preview: false });
+  f.controller.dispose();
+  await expect(f.controller.withdrawInbox('s', 'other')).rejects.toThrow('active connection');
+  expect(f.mutate).toHaveBeenCalledTimes(2);
+  const readonly = await fixture(false);
+  const mutate = vi.spyOn(readonly.api, 'mutate');
+  await expect(readonly.controller.withdrawInbox('s', 'item')).rejects.toThrow('sessions:w');
+  expect(mutate).not.toHaveBeenCalled();
+});
+
+it('refuses cancellation without write authority or after the connection is retired', async () => {
+  const readonly = await fixture(false);
+  const mutateReadonly = vi.spyOn(readonly.api, 'mutate');
+  await readonly.event('turn.started', { turn_id: 'read-only-turn' });
+  await expect(readonly.controller.cancel('s')).rejects.toThrow('sessions:w');
+  expect(mutateReadonly).not.toHaveBeenCalled();
+
+  const active = await fixture();
+  const mutate = vi.spyOn(active.api, 'mutate');
+  await active.event('turn.started', { turn_id: 'observed' });
+  active.controller.dispose();
+  await expect(active.controller.cancel('s')).rejects.toThrow('active connection');
+  expect(mutate).not.toHaveBeenCalled();
+});
+
+it('keeps cancellation available during feed reconnection and pending settings', async () => {
+  const f = await fixture();
+  vi.useFakeTimers();
+  await f.event('turn.started', { turn_id: 'observed' });
+  let acknowledge!: () => void;
+  const mutate = vi.spyOn(f.api, 'mutate').mockImplementation(async (method) => {
+    if (method === 'PATCH') {
+      await new Promise<void>((resolve) => {
+        acknowledge = resolve;
+      });
+      return structuredClone(f.session);
+    }
+  });
+  const settings = f.controller.patchSettings('s', { permission: 'none' });
+  f.closeFeed();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(f.state().feed).toBe('reconnecting');
+  expect(f.state().settingsPending).toBe(true);
+  await f.controller.cancel('s');
+  expect(mutate).toHaveBeenLastCalledWith('POST', '/v1/sessions/s/cancel', { turn_id: 'observed' });
+  expect(f.state().running).toBe(true);
+  acknowledge();
+  await settings;
+});
+
 it('never cancels without an observed turn id and retains a direct-turn draft on conflict', async () => {
   const f = await fixture();
   const mutate = vi
@@ -368,6 +868,52 @@ it('does not erase a newer live turn when an older reconciliation finishes', asy
   expect(f.state().turnId).toBe('new');
   expect(f.state().blocks).toEqual([{ kind: 'text', text: 'new output' }]);
 });
+it('keeps server notice severity through refresh without adding routine tool or stop errors', async () => {
+  const f = await fixture();
+  f.session.turn_in_flight = true;
+  await f.event('turn.started', { turn_id: 'turn' });
+  for (const level of ['info', 'warn', 'error'])
+    await f.event('notice', { turn_id: 'turn', level, text: `${level} message` });
+  await f.controller.refresh('s');
+  expect(f.state().notices.map(({ level, text }) => ({ level, text }))).toEqual([
+    { level: 'info', text: 'info message' },
+    { level: 'warning', text: 'warn message' },
+    { level: 'error', text: 'error message' },
+  ]);
+  await f.event('tool_call.executing', {
+    turn_id: 'turn',
+    id: 'tool',
+    name: 'shell_execute',
+    input: {},
+  });
+  await f.event('tool_call.completed', {
+    turn_id: 'turn',
+    id: 'tool',
+    is_error: true,
+    content: [{ type: 'text', text: 'Command stopped' }],
+  });
+  f.session.turn_in_flight = false;
+  await f.event('turn.canceled', { turn_id: 'turn', reason: 'client' });
+  await f.controller.refresh('s', true);
+  expect(f.state().notices).toHaveLength(3);
+  expect(f.state().notices.every((notice) => notice.turnId === 'turn')).toBe(true);
+  expect(new Set(f.state().notices.map((notice) => notice.id)).size).toBe(3);
+});
+
+it('does not duplicate a replayed terminal error and bounds retained notices', async () => {
+  const f = await fixture();
+  await f.event('turn.started', { turn_id: 'turn' });
+  await f.event('turn.failed', { turn_id: 'turn', error: { detail: 'Provider failed' } });
+  const first = f.state().notices[0];
+  await f.event('turn.failed', { turn_id: 'turn', error: { detail: 'Provider failed' } });
+  expect(f.state().notices).toEqual([first]);
+  for (let index = 0; index < 25; index++)
+    await f.event('notice', { text: `Warning ${index}`, level: 'warn' });
+  expect(f.state().notices).toHaveLength(20);
+  expect(f.state().notices[0]?.text).toBe('Warning 5');
+  expect(f.state().notices.at(-1)?.text).toBe('Warning 24');
+});
+
 it('labels resumed previews as partial and keeps saved state separate', async () => {
   const f = await fixture();
   await f.event('turn.started', { turn_id: 'joined', resumed: true }, true);

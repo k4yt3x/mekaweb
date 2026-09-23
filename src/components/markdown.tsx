@@ -28,6 +28,17 @@ import { ApiClient, sessionPath, segment } from '../api/client';
 import { useConnection } from '../connections/context';
 import 'katex/dist/katex.min.css';
 
+export function MarkdownPreview({ text }: { text: string }) {
+  // A collapsed row needs only a bounded opening excerpt, without links, images, or heavy renderers.
+  const source = text.trim();
+  const preview = source.slice(0, 1024).replace(/\s+/g, ' ');
+  return (
+    <ReactMarkdown allowedElements={['strong', 'em', 'del', 'code']} unwrapDisallowed skipHtml>
+      {preview + (source.length > 1024 ? '…' : '')}
+    </ReactMarkdown>
+  );
+}
+
 function CodeBlock({ text, language }: { text: string; language: string | undefined }) {
   const [highlighted, setHighlighted] = useState<{
     source: string;

@@ -18,7 +18,7 @@ See the [captured schema and generation instructions](api/README.md) for the wir
 | POST   | `/v1/sessions/{id}/fork`                   | Fork with supported overrides                                               |
 | GET    | `/v1/sessions/{id}/messages`               | Paged history, revision, and compaction markers                             |
 | GET    | `/v1/sessions/{id}/blobs/{hash}`           | Authenticated image display/download                                        |
-| POST   | `/v1/sessions/{id}/turn`                   | Images, skills, retention options, and response reconciliation              |
+| POST   | `/v1/sessions/{id}/turn`                   | Streaming idle turns, images, skills, retention, and recovery               |
 | POST   | `/v1/sessions/{id}/cancel`                 | Cancel the observed turn id                                                 |
 | POST   | `/v1/sessions/{id}/inbox`                  | Steer, follow-up, interrupt, and durable idempotency                        |
 | GET    | `/v1/sessions/{id}/inbox`                  | Pending/appended items and delivery state                                   |
@@ -58,6 +58,7 @@ See the [captured schema and generation instructions](api/README.md) for the wir
 - **Sub-agents:** Their parent drives them. Their history, context, and tasks can be inspected, but they cannot receive direct user turns or independent settings changes.
 - **History:** Compaction and rewind alter model context. Live replay is bounded and cannot serve as a complete transcript. Export supports Markdown transcripts and JSON archives. Meka 0.60.0 exports archive format 4 and imports formats 3 and 4; older data conversion is handled by the server.
 - **Images and skills:** These use direct turns while idle; the inbox accepts text only. Skill activation is available from composer Settings.
+- **Sending:** Idle text uses a direct streaming turn; busy text uses the selected inbox mode. Only an explicit `turn-in-flight` conflict permits a text-only fallback to the inbox. Streaming turns are never retried automatically. The session feed supplies displayed events and approvals; the POST stream tracks admission and the submitted turn's outcome.
 - **Memory:** Search filters the complete returned index; this release has no memory pagination or server-side filter parameters. Editing preserves omitted-versus-empty body and tag values.
 - **Skills:** Editable fields are those accepted by the write API. Author is creation-only; version, compatibility, license, and allowed-tools metadata are read-only. The server may reject writes to read-only skill locations.
 - **Schedules:** One-time timestamps/durations, intervals, cron expressions, and shell/tool gates are supported. Gate predicates include changes, success, regular expressions, and JSON-pointer conditions. Retention is server-owned, and gate details may be withheld without `sessions:r`.

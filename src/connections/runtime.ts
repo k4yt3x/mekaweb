@@ -15,8 +15,7 @@ export class ConnectionRuntime {
   private listeners = new Set<() => void>();
   private generation = 0;
   private attempt = 0;
-  private pending: ApiClient | undefined;
-  private pendingId: string | undefined;
+  private pending: { api: ApiClient; abort: AbortController; id?: string | undefined } | undefined;
   constructor(
     readonly storage: BrowserStorage,
     readonly queries: QueryClient,
@@ -38,18 +37,25 @@ export class ConnectionRuntime {
     this.state.api?.dispose();
     this.queries.clear();
   }
-  disconnect(error?: string) {
+  private cancelPending() {
     this.attempt++;
-    this.pending?.dispose();
+    this.pending?.abort.abort();
+    this.pending?.api.dispose();
     this.pending = undefined;
-    this.pendingId = undefined;
+  }
+  cancelConnect() {
+    this.cancelPending();
+    this.publish({ ...this.state, busy: false });
+  }
+  disconnect(error?: string) {
+    this.cancelPending();
     this.releaseAuthority();
     this.publish({ busy: false, ...(error ? { error } : {}) });
   }
   start() {
     const detach = this.storage.attach();
     const invalidate = this.storage.onInvalidation((id) => {
-      if (this.state.connection?.id === id || this.pendingId === id)
+      if (this.state.connection?.id === id || this.pending?.id === id)
         this.disconnect(
           'This connection’s credentials changed. Reconnect to use its current authority.',
         );
@@ -100,15 +106,26 @@ export class ConnectionRuntime {
     save: () => Connection,
     pendingId?: string,
   ) {
-    const attempt = ++this.attempt;
-    this.pending?.dispose();
-    this.pendingId = pendingId;
-    this.publish({ ...this.state, busy: true });
+    this.cancelPending();
+    const attempt = this.attempt;
+    const state = { ...this.state, busy: true };
+    delete state.error;
+    this.publish(state);
     let candidate: ApiClient | undefined;
+    const abort = new AbortController();
+    // Bound discovery, including retries and reading its body, without timing out agent work.
+    const timeout = setTimeout(() => {
+      abort.abort(
+        new Error(
+          'Connection timed out after 10 seconds. Check that meka is running and the endpoint is reachable, then try again.',
+        ),
+      );
+    }, 10_000);
     try {
       candidate = new ApiClient(endpoint, token);
-      this.pending = candidate;
-      const info = await candidate.get<Schema['InfoResponse']>('/v1/info');
+      this.pending = { api: candidate, abort, id: pendingId };
+      const info = await candidate.get<Schema['InfoResponse']>('/v1/info', undefined, abort.signal);
+      abort.signal.throwIfAborted();
       if (
         !info ||
         !Array.isArray(info.scopes) ||
@@ -126,7 +143,6 @@ export class ConnectionRuntime {
       }
       // Discovery is a check, not a committed authority change. Keep failed edits reviewable.
       this.pending = undefined;
-      this.pendingId = undefined;
       candidate.dispose();
       // Retire the old authority without canceling this connection attempt's error handling.
       this.releaseAuthority();
@@ -146,10 +162,15 @@ export class ConnectionRuntime {
       candidate?.dispose();
       if (attempt === this.attempt) {
         this.pending = undefined;
-        this.pendingId = undefined;
-        this.publish({ ...this.state, busy: false, error: errorMessage(error) });
+        this.publish({
+          ...this.state,
+          busy: false,
+          error: errorMessage(abort.signal.aborted ? abort.signal.reason : error),
+        });
       }
       return false;
+    } finally {
+      clearTimeout(timeout);
     }
   }
 }
