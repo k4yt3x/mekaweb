@@ -1,6 +1,7 @@
 import {
   ApiClient,
   ApiError,
+  asError,
   errorMessage,
   pause,
   sessionPath,
@@ -17,6 +18,7 @@ export interface LiveTool {
   id: string;
   name: string;
   input: unknown;
+  displaySummary?: string;
   state: 'composing' | 'executing' | 'completed' | 'error' | 'ended';
   output: string;
   content: unknown;
@@ -62,7 +64,7 @@ export interface SessionState {
   id: string;
   session?: Schema['SessionResponse'];
   feed: 'connecting' | 'connected' | 'reconnecting' | 'closed' | 'unavailable';
-  error?: string;
+  error?: Error;
   saved?: Schema['MessagesResponse'];
   offset: number;
   loading: boolean;
@@ -135,6 +137,7 @@ export class SessionController {
   private entries = new Map<string, Entry>();
   private drafts = new Map<string, ComposerOptions>();
   private deletions = new Map<string, Promise<string[]>>();
+  private settingsChanges = new Set<string>();
   draft(id: string) {
     return this.drafts.get(id);
   }
@@ -280,7 +283,7 @@ export class SessionController {
       await this.refresh(entry.state.id);
     } catch (error) {
       if (!entry.abort.signal.aborted) {
-        this.publish(entry, { feed: 'unavailable', error: errorMessage(error) });
+        this.publish(entry, { feed: 'unavailable', error: asError(error) });
         throw error;
       }
     }
@@ -301,7 +304,10 @@ export class SessionController {
         const decoder = new TextDecoder();
         try {
           for (;;) {
-            const chunk = await reader.read();
+            const chunk = await reader.read().catch((error: unknown) => {
+              if (entry.abort.signal.aborted) throw error;
+              throw this.api.reportConnectionError(error, response);
+            });
             if (chunk.done) break;
             parser.push(decoder.decode(chunk.value, { stream: true }));
           }
@@ -312,7 +318,7 @@ export class SessionController {
         }
       } catch (error) {
         if (entry.abort.signal.aborted) return;
-        this.publish(entry, { error: errorMessage(error), partial: true });
+        this.publish(entry, { error: asError(error), partial: true });
       }
       if (entry.abort.signal.aborted) return;
       this.publish(entry, { feed: 'reconnecting', partial: true, approvals: [] });
@@ -332,10 +338,10 @@ export class SessionController {
         } catch (error) {
           if (entry.abort.signal.aborted) return;
           if (error instanceof ApiError && [401, 403, 404, 422].includes(error.status)) {
-            this.publish(entry, { feed: 'unavailable', error: errorMessage(error) });
+            this.publish(entry, { feed: 'unavailable', error: asError(error) });
             return;
           }
-          this.publish(entry, { error: errorMessage(error) });
+          this.publish(entry, { error: asError(error) });
           entry.retry = Math.max(
             entry.retry,
             Math.min(entry.retry * 2, 30000),
@@ -350,7 +356,7 @@ export class SessionController {
     try {
       data = parseEvent(frame);
     } catch (error) {
-      this.publish(entry, { partial: true, error: errorMessage(error) });
+      this.publish(entry, { partial: true, error: asError(error) });
       void this.refresh(entry.state.id);
       return;
     }
@@ -468,6 +474,8 @@ export class SessionController {
         tool.state = 'executing';
         tool.input = data.input;
         tool.name = string(data, 'name');
+        if (typeof data.display_summary === 'string') tool.displaySummary = data.display_summary;
+        else delete tool.displaySummary;
       }
       if (frame.event === 'tool_call.completed') {
         tool.state = data.is_error ? 'error' : 'completed';
@@ -502,7 +510,7 @@ export class SessionController {
         ],
       });
     } else if (frame.event === 'notice') {
-      // Notices have no structured replay-gap discriminator in 0.60.0. Conservatively refresh.
+      // Notices have no structured replay-gap discriminator. Conservatively refresh.
       this.publish(entry, {
         notices: this.withNotice(entry, frame.event, data),
         partial: true,
@@ -622,7 +630,7 @@ export class SessionController {
     const state = this.entries.get(id)?.state;
     if (state && isSessionRunning(state))
       throw new Error('Stop the current turn before deleting this session.');
-    if (state?.settingsPending) throw new Error('Wait for the settings change to finish.');
+    if (this.settingsChanges.has(id)) throw new Error('Wait for the settings change to finish.');
     try {
       await this.api.mutate('DELETE', sessionPath(id));
     } catch (error) {
@@ -668,8 +676,9 @@ export class SessionController {
     const entry = this.entries.get(id);
     if (entry?.state.session?.parent_id)
       throw new Error('Sub-agent sessions are controlled by their parent.');
-    if (entry?.state.settingsPending)
+    if (this.settingsChanges.has(id))
       throw new Error('Wait for the current settings change to finish.');
+    this.settingsChanges.add(id);
     if (entry && !entry.abort.signal.aborted) this.publish(entry, { settingsPending: true });
     try {
       const session = await this.api.mutate<Schema['SessionResponse']>(
@@ -689,15 +698,45 @@ export class SessionController {
       return session;
     } catch (error) {
       // A missing mutation response needs a read, never an automatic repeat of the PATCH.
+      if (!this.disposed) this.invalidated(id);
       await this.refresh(id);
       throw error;
     } finally {
+      this.settingsChanges.delete(id);
       const current = this.entries.get(id);
       if (!this.disposed && current) {
         this.publish(current, { settingsPending: false });
         this.release(current);
       }
     }
+  }
+  async refreshMetadata(id: string, signal?: AbortSignal): Promise<Schema['SessionResponse']> {
+    const entry = this.entries.get(id);
+    if (this.disposed || !entry) throw new Error('Open a session on the active connection first.');
+    const previous = entry.state.session;
+    const requestSignal = AbortSignal.any([
+      this.lifetime.signal,
+      entry.abort.signal,
+      ...(signal ? [signal] : []),
+    ]);
+    const session = await this.api.get<Schema['SessionResponse']>(
+      sessionPath(id),
+      undefined,
+      requestSignal,
+    );
+    // Supplementary reads participate in query invalidation without reloading history.
+    // A settings acknowledgment or full refresh takes precedence over an older read.
+    if (
+      !this.disposed &&
+      !requestSignal.aborted &&
+      this.entries.get(id) === entry &&
+      entry.state.session === previous &&
+      !entry.state.loading &&
+      !entry.state.deleting &&
+      !this.settingsChanges.has(id)
+    )
+      this.publish(entry, { session });
+    return entry.state.session ?? session;
   }
   async refresh(id: string, replacePreview = false) {
     const entry = this.entries.get(id);
@@ -798,7 +837,7 @@ export class SessionController {
       if (pendingInbox.length || wasFollowed) this.release(entry);
     } catch (error) {
       if (!entry.abort.signal.aborted && request === entry.snapshotEpoch)
-        this.publish(entry, { loading: false, error: errorMessage(error) });
+        this.publish(entry, { loading: false, error: asError(error) });
     }
   }
   private async loadSnapshot(
@@ -862,7 +901,7 @@ export class SessionController {
         offset,
       });
     } catch (error) {
-      this.publish(entry, { error: errorMessage(error) });
+      this.publish(entry, { error: asError(error) });
     }
   }
   async submitMessage(id: string, message: string, options: ComposerOptions): Promise<boolean> {
@@ -1143,7 +1182,7 @@ export class SessionController {
     } catch (error) {
       const current = this.entries.get(id);
       if (!this.disposed && current && current.state.feed !== 'connected')
-        this.publish(current, { error: errorMessage(error), partial: true });
+        this.publish(current, { error: asError(error), partial: true });
       // A healthy session feed remains authoritative if this supplementary read also fails.
     }
   }
@@ -1164,6 +1203,9 @@ export class SessionController {
           : submission,
       ),
     });
+    // turn.started precedes the eager user-message save. The first provider event
+    // gives both the list and header another read after that title can be derived.
+    this.invalidated(entry.state.id);
   }
   async retryInbox(id: string, key: string) {
     const entry = await this.ensure(id);

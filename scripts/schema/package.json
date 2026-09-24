@@ -4,7 +4,7 @@
   "type": "module",
   "license": "AGPL-3.0-or-later",
   "scripts": {
-    "generate": "openapi-typescript ../../docs/api/meka-0.60.0.json --empty-objects-unknown -o ../../src/api/schema.d.ts && prettier --write ../../src/api/schema.d.ts"
+    "generate": "openapi-typescript ../../docs/api/meka-0.64.0.json --empty-objects-unknown -o ../../src/api/schema.d.ts && prettier --write ../../src/api/schema.d.ts"
   },
   "devDependencies": {
     "openapi-typescript": "7.13.0",

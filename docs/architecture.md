@@ -29,7 +29,7 @@ The API client preserves reverse-proxy paths, rejects credentials embedded in UR
 | Data                                                       | Storage                                                                      |
 | ---------------------------------------------------------- | ---------------------------------------------------------------------------- |
 | Sessions, resources, permissions, tasks, schedules         | Meka's store                                                                 |
-| Connection metadata, theme, panel preferences              | Versioned localStorage                                                       |
+| Connection metadata, theme, conversation font size, panels | Versioned localStorage                                                       |
 | API tokens                                                 | localStorage by default for new connections; sessionStorage when selected    |
 | Text drafts                                                | Connection/session-scoped localStorage, up to 20 drafts of 50,000 characters |
 | Attachments, sending options, live previews, query results | Connection-scoped memory                                                     |
@@ -37,6 +37,8 @@ The API client preserves reverse-proxy paths, rejects credentials embedded in UR
 Endpoint changes create a new connection identity and remove the replaced connection's credentials and drafts. Credential replacement/removal disposes old requests, feeds, and authenticated caches across tabs. Cross-tab notifications contain invalidation identifiers, not tokens. Changing the selected connection does not navigate another tab.
 
 Connection discovery has a 10-second deadline covering retries and the response body. It can be canceled or superseded by another saved connection. Failed or canceled discovery preserves saved credentials and any already-connected endpoint; late responses cannot replace a newer connection. This deadline does not apply to running turns or event streams.
+
+Transport failures on the active API instance are typed connection errors and have one owner: the connection runtime. A global banner replaces duplicate local notices for those errors; discovery attempts and HTTP/protocol errors keep local feedback, and uncertain mutations keep their recovery warnings. The runtime probes liveness after five seconds, with a five-second deadline, and accepts recovery only from requests begun after the latest failure. Recovery invalidates reads and resumes failed feeds within the existing controller; it never repeats a mutation or replaces credentials. Disconnecting or switching authority aborts recovery checks. The banner is a live region above dialogs, and its measured height reserves space for the workspace and modal controls.
 
 Browser storage is not encrypted by the application. Forgetting a token removes local access but does not revoke it on the server. Scopes control visible actions; the server remains authoritative. A 401 retires the connection, while a 403 is shown as an actionable refusal.
 
@@ -54,6 +56,14 @@ Inbox retries preserve their original body and idempotency key. Management mutat
 
 Pending settings and deletion remain controller state through navigation and feed replacement. New sends wait for acknowledgment. Retired controllers cannot reopen feeds, and stale completions cannot publish into replacement entries. Session dialogs close when navigation changes their target. Acknowledgments clear submitted drafts while preserving subsequent edits; conflicting edits from other tabs are surfaced.
 
+## Session organization
+
+Titles and pins belong to meka’s store. Metadata edits use the session controller’s serialized PATCH path, update selected-session metadata, and invalidate list and search queries. Editing a session from the list does not open a feed or revive an agent. Uncertain mutations refresh visible state without automatic retries.
+
+The selected session's metadata participates in query invalidation and polls while its screen is open. These reads update the controller's session record without replacing conversation history or live turn state. Reads overtaken by a settings acknowledgment or snapshot refresh cannot restore older metadata. The first provider event invalidates metadata again, since turn admission can precede the first user message being saved. Inline title edits keep their own draft through these updates.
+
+The sidebar preserves the server’s pin/recency order and passes pagination cursors through unchanged. Search is debounced, connection-scoped, and abortable; it uses the server’s conversation index, relevance order, and plain-text excerpts. Search has no cursor and caps results at 100. Controls for titles, pins, and search require a discovered version of at least 0.64.0, since older servers may ignore unknown PATCH fields.
+
 ## Saved history and live output
 
 `/messages` is the current model context, not an immutable transcript. Compaction and rewind can replace it. Live turn UUIDs differ from saved turn indexes; the API provides neither stable message ids nor an atomic snapshot/feed cursor. Saved and live messages must not be merged by equal text or guessed identifiers.
@@ -66,6 +76,8 @@ New sessions enable reasoning streams by default; available `thinking.delta` eve
 
 Saved tool calls and results share a disclosure, paired by explicit tool-call IDs within an assistant round. Pairing is limited to the loaded snapshot and stops at compaction boundaries. Unmatched or ambiguous results stay visible separately; loading earlier messages can supply a missing call. This presentation does not change the saved messages or merge saved history with live output.
 
+Tool headings use the server's `display_summary` from live execution events. History lacks this field and tool schemas, so `src/session/tool-summary.ts` follows meka's built-in primary-argument mappings, including supported older names. Unknown tools without a server summary remain bare, as in meka's history renderer. Header previews are bounded, single-line text; expanded arguments retain their original values.
+
 Consecutive assistant messages share an Agent heading. Changes in virtual turn indexes remain boundaries unless the intervening rows consist solely of matched tool results, which meka encodes as user-role messages. User input, compaction markers, and unmatched results always keep their boundaries.
 
 Local submissions appear immediately as You previews, interleaved with live output. Routine admitted direct turns need no acceptance banner or queue. Snapshot replacement waits while admission is unknown. A history read begun after confirmed input persistence or completion replaces the preview; a pending-inbox read also recovers missed delivery events without assuming that absence proves delivery. Pending inbox items appear as chat messages with an inline Withdraw action; delivery events refresh that state. Queued items remain previews, and uncertain submissions retain their recovery controls inside the corresponding message. Preview replacement never compares message text. The inbox API exposes metadata without bodies: after a reload, unmatched pending items have an explicit text-unavailable placeholder. Local text is associated only by item ID. Pending requests without an item ID are resolved before showing unmatched placeholders, so an early inbox read cannot duplicate their messages. Composer errors and draft-conflict choices render in the conversation rather than in panels around the input.
@@ -74,7 +86,7 @@ Server notices and turn failures appear as inline messages with their severity. 
 
 ## Rendering
 
-Model and tool content is untrusted. Markdown raw HTML is disabled. Code highlighting loads locally on demand, math uses KaTeX without trusted commands, and Mermaid previews reject configuration directives and external resources. Diagrams are sanitized and displayed as static images. External Markdown images become links; only endpoint blobs receive API credentials.
+Model and tool content is untrusted. Markdown raw HTML is disabled. Code highlighting loads locally on demand, math uses KaTeX without trusted commands, and Mermaid previews reject configuration directives and external resources. Diagrams are sanitized and displayed as static images. External Markdown images become links; only endpoint blobs receive API credentials. Image reads participate in connection recovery. Successfully loaded content hashes remain cached while displayed, with their bytes and object URLs released when no longer in use.
 
 Wide tables, code, formulas, and diagrams scroll within the content column. Dialogs and menus use Radix focus handling. Resource editors preserve raw bodies and distinguish omitted fields from intentional empty values; background refresh does not overwrite an editor's draft.
 

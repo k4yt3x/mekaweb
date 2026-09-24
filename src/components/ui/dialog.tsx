@@ -28,6 +28,12 @@ export function Dialog({
         <Primitive.Content
           className={`dialog-content ${wide ? 'dialog-wide' : ''} dialog-${placement}`}
           onCloseAutoFocus={onCloseAutoFocus}
+          onInteractOutside={(event) => {
+            const target = event.detail.originalEvent.target;
+            // Recovery controls sit above modals; using them must not discard an editor.
+            if (target instanceof Element && target.closest('.connection-banner'))
+              event.preventDefault();
+          }}
         >
           <div className="dialog-heading">
             <Primitive.Title>{title}</Primitive.Title>

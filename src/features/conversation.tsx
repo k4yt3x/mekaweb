@@ -9,6 +9,7 @@ import {
   useSyncExternalStore,
   type KeyboardEvent,
   type ReactNode,
+  type CSSProperties,
 } from 'react';
 import {
   ArrowDown,
@@ -35,8 +36,9 @@ import type { SessionState, LiveTool, Submission, ComposerOptions } from '../ses
 import { isSessionRunning } from '../session/controller';
 import { useTextDraft } from '../session/drafts';
 import { Button } from '../components/ui/button';
-import { Empty, ErrorNotice, Json, Loading } from '../components/common';
+import { Empty, ErrorNotice, Loading } from '../components/common';
 import { NoticeMessage } from '../components/notice-message';
+import { ToolCard } from '../components/tool-card';
 import { ComposerResizeHandle } from '../components/composer-resize-handle';
 import { Attachment, Markdown, MarkdownPreview } from '../components/markdown';
 import { scrollRegion } from '../components/scrolling';
@@ -55,9 +57,10 @@ import {
   type ToolUseBlock,
 } from './conversation-history';
 const positions = new Map<string, { top: number; following: boolean }>();
-const DEFAULT_INPUT_HEIGHT = 90;
+// Includes the editor's 22px vertical padding and room for two lines of text.
+const DEFAULT_INPUT_HEIGHT = 68;
 export function Conversation({ state }: { state: SessionState }) {
-  const { controller, connection } = useConnection();
+  const { controller, connection, connectionIssue } = useConnection();
   const runtime = useRuntime();
   const draft = useTextDraft(runtime.storage, connection?.id ?? '', state.id);
   const profiles = useResource<Schema['ProfilesResponse']>('/v1/profiles');
@@ -71,7 +74,7 @@ export function Conversation({ state }: { state: SessionState }) {
     setInputHeight(DEFAULT_INPUT_HEIGHT);
     setResizeGeneration((value) => value + 1);
   }
-  const { showTurnContext } = useSettings();
+  const { showTurnContext, conversationFontSize } = useSettings();
   const scroller = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
   const dock = useRef<HTMLDivElement>(null);
@@ -84,7 +87,13 @@ export function Conversation({ state }: { state: SessionState }) {
     () => groupLiveMessages(state.blocks, state.submissions),
     [state.blocks, state.submissions],
   );
-  const waiting = responseActivityIndicator(state, live);
+  const activity = responseActivityIndicator(state, live);
+  const waiting =
+    connectionIssue &&
+    activity &&
+    ['connecting', 'reconnecting', 'disconnected'].includes(activity.status)
+      ? undefined
+      : activity;
   const problems = state.submissions.filter(
     (submission) =>
       submission.state === 'uncertain' ||
@@ -169,7 +178,11 @@ export function Conversation({ state }: { state: SessionState }) {
           }
         }}
       >
-        <div className="conversation-history" ref={content}>
+        <div
+          className="conversation-history"
+          ref={content}
+          style={{ '--conversation-font-size': `${conversationFontSize}px` } as CSSProperties}
+        >
           <div
             className="conversation-width"
             onClick={(event) => {
@@ -282,7 +295,7 @@ export function Conversation({ state }: { state: SessionState }) {
                 </div>
               </div>
             )}
-            <ErrorNotice error={state.error ? new Error(state.error) : undefined} />
+            <ErrorNotice error={state.error} />
             <ErrorNotice error={feedbackError} />
             <ErrorNotice error={profiles.error ?? inbox.error} />
           </div>
@@ -721,44 +734,13 @@ function ToolOutput({ children, label = 'Tool result' }: { children: ReactNode; 
     </div>
   );
 }
-function ToolCard({
-  name,
-  input,
-  status,
-  isError,
-  children,
-}: {
-  name: string;
-  input: unknown;
-  status: string;
-  isError: boolean;
-  children: ReactNode;
-}) {
-  return (
-    <details className={`tool-card ${isError ? 'tool-error' : ''}`}>
-      <summary>
-        <span className="tool-symbol" aria-hidden="true">
-          ⌘
-        </span>
-        <span className="tool-name">{name}</span>
-        <span className="badge tool-state">{status}</span>
-      </summary>
-      <div className="tool-details">
-        <div className="tool-section">
-          <h4>Arguments</h4>
-          <Json value={input} />
-        </div>
-        {children}
-      </div>
-    </details>
-  );
-}
 function Tool({ tool }: { tool: LiveTool | undefined }) {
   if (!tool) return null;
   return (
     <ToolCard
       name={tool.name}
       input={tool.input}
+      displaySummary={tool.displaySummary}
       status={
         {
           composing: 'Composing',
@@ -1051,7 +1033,7 @@ function Composer({
               value={draft.text}
               onChange={(event) => draft.setText(event.target.value)}
               onKeyDown={keydown}
-              rows={3}
+              rows={2}
               disabled={!canWrite || Boolean(state.session?.parent_id) || state.deleting}
             />
           </div>

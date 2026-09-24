@@ -138,6 +138,18 @@ it.each(['steer', 'followup', 'interrupt'])(
   },
 );
 
+it('refreshes metadata again on first progress when admission preceded input persistence', async () => {
+  const f = await fixture();
+  await f.start();
+  f.invalidated.mockClear();
+  f.session.title = 'Hello.';
+  await f.post.event('thinking.delta', { text: 'Considering' });
+  expect(f.invalidated).toHaveBeenCalledExactlyOnceWith('s');
+  await f.feed.event('thinking.delta', { text: 'Considering' });
+  await f.post.event('assistant_text.delta', { text: 'Answer' });
+  expect(f.invalidated).toHaveBeenCalledTimes(1);
+});
+
 it.each(['steer', 'followup', 'interrupt'])(
   'sends %s through the inbox during an admitted direct turn',
   async (mode) => {

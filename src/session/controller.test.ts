@@ -2,6 +2,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import {
   ApiClient,
   ApiError,
+  ConnectionError,
   UncertainMutationError,
   type Query,
   type Schema,
@@ -92,6 +93,59 @@ it('tracks text bursts and quiet intervals without treating a pause as turn comp
   expect(f.state().running).toBe(true);
   await f.event('assistant_text.delta', { turn_id: 'turn', text: ' continued' });
   expect(f.state().textStreaming).toBe(true);
+});
+
+it('retains the server tool summary through output, activity, and completion', async () => {
+  const f = await fixture();
+  await f.event('turn.started', { turn_id: 'turn' });
+  await f.event('tool_call.composing', { id: 'tool', name: 'mcp__server__read', turn_id: 'turn' });
+  expect(f.state().tools.tool?.displaySummary).toBeUndefined();
+  await f.event('tool_call.executing', {
+    id: 'tool',
+    name: 'mcp__server__read',
+    turn_id: 'turn',
+    input: { resource: 'raw' },
+    display_summary: 'Resolved resource',
+  });
+  await f.event('tool_call.output_delta', { id: 'tool', turn_id: 'turn', chunk: 'output' });
+  await f.event('subagent.activity', { id: 'tool', turn_id: 'turn', summary: 'activity' });
+  await f.event('tool_call.completed', {
+    id: 'tool',
+    turn_id: 'turn',
+    is_error: false,
+    content: [],
+  });
+  expect(f.state().tools.tool).toMatchObject({
+    displaySummary: 'Resolved resource',
+    input: { resource: 'raw' },
+    output: 'output',
+    state: 'completed',
+  });
+  await f.event('turn.started', { turn_id: 'next' });
+  await f.event('tool_call.executing', {
+    id: 'tool',
+    name: 'file_read',
+    turn_id: 'next',
+    input: { path: 'next.txt' },
+  });
+  expect(f.state().tools.tool?.displaySummary).toBeUndefined();
+});
+
+it('ignores malformed optional tool labels without interrupting the feed', async () => {
+  const f = await fixture();
+  await f.event('turn.started', { turn_id: 'turn' });
+  for (const display_summary of [null, 42, {}, []]) {
+    await f.event('tool_call.executing', {
+      id: 'tool',
+      name: 'file_read',
+      turn_id: 'turn',
+      input: { path: 'file.txt' },
+      display_summary,
+    });
+    expect(f.state().tools.tool?.displaySummary).toBeUndefined();
+    expect(f.state().tools.tool?.input).toEqual({ path: 'file.txt' });
+    expect(f.state().feed).toBe('connected');
+  }
 });
 
 it.each([
@@ -525,7 +579,7 @@ it('keeps the preview until a failed history refresh can recover', async () => {
   vi.mocked(f.api.get).mockRejectedValueOnce(new Error('History temporarily unavailable'));
   await f.controller.refresh('s');
   expect(f.state().submissions[0]?.preview).toBe(true);
-  expect(f.state().error).toContain('History temporarily unavailable');
+  expect(f.state().error?.message).toContain('History temporarily unavailable');
   await f.controller.refresh('s');
   expect(f.state().submissions[0]?.preview).toBe(false);
 });
@@ -628,7 +682,7 @@ async function queuedFixture() {
       id: 'item',
       session_id: 's',
       class: 'followup',
-      source: 'client',
+      // 0.63+ omits source when no sender was named.
       created_at: '2026-09-23T12:00:00Z',
       state: 'pending',
     },
@@ -786,6 +840,147 @@ it('reads the actual settings after an uncertain PATCH without repeating the mut
     permission: 'workspace',
   });
   expect(f.state().session?.permission).toBe('workspace');
+});
+it('updates titles and pins during a running turn without losing its live state', async () => {
+  const f = await fixture();
+  await f.event('turn.started', { turn_id: 'running' });
+  await f.event('assistant_text.delta', { turn_id: 'running', text: 'In progress' });
+  f.session.turn_in_flight = true;
+  const liveBlocks = f.state().blocks;
+  const mutate = vi.spyOn(f.api, 'mutate').mockImplementation(async (_method, _path, body) => {
+    const patch = body as Schema['PatchSessionRequest'];
+    f.session.title = patch.title ?? f.session.title;
+    if (patch.pinned) f.session.pinned_at = '2026-09-24T00:00:00Z';
+    return structuredClone(f.session);
+  });
+  await f.controller.patchSettings('s', { title: 'Research', pinned: true });
+  expect(mutate).toHaveBeenCalledExactlyOnceWith('PATCH', '/v1/sessions/s', {
+    title: 'Research',
+    pinned: true,
+  });
+  expect(f.state().session?.title).toBe('Research');
+  expect(f.state().session?.pinned_at).toBe('2026-09-24T00:00:00Z');
+  expect(f.state().running).toBe(true);
+  expect(f.state().turnId).toBe('running');
+  expect(f.state().blocks).toEqual(liveBlocks);
+  await f.controller.patchSettings('s', { title: '' });
+  expect(mutate).toHaveBeenLastCalledWith('PATCH', '/v1/sessions/s', { title: '' });
+});
+it('refreshes metadata during a turn without changing the conversation or running state', async () => {
+  const f = await fixture();
+  await f.event('turn.started', { turn_id: 'turn' });
+  await f.event('assistant_text.delta', { turn_id: 'turn', text: 'Still working' });
+  const saved = f.state().saved;
+  const blocks = f.state().blocks;
+  f.session.title = 'First message';
+  vi.mocked(f.api.get).mockClear();
+  await f.controller.refreshMetadata('s');
+  expect(f.state().session?.title).toBe('First message');
+  expect(f.state().running).toBe(true);
+  expect(f.state().turnId).toBe('turn');
+  expect(f.state().saved).toBe(saved);
+  expect(f.state().blocks).toBe(blocks);
+  expect(f.api.get).toHaveBeenCalledExactlyOnceWith(
+    '/v1/sessions/s',
+    undefined,
+    expect.any(AbortSignal),
+  );
+});
+
+it('does not let a late metadata read revert an acknowledged rename', async () => {
+  const f = await fixture();
+  const old = structuredClone(f.session);
+  let finish!: (session: Schema['SessionResponse']) => void;
+  vi.mocked(f.api.get).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const reading = f.controller.refreshMetadata('s');
+  vi.spyOn(f.api, 'mutate').mockImplementation(async () => {
+    f.session.title = 'User chosen title';
+    return structuredClone(f.session);
+  });
+  await f.controller.patchSettings('s', { title: 'User chosen title' });
+  finish(old);
+  expect((await reading).title).toBe('User chosen title');
+  expect(f.state().session?.title).toBe('User chosen title');
+});
+
+it('ignores canceled metadata reads and completions after disconnect', async () => {
+  const f = await fixture();
+  let finish!: (session: Schema['SessionResponse']) => void;
+  vi.mocked(f.api.get).mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const abort = new AbortController();
+  const canceled = f.controller.refreshMetadata('s', abort.signal);
+  abort.abort();
+  finish({ ...f.session, title: 'Canceled read' });
+  await canceled;
+  expect(f.state().session?.title).toBe('');
+  const late = f.controller.refreshMetadata('s');
+  f.controller.dispose();
+  finish({ ...f.session, title: 'Retired connection' });
+  await late;
+  expect(f.controller.getSnapshot()).toEqual([]);
+});
+
+it('preserves connection-error identity so history failures are shown only in the global banner', async () => {
+  const f = await fixture();
+  const failure = new ConnectionError(new TypeError('offline'), true);
+  vi.mocked(f.api.get).mockRejectedValueOnce(failure);
+  await f.controller.refresh('s');
+  expect(f.state().error).toBe(failure);
+  await f.controller.refresh('s');
+  expect(f.state().error).toBeUndefined();
+});
+it('serializes unopened-session edits and refreshes lists after uncertain metadata writes', async () => {
+  const api = new ApiClient('https://example.org', 'dummy');
+  const invalidated = vi.fn();
+  const controller = new SessionController(api, true, invalidated);
+  controllers.push(controller);
+  const read = vi.spyOn(api, 'get');
+  const stream = vi.spyOn(api, 'stream');
+  let reject!: (error: Error) => void;
+  const mutate = vi.spyOn(api, 'mutate').mockImplementation(
+    () =>
+      new Promise((_, fail) => {
+        reject = fail;
+      }),
+  );
+  const change = controller.patchSettings('dormant', { title: 'A new title' });
+  await expect(controller.patchSettings('dormant', { pinned: true })).rejects.toThrow('Wait');
+  await expect(controller.deleteSession('dormant')).rejects.toThrow('Wait');
+  reject(new UncertainMutationError());
+  await expect(change).rejects.toBeInstanceOf(UncertainMutationError);
+  expect(mutate).toHaveBeenCalledTimes(1);
+  expect(invalidated).toHaveBeenCalledWith('dormant');
+  expect(read).not.toHaveBeenCalled();
+  expect(stream).not.toHaveBeenCalled();
+  expect(controller.getSnapshot()).toEqual([]);
+  mutate.mockResolvedValue({ id: 'dormant', title: 'Restored' });
+  await controller.patchSettings('dormant', { title: '' });
+  expect(mutate).toHaveBeenCalledTimes(2);
+});
+it('does not publish a metadata acknowledgment after the connection is retired', async () => {
+  const f = await fixture();
+  let resolve!: (session: Schema['SessionResponse']) => void;
+  vi.spyOn(f.api, 'mutate').mockImplementation(
+    () =>
+      new Promise((done) => {
+        resolve = done;
+      }),
+  );
+  const change = f.controller.patchSettings('s', { title: 'Stale title' });
+  f.controller.dispose();
+  resolve({ ...f.session, title: 'Stale title' });
+  await expect(change).rejects.toThrow('connection changed');
+  expect(f.controller.getSnapshot()).toEqual([]);
 });
 it('keeps settings updates pending across navigation and refuses a new send until acknowledgment', async () => {
   const f = await fixture();

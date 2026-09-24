@@ -22,6 +22,7 @@ import { Button } from './components/ui/button';
 import { Dialog } from './components/ui/dialog';
 import { ErrorNotice, Json, Loading } from './components/common';
 import { NavigationToggle } from './components/layout';
+import { ConnectionBanner } from './components/connection-banner';
 
 export function App({ runtime }: { runtime: ConnectionRuntime }) {
   useEffect(() => runtime.start(), [runtime]);
@@ -84,74 +85,77 @@ function Shell() {
       </>
     );
   return (
-    <div
-      className={`app-shell ${settings.layout.navigationCollapsed ? 'navigation-collapsed' : ''}`}
-    >
-      <a
-        href="#main-content"
-        className="skip-link"
-        onClick={(event) => {
-          event.preventDefault();
-          document.getElementById('main-content')?.focus();
-        }}
+    <div className="app-frame">
+      <ConnectionBanner />
+      <div
+        className={`app-shell ${settings.layout.navigationCollapsed ? 'navigation-collapsed' : ''}`}
       >
-        Skip to content
-      </a>
-      <aside id="workspace-navigation" className="app-sidebar" aria-label="Workspace navigation">
-        <Navigation />
-      </aside>
-      {settings.layout.navigationCollapsed &&
-        (!state.info?.scopes.includes('sessions:r') ||
-          (!location.pathname.startsWith('/sessions') && location.pathname !== '/')) && (
-          <NavigationToggle className="navigation-restore" />
+        <a
+          href="#main-content"
+          className="skip-link"
+          onClick={(event) => {
+            event.preventDefault();
+            document.getElementById('main-content')?.focus();
+          }}
+        >
+          Skip to content
+        </a>
+        <aside id="workspace-navigation" className="app-sidebar" aria-label="Workspace navigation">
+          <Navigation />
+        </aside>
+        {settings.layout.navigationCollapsed &&
+          (!state.info?.scopes.includes('sessions:r') ||
+            (!location.pathname.startsWith('/sessions') && location.pathname !== '/')) && (
+            <NavigationToggle className="navigation-restore" />
+          )}
+        <header className="mobile-header">
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="Open navigation"
+            onClick={() => setNav(true)}
+          >
+            <Menu size={20} />
+          </Button>
+          <strong>meka</strong>
+          <span className="muted small">{state.connection?.name}</span>
+        </header>
+        <main
+          id="main-content"
+          tabIndex={-1}
+          className="main-content"
+          key={state.connection?.id + ':' + state.connection?.authority}
+        >
+          <Suspense
+            fallback={
+              <div className="page">
+                <Loading />
+              </div>
+            }
+          >
+            <Outlet />
+          </Suspense>
+        </main>
+        <Dialog open={nav} onOpenChange={setNav} title="Navigation" placement="left">
+          <Navigation onNavigate={() => setNav(false)} />
+        </Dialog>
+        {runtime.storage.warning && (
+          <p className="storage-warning" role="status">
+            {runtime.storage.warning}
+          </p>
         )}
-      <header className="mobile-header">
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label="Open navigation"
-          onClick={() => setNav(true)}
-        >
-          <Menu size={20} />
-        </Button>
-        <strong>meka</strong>
-        <span className="muted small">{state.connection?.name}</span>
-      </header>
-      <main
-        id="main-content"
-        tabIndex={-1}
-        className="main-content"
-        key={state.connection?.id + ':' + state.connection?.authority}
-      >
-        <Suspense
-          fallback={
-            <div className="page">
-              <Loading />
-            </div>
-          }
-        >
-          <Outlet />
-        </Suspense>
-      </main>
-      <Dialog open={nav} onOpenChange={setNav} title="Navigation" placement="left">
-        <Navigation onNavigate={() => setNav(false)} />
-      </Dialog>
-      {runtime.storage.warning && (
-        <p className="storage-warning" role="status">
-          {runtime.storage.warning}
-        </p>
-      )}
-      <div className="approval-tray" role="region" aria-label="Pending approvals">
-        {sessions
-          .flatMap((s) => s.approvals)
-          .map((approval) => (
-            <ApprovalCard key={approval.id} approval={approval} />
-          ))}
+        <div className="approval-tray" role="region" aria-label="Pending approvals">
+          {sessions
+            .flatMap((s) => s.approvals)
+            .map((approval) => (
+              <ApprovalCard key={approval.id} approval={approval} />
+            ))}
+        </div>
+        <span className="sr-only" aria-live="polite">
+          {sessions.reduce((sum, s) => sum + s.approvals.length, 0)} approvals waiting.{' '}
+          {location.pathname.split('/')[1] || 'Sessions'} view.
+        </span>
       </div>
-      <span className="sr-only" aria-live="polite">
-        {sessions.reduce((sum, s) => sum + s.approvals.length, 0)} approvals waiting.{' '}
-        {location.pathname.split('/')[1] || 'Sessions'} view.
-      </span>
     </div>
   );
 }

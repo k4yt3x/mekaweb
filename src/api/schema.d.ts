@@ -298,6 +298,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/v1/sessions/search': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** GET /v1/sessions/search: the sessions whose conversations hold the words of `q`, best first. */
+    get: operations['search_sessions'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/v1/sessions/{id}': {
     parameters: {
       query?: never;
@@ -1024,7 +1041,8 @@ export interface components {
       id: string;
       /** Format: uuid */
       session_id: string;
-      source: string;
+      /** @description Absent when the client named nobody. */
+      source?: string | null;
       /** @description `pending`, `appended`, `delivered` or `withdrawn`. */
       state: string;
       withdrawn_at?: string | null;
@@ -1046,11 +1064,15 @@ export interface components {
        *     to end. Any of them rides the next turn's opening, or opens one, when nothing is running.
        */
       class: string;
-      /** @description What the model reads, verbatim under a header naming `source` and when it arrived. */
+      /**
+       * @description What the model reads, verbatim under a header naming when it arrived and, when given,
+       *     `source`.
+       */
       message: string;
       /**
-       * @description Who the message is from, as the header names them. Defaults to the token's description,
-       *     then to `client`.
+       * @description Who the message is from, as the header names them. Left out or blank, the header names
+       *     nobody: who sent a message is the client's to say, and meka does not guess it from the
+       *     token.
        */
       source?: string | null;
     };
@@ -1266,6 +1288,11 @@ export interface components {
        */
       permission?: string | null;
       /**
+       * @description Pin or unpin the session. A pinned session is listed first, newest pin on top. Absent →
+       *     keep current. Does not move `updated_at`.
+       */
+      pinned?: boolean | null;
+      /**
        * @description Profile to move the session onto. Must name a profile in `config.toml`. Absent → keep
        *     current.
        *
@@ -1274,6 +1301,11 @@ export interface components {
        *     reasoning recorded so far stops being visible to the model from the next turn onward.
        */
       profile?: string | null;
+      /**
+       * @description The session's title, as every listing shows it. Empty clears it, so the session is labeled
+       *     by its first words again. Absent → keep current. Does not move `updated_at`.
+       */
+      title?: string | null;
     };
     /** @enum {string} */
     PermissionDecision: 'allow' | 'deny' | 'allow_always' | 'deny_always';
@@ -1411,6 +1443,9 @@ export interface components {
     ScheduledJobsResponse: {
       jobs: components['schemas']['ScheduledJobView'][];
     };
+    SearchSessionsResponse: {
+      sessions: components['schemas']['SessionMatchResponse'][];
+    };
     /**
      * @description Per-session capabilities flags declared at create time. Defaults match the bot/bridge use
      *     case (server handles everything locally; SSE clients get assistant text + tool calls but not
@@ -1445,6 +1480,18 @@ export interface components {
        * @default false
        */
       supports_reasoning_stream: boolean;
+    };
+    /**
+     * @description A session a search found: the record every listing answers with, plus the words it was found
+     *     by.
+     */
+    SessionMatchResponse: components['schemas']['SessionResponse'] & {
+      /**
+       * @description The line of the best-matching message that holds a query term, whitespace collapsed and
+       *     cut short, marked `(summary)` when taken from a compaction summary. Omitted for a session
+       *     found by its title alone.
+       */
+      excerpt?: string | null;
     };
     /**
      * @description A session as this server answers for it: the row every host prints, under the facts only the
@@ -1521,11 +1568,16 @@ export interface components {
        *     hand's, and inventing a value for it would state a level the session never ran at.
        */
       permission?: string | null;
+      /**
+       * @description RFC 3339, when the session was pinned; omitted for a session that is not. Pinned sessions
+       *     are listed first, newest pin on top.
+       */
+      pinned_at?: string | null;
       /** @description The profile this session runs on. */
       profile: string;
       /**
-       * @description The first user message's words, whitespace collapsed and cut to 80 characters. Empty until
-       *     the session has run a turn.
+       * @description The title a user set, else the first user message's words, whitespace collapsed and cut to
+       *     80 characters. Empty until either has happened.
        */
       title: string;
       /** @description RFC 3339, moved by any session-level change, a `PATCH` included. */
@@ -2692,6 +2744,63 @@ export interface operations {
       };
       /** @description Malformed or unsupported envelope */
       422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+    };
+  };
+  search_sessions: {
+    parameters: {
+      query: {
+        /**
+         * @description The words to search for. What was said is searched, not what tools were called with or
+         *     returned; a session whose title holds every word is listed first. Blank finds nothing.
+         */
+        q: string;
+        /** @description How many sessions to answer with at most. Default 20, clamped to 1..100. */
+        limit?: number | null;
+        /** @description Include sub-agent sessions. Default `false`, like the listing. */
+        include_children?: boolean | null;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Matching sessions, best first, each with the words it was found by */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['SearchSessionsResponse'];
+        };
+      };
+      /** @description Authorization missing or invalid */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Insufficient scope */
+      403: {
         headers: {
           [name: string]: unknown;
         };

@@ -2,6 +2,21 @@ import type { components } from './schema';
 
 export type Schema = components['schemas'];
 export type Query = Record<string, string | number | boolean | undefined>;
+export class ConnectionError extends Error {
+  constructor(
+    cause?: unknown,
+    readonly reportedGlobally = false,
+  ) {
+    super(
+      'Cannot reach this endpoint. Check the address, network, TLS certificate, and the server’s CORS origin configuration.',
+      { cause },
+    );
+    this.name = 'ConnectionError';
+  }
+}
+export function asError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(errorMessage(error));
+}
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -78,16 +93,54 @@ export interface RequestOptions {
 export class ApiClient {
   readonly base: string;
   private lifetime = new AbortController();
+  private requestSequence = 0;
+  private lastConnectionFailure = 0;
+  private reachable = true;
+  private responses = new WeakMap<Response, { sequence: number; signal: AbortSignal }>();
   constructor(
     base: string,
     private token: string,
     private unauthorized: () => void = () => {},
+    private connectionChanged?: (reachable: boolean) => void,
   ) {
     this.base = normalizeEndpoint(base);
   }
   dispose() {
     this.lifetime.abort();
     this.token = '';
+  }
+  private reportConnection(reachable: boolean, sequence: number) {
+    if (this.lifetime.signal.aborted) return;
+    // A dropped body is new evidence even if its request started earlier. Recovery
+    // needs a request begun after that failure, not an old buffered response.
+    if (!reachable) this.lastConnectionFailure = this.requestSequence;
+    else if (sequence <= this.lastConnectionFailure) return;
+    if (this.reachable === reachable) return;
+    this.reachable = reachable;
+    this.connectionChanged?.(reachable);
+  }
+  private connectionFailure(cause: unknown, sequence: number): ConnectionError {
+    this.reportConnection(false, sequence);
+    return new ConnectionError(cause, Boolean(this.connectionChanged));
+  }
+  reportConnectionError(cause: unknown, response?: Response): ConnectionError {
+    const request = response && this.responses.get(response);
+    if (request?.signal.aborted || this.lifetime.signal.aborted)
+      return new ConnectionError(cause, Boolean(this.connectionChanged));
+    return this.connectionFailure(cause, request?.sequence ?? ++this.requestSequence);
+  }
+  private async readResponse<T>(response: Response, read: () => Promise<T>): Promise<T> {
+    const request = this.responses.get(response);
+    let value: T;
+    try {
+      value = await read();
+    } catch (error) {
+      if (request?.signal.aborted || this.lifetime.signal.aborted) throw error;
+      throw this.reportConnectionError(error, response);
+    }
+    request?.signal.throwIfAborted();
+    this.reportConnection(true, request?.sequence ?? ++this.requestSequence);
+    return value;
   }
   url(path: string, query?: Query): string {
     if (
@@ -117,6 +170,7 @@ export class ApiClient {
     if (options.idempotencyKey) headers['Idempotency-Key'] = options.idempotencyKey;
     for (let attempt = 0; ; attempt++) {
       signal.throwIfAborted();
+      const sequence = ++this.requestSequence;
       let response: Response;
       try {
         response = await fetch(url, {
@@ -131,26 +185,30 @@ export class ApiClient {
         });
       } catch (error) {
         if (signal.aborted) throw error;
-        if (method !== 'GET') throw new UncertainMutationError(error);
+        if (method !== 'GET')
+          throw new UncertainMutationError(this.connectionFailure(error, sequence));
         if (attempt < 2) {
           await pause(500 * 2 ** attempt, signal);
           continue;
         }
-        throw new Error(
-          'Cannot reach this endpoint. Check the address, network, TLS certificate, and the server’s CORS origin configuration.',
-          { cause: error },
-        );
+        throw this.connectionFailure(error, sequence);
       }
       signal.throwIfAborted();
-      if (response.ok || (path.endsWith('/health/ready') && response.status === 503))
+      this.responses.set(response, { sequence, signal });
+      if (response.ok || (path.endsWith('/health/ready') && response.status === 503)) {
+        if (options.accept === 'text/event-stream') this.reportConnection(true, sequence);
         return response;
+      }
       const delay = retryDelay(response.headers.get('Retry-After'));
       let problem: Partial<Schema['ProblemDetail']> = {};
       try {
-        const value: unknown = await response.json();
+        const value: unknown = JSON.parse(await this.readResponse(response, () => response.text()));
         if (value !== null && typeof value === 'object')
           problem = value as Partial<Schema['ProblemDetail']>;
-      } catch {
+      } catch (error) {
+        if (signal.aborted) throw error;
+        if (error instanceof ConnectionError)
+          throw method === 'GET' ? error : new UncertainMutationError(error);
         /* Some reverse proxies return non-JSON errors. */
       }
       const error = new ApiError(response.status, problem, delay);
@@ -172,7 +230,7 @@ export class ApiClient {
   }
   async get<T>(path: string, query?: Query, signal?: AbortSignal): Promise<T> {
     const response = await this.response('GET', path, { ...(query ? { query } : {}), signal });
-    return response.json() as Promise<T>;
+    return JSON.parse(await this.readResponse(response, () => response.text())) as T;
   }
   async mutate<T = void>(
     method: 'POST' | 'PUT' | 'PATCH' | 'DELETE',
@@ -184,12 +242,15 @@ export class ApiClient {
       ...(body !== undefined ? { body } : {}),
       ...(idempotencyKey ? { idempotencyKey } : {}),
     });
-    if (response.status === 204) return undefined as T;
+    if (response.status === 204) {
+      await this.readResponse(response, () => Promise.resolve());
+      return undefined as T;
+    }
     try {
-      const text = await response.text();
+      const text = await this.readResponse(response, () => response.text());
       return (text ? JSON.parse(text) : undefined) as T;
-    } catch {
-      throw new UncertainMutationError();
+    } catch (error) {
+      throw new UncertainMutationError(error);
     }
   }
   async stream(
@@ -206,7 +267,8 @@ export class ApiClient {
     });
   }
   async blob(path: string, query?: Query, signal?: AbortSignal): Promise<Blob> {
-    return (await this.response('GET', path, { ...(query ? { query } : {}), signal })).blob();
+    const response = await this.response('GET', path, { ...(query ? { query } : {}), signal });
+    return this.readResponse(response, () => response.blob());
   }
 }
 export const sessionPath = (id: string) => `/v1/sessions/${segment(id)}`;

@@ -1,6 +1,6 @@
 import { QueryClient } from '@tanstack/react-query';
 import { afterEach, expect, it, vi } from 'vitest';
-import { ApiClient, type Schema } from '../api/client';
+import { ApiClient, ConnectionError, type Schema } from '../api/client';
 import { ConnectionRuntime } from './runtime';
 import { BrowserStorage } from './storage';
 
@@ -52,6 +52,71 @@ function deferred<T>() {
   });
   return { promise, resolve };
 }
+
+it('recovers in place with read-only probes while preserving credentials and cached data', async () => {
+  vi.useFakeTimers();
+  const { runtime, storage } = fixture();
+  const fetcher = vi
+    .spyOn(globalThis, 'fetch')
+    .mockResolvedValueOnce(Response.json(info))
+    .mockResolvedValueOnce(Response.json({ status: 'ok' }));
+  await runtime.save('Test', 'https://example.org', 'dummy', true);
+  const { api, controller, connection } = runtime.getSnapshot();
+  runtime.queries.setQueryData(['cached'], 'preserved');
+  storage.saveDraft(connection!.id, 's', 'Keep draft');
+  const error = api!.reportConnectionError(new TypeError('offline'));
+  expect(error).toBeInstanceOf(ConnectionError);
+  expect(error.reportedGlobally).toBe(true);
+  expect(runtime.getSnapshot().connectionIssue).toBe('offline');
+  await vi.advanceTimersByTimeAsync(5000);
+  expect(runtime.getSnapshot()).toMatchObject({ api, controller, connection });
+  expect(runtime.getSnapshot().connectionIssue).toBeUndefined();
+  expect(storage.token(connection!)).toBe('dummy');
+  expect(storage.draft(connection!.id, 's')?.text).toBe('Keep draft');
+  expect(runtime.queries.getQueryData(['cached'])).toBe('preserved');
+  expect(fetcher.mock.calls.every(([, options]) => options?.method === 'GET')).toBe(true);
+  expect(fetcher).toHaveBeenCalledTimes(2);
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it('bounds stalled recovery checks and cancels them on disconnect', async () => {
+  vi.useFakeTimers();
+  const { runtime } = fixture();
+  vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(Response.json(info));
+  await runtime.save('Test', 'https://example.org', 'dummy', true);
+  runtime.getSnapshot().api!.reportConnectionError(new TypeError('offline'));
+  const stalled = stalledDiscovery();
+  const checking = runtime.retryConnection();
+  expect(runtime.getSnapshot().connectionIssue).toBe('checking');
+  await vi.advanceTimersByTimeAsync(5000);
+  await checking;
+  expect(stalled.signal()?.aborted).toBe(true);
+  expect(runtime.getSnapshot().connectionIssue).toBe('offline');
+  runtime.disconnect();
+  await vi.advanceTimersByTimeAsync(10000);
+  expect(runtime.getSnapshot()).toEqual({ busy: false });
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it('does not let recovery from a retired endpoint affect a new connection', async () => {
+  vi.useFakeTimers();
+  const { runtime } = fixture();
+  const fetcher = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(Response.json(info));
+  await runtime.save('Old', 'https://old.example', 'old-token', false);
+  const old = runtime.getSnapshot().api!;
+  old.reportConnectionError(new TypeError('offline'));
+  const pending = deferred<Response>();
+  fetcher.mockReturnValueOnce(pending.promise);
+  const checking = runtime.retryConnection();
+  fetcher.mockResolvedValueOnce(Response.json(info));
+  await runtime.save('New', 'https://new.example', 'new-token', false);
+  pending.resolve(Response.json({ status: 'ok' }));
+  await checking;
+  old.reportConnectionError(new TypeError('late error'));
+  expect(runtime.getSnapshot().connection?.name).toBe('New');
+  expect(runtime.getSnapshot().connectionIssue).toBeUndefined();
+  expect(vi.getTimerCount()).toBe(0);
+});
 
 function stalledDiscovery(phase: 'headers' | 'body' | 'error body' = 'headers') {
   let signal: AbortSignal | undefined;

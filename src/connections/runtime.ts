@@ -1,5 +1,5 @@
 import { QueryClient } from '@tanstack/react-query';
-import { ApiClient, errorMessage, type Schema } from '../api/client';
+import { ApiClient, ConnectionError, errorMessage, type Schema } from '../api/client';
 import { SessionController } from '../session/controller';
 import { BrowserStorage, type Connection } from './storage';
 export interface RuntimeState {
@@ -9,6 +9,7 @@ export interface RuntimeState {
   info?: Schema['InfoResponse'];
   busy: boolean;
   error?: string;
+  connectionIssue?: 'offline' | 'checking';
 }
 export class ConnectionRuntime {
   private state: RuntimeState = { busy: false };
@@ -16,6 +17,9 @@ export class ConnectionRuntime {
   private generation = 0;
   private attempt = 0;
   private pending: { api: ApiClient; abort: AbortController; id?: string | undefined } | undefined;
+  private recoveryTimer: ReturnType<typeof setTimeout> | undefined;
+  private recoveryAbort: AbortController | undefined;
+  private recoveryPromise: Promise<void> | undefined;
   constructor(
     readonly storage: BrowserStorage,
     readonly queries: QueryClient,
@@ -33,9 +37,83 @@ export class ConnectionRuntime {
   }
   private releaseAuthority() {
     this.generation++;
+    clearTimeout(this.recoveryTimer);
+    this.recoveryTimer = undefined;
+    this.recoveryAbort?.abort();
+    this.recoveryAbort = undefined;
+    this.recoveryPromise = undefined;
     this.state.controller?.dispose();
     this.state.api?.dispose();
     this.queries.clear();
+  }
+  private connectionChanged(reachable: boolean) {
+    if (!this.state.api) return;
+    if (!reachable) {
+      if (!this.state.connectionIssue) this.publish({ ...this.state, connectionIssue: 'offline' });
+      this.scheduleRecovery();
+      return;
+    }
+    if (!this.state.connectionIssue) return;
+    clearTimeout(this.recoveryTimer);
+    this.recoveryTimer = undefined;
+    const state = { ...this.state };
+    delete state.connectionIssue;
+    this.publish(state);
+    // Revalidate reads in place. Accepted or uncertain mutations must never be repeated.
+    void this.queries.invalidateQueries();
+    this.retryFeeds(false);
+  }
+  private retryFeeds(immediate: boolean) {
+    const controller = this.state.controller;
+    if (!controller) return;
+    for (const session of controller.getSnapshot()) {
+      if (session.session?.parent_id) continue;
+      if (
+        (session.feed === 'unavailable' && session.error instanceof ConnectionError) ||
+        (immediate && session.feed === 'reconnecting')
+      )
+        void controller.reconnect(session.id).catch(() => {});
+    }
+  }
+  private scheduleRecovery() {
+    if (this.recoveryTimer || this.recoveryPromise || !this.state.connectionIssue) return;
+    this.recoveryTimer = setTimeout(() => {
+      this.recoveryTimer = undefined;
+      void this.checkConnection(false);
+    }, 5000);
+  }
+  retryConnection() {
+    return this.checkConnection(true);
+  }
+  private checkConnection(immediate: boolean): Promise<void> {
+    if (this.recoveryPromise) return this.recoveryPromise;
+    const api = this.state.api;
+    if (!api || !this.state.connectionIssue) return Promise.resolve();
+    clearTimeout(this.recoveryTimer);
+    this.recoveryTimer = undefined;
+    const generation = this.generation;
+    const abort = new AbortController();
+    this.recoveryAbort = abort;
+    this.publish({ ...this.state, connectionIssue: 'checking' });
+    this.recoveryPromise = (async () => {
+      const timeout = setTimeout(() => abort.abort(), 5000);
+      try {
+        await api.get('/v1/health/live', undefined, abort.signal);
+      } catch {
+        // The shared transport owns the warning; a probe adds no second error.
+      } finally {
+        clearTimeout(timeout);
+        if (generation === this.generation && this.state.api === api) {
+          this.recoveryAbort = undefined;
+          this.recoveryPromise = undefined;
+          if (this.state.connectionIssue) {
+            this.publish({ ...this.state, connectionIssue: 'offline' });
+            this.scheduleRecovery();
+          } else if (immediate) this.retryFeeds(true);
+        }
+      }
+    })();
+    return this.recoveryPromise;
   }
   private cancelPending() {
     this.attempt++;
@@ -149,10 +227,18 @@ export class ConnectionRuntime {
       this.publish({ busy: true });
       const connection = save();
       const generation = this.generation;
-      const api = new ApiClient(endpoint, token, () => {
-        if (generation === this.generation)
-          this.disconnect('The token was rejected. Enter a valid token to reconnect.');
-      });
+      const api = new ApiClient(
+        endpoint,
+        token,
+        () => {
+          if (generation === this.generation)
+            this.disconnect('The token was rejected. Enter a valid token to reconnect.');
+        },
+        (reachable) => {
+          if (generation === this.generation && this.state.api === api)
+            this.connectionChanged(reachable);
+        },
+      );
       const controller = new SessionController(api, info.scopes.includes('sessions:w'), () => {
         void this.queries.invalidateQueries();
       });

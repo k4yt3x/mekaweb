@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { BrowserStorage } from './storage';
+import { BrowserStorage, CONVERSATION_FONT } from './storage';
 function storage(): Storage {
   const map = new Map<string, string>();
   return {
@@ -197,4 +197,71 @@ it('bounds stored panel widths and ignores nonnumeric sizes', () => {
   adapter.refresh();
   expect(adapter.getSnapshot().layout.sessionsWidth).toBeUndefined();
   expect(adapter.getSnapshot().layout.detailsWidth).toBeUndefined();
+});
+
+it('adds a safe conversation font size to older or malformed settings', () => {
+  const local = storage();
+  for (const value of [undefined, null, '24px', false, {}, []]) {
+    local.setItem(
+      'mekaweb:v1:settings',
+      JSON.stringify({
+        version: 1,
+        connections: [],
+        conversationFontSize: value,
+      }),
+    );
+    expect(new BrowserStorage(local, storage()).getSnapshot().conversationFontSize).toBe(
+      CONVERSATION_FONT.default,
+    );
+  }
+});
+
+it('bounds and normalizes font sizes read from storage and written through settings', () => {
+  const local = storage();
+  const adapter = new BrowserStorage(local, storage());
+  for (const [input, expected] of [
+    [-100, 12],
+    [999, 24],
+    [17.6, 18],
+  ]) {
+    local.setItem(
+      'mekaweb:v1:settings',
+      JSON.stringify({
+        version: 1,
+        connections: [],
+        conversationFontSize: input,
+      }),
+    );
+    adapter.refresh();
+    expect(adapter.getSnapshot().conversationFontSize).toBe(expected);
+    adapter.conversationFontSize(input!);
+    expect(new BrowserStorage(local, storage()).getSnapshot().conversationFontSize).toBe(expected);
+  }
+  for (const invalid of [NaN, Infinity, -Infinity]) {
+    adapter.conversationFontSize(invalid);
+    expect(adapter.getSnapshot().conversationFontSize).toBe(CONVERSATION_FONT.default);
+  }
+});
+
+it('shares the font preference across tabs without losing drafts, tokens, or other preferences', () => {
+  const local = storage();
+  const first = new BrowserStorage(local, storage());
+  const connection = first.saveConnection('test', 'https://example.org', 'dummy', true);
+  const draft = first.saveDraft(connection.id, 's', 'Preserved draft');
+  const other = new BrowserStorage(local, storage());
+  first.conversationFontSize(20);
+  other.theme('dark');
+  first.showTurnContext(true);
+  other.refresh();
+  expect(other.getSnapshot()).toMatchObject({
+    conversationFontSize: 20,
+    theme: 'dark',
+    showTurnContext: true,
+    connections: [connection],
+  });
+  expect(other.draft(connection.id, 's')).toEqual(draft);
+  expect(other.token(connection)).toBe('dummy');
+  other.conversationFontSize(CONVERSATION_FONT.default);
+  first.refresh();
+  expect(first.getSnapshot().conversationFontSize).toBe(CONVERSATION_FONT.default);
 });

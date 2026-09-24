@@ -1,18 +1,22 @@
 import { useAction } from '../components/actions';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
-import { useEffect, useRef, useState, type FormEvent, type CSSProperties } from 'react';
-import { useInfiniteQuery } from '@tanstack/react-query';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+  type CSSProperties,
+} from 'react';
 import {
   ChevronLeft,
   CornerUpLeft,
-  Import,
   Ellipsis,
   Folder,
   MessageSquare,
   PanelRight,
   List,
   ListCollapse,
-  ListTree,
   X,
   RefreshCw,
   Plus,
@@ -26,7 +30,7 @@ import {
   useRuntime,
   useSettings,
 } from '../connections/context';
-import { useSessionStates } from '../session/hooks';
+import { useSessionMetadata, useSessionStates } from '../session/hooks';
 import { isSessionRunning } from '../session/controller';
 import { useParams } from '@tanstack/react-router';
 import { Button } from '../components/ui/button';
@@ -34,7 +38,9 @@ import { Dialog } from '../components/ui/dialog';
 import { Empty, ErrorNotice, Field, Json, Loading } from '../components/common';
 import { Conversation } from './conversation';
 import { SessionContext } from './session-context';
-import { SessionListItem } from './session-list-item';
+import { SessionList } from './session-list';
+import { SessionMetadataItems, SessionRenameDialog } from './session-metadata';
+import { SessionHeading } from './session-heading';
 import { SessionForm } from './session-settings';
 import { SchedulesPage } from './schedules';
 import { NavigationToggle } from '../components/layout';
@@ -45,7 +51,6 @@ export function SessionsPage({ id }: { id?: string | undefined }) {
   const runtime = useRuntime();
   const canRead = useCan('sessions:r');
   const canWrite = useCan('sessions:w');
-  const [children, setChildren] = useState(false);
   const [create, setCreate] = useState(false);
   const [mobileDetails, setMobileDetails] = useState(false);
   const { layout } = useSettings();
@@ -101,23 +106,18 @@ export function SessionsPage({ id }: { id?: string | undefined }) {
   const action = useAction();
   const sessions = useSessionStates();
   const selected = sessions.find((s) => s.id === id);
-  const selectedRunning = selected ? isSessionRunning(selected) : false;
-  const list = useInfiniteQuery({
-    queryKey: [state.connection?.id, state.connection?.authority, 'session-list', children],
-    initialPageParam: undefined as string | undefined,
-    queryFn: ({ pageParam, signal }) => {
-      if (!state.api) throw new Error('Connect first.');
-      return state.api.get<Schema['ListSessionsResponse']>(
-        '/v1/sessions',
-        { limit: 40, include_children: children, cursor: pageParam },
-        signal,
+  useSessionMetadata(id, canRead && Boolean(selected?.session));
+  const headingKey = `${state.connection?.id}:${state.connection?.authority}:${id}`;
+  const [headingError, setHeadingError] = useState<{ key: string; error: unknown }>();
+  const reportHeadingError = useCallback(
+    (error: unknown) => {
+      setHeadingError((previous) =>
+        error ? { key: headingKey, error } : previous?.key === headingKey ? undefined : previous,
       );
     },
-    getNextPageParam: (page) => page.next_cursor ?? undefined,
-    enabled: Boolean(state.api) && canRead,
-    refetchInterval: 15000,
-    retry: false,
-  });
+    [headingKey],
+  );
+  const selectedRunning = selected ? isSessionRunning(selected) : false;
   useEffect(() => {
     if (canRead) state.controller?.select(id);
     return () => state.controller?.select(undefined);
@@ -128,7 +128,6 @@ export function SessionsPage({ id }: { id?: string | undefined }) {
         This token needs sessions:r to view sessions.
       </Empty>
     );
-  const items = list.data?.pages.flatMap((page) => page.sessions) ?? [];
   return (
     <div
       ref={workspace}
@@ -141,87 +140,11 @@ export function SessionsPage({ id }: { id?: string | undefined }) {
       className={`sessions-workspace ${id ? 'has-session' : ''} ${listCollapsed ? 'sessions-collapsed' : ''} ${desktop && details && selected?.session ? 'details-open' : ''}`}
     >
       <aside id="session-list" className="session-list" aria-label="Session list">
-        <header>
-          <h2>Sessions</h2>
-          <div className="session-list-actions">
-            <Button
-              variant={children ? 'secondary' : 'ghost'}
-              size="icon"
-              aria-label="Show sub-agents"
-              aria-pressed={children}
-              title={children ? 'Hide sub-agents' : 'Show sub-agents'}
-              onClick={() => setChildren(!children)}
-            >
-              <ListTree size={17} />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label="New session"
-              disabled={!canWrite}
-              onClick={() => setCreate(true)}
-            >
-              <Plus size={18} />
-            </Button>
-          </div>
-        </header>
-        <div className="session-items">
-          <ErrorNotice error={list.error} />
-          {list.isPending && <Loading />}
-          {items.map((item) => (
-            <SessionListItem
-              key={`${state.connection?.id}:${state.connection?.authority}:${item.id}`}
-              session={item}
-              selected={item.id === id}
-              running={
-                item.turn_in_flight || sessions.some((s) => s.id === item.id && isSessionRunning(s))
-              }
-            />
-          ))}
-          {!list.isPending && items.length === 0 && (
-            <p className="muted list-empty">No sessions yet.</p>
-          )}
-          {list.hasNextPage && (
-            <Button
-              variant="ghost"
-              disabled={list.isFetchingNextPage}
-              onClick={() => void list.fetchNextPage()}
-            >
-              Load more sessions
-            </Button>
-          )}
-        </div>
-        <div className="list-footer">
-          <label className={`button button-ghost ${!canWrite ? 'disabled' : ''}`}>
-            <Import size={14} />
-            Import archive
-            <input
-              className="sr-only"
-              type="file"
-              accept="application/json,.json"
-              disabled={!canWrite || action.busy}
-              onChange={(event) => {
-                const file = event.target.files?.[0];
-                if (file)
-                  void action.run(async () => {
-                    if (file.size > 25 * 1024 * 1024)
-                      throw new Error('This archive exceeds the browser import limit of 25 MiB.');
-                    const body: unknown = JSON.parse(await file.text());
-                    const result = await state.api?.mutate<Schema['ImportResponse']>(
-                      'POST',
-                      '/v1/sessions/import',
-                      body,
-                    );
-                    if (result) {
-                      await runtime.queries.invalidateQueries();
-                      location.hash = '/sessions/' + result.session_id;
-                    }
-                  });
-                event.target.value = '';
-              }}
-            />
-          </label>
-        </div>
+        <SessionList
+          key={`${state.connection?.id}:${state.connection?.authority}`}
+          selectedId={id}
+          onCreate={() => setCreate(true)}
+        />
         {desktop && (
           <PanelResizeHandle
             side="sessions"
@@ -263,7 +186,16 @@ export function SessionsPage({ id }: { id?: string | undefined }) {
             )}
             {id && (
               <div className="session-title">
-                <h1>{selected?.session?.title || 'New conversation'}</h1>
+                {selected?.session ? (
+                  <SessionHeading
+                    key={headingKey}
+                    session={selected.session}
+                    disabled={selected.deleting || selected.settingsPending}
+                    onError={reportHeadingError}
+                  />
+                ) : (
+                  <h1>New conversation</h1>
+                )}
                 <p>
                   {selected?.session?.parent_id ? (
                     <a
@@ -321,6 +253,9 @@ export function SessionsPage({ id }: { id?: string | undefined }) {
           </header>
         )}
         <ErrorNotice error={action.error} />
+        <div id="session-title-error">
+          <ErrorNotice error={headingError?.key === headingKey ? headingError.error : undefined} />
+        </div>
         {!id ? (
           <div className="session-welcome">
             <div className="empty-icon">
@@ -339,7 +274,7 @@ export function SessionsPage({ id }: { id?: string | undefined }) {
           />
         ) : (
           <div className="page">
-            {selected?.error ? (
+            {state.connectionIssue ? null : selected?.error ? (
               <Button
                 variant="secondary"
                 onClick={() => void action.run(async () => state.controller?.reconnect(id))}
@@ -349,7 +284,7 @@ export function SessionsPage({ id }: { id?: string | undefined }) {
             ) : (
               <Loading label="Opening session…" />
             )}
-            <ErrorNotice error={selected?.error ? new Error(selected.error) : undefined} />
+            <ErrorNotice error={selected?.error} />
           </div>
         )}
       </section>
@@ -452,6 +387,15 @@ function SessionActions({
       closeAction();
     });
   }
+  async function togglePin() {
+    const result = await action.run(async () =>
+      controller?.patchSettings(session.id, { pinned: !session.pinned_at }),
+    );
+    if (!result && runtime.getSnapshot().controller === controller) {
+      dialogIntent.current = 'pin';
+      setDialog('pin');
+    }
+  }
   async function execute(event: FormEvent) {
     event.preventDefault();
     await action.run(async () => {
@@ -520,6 +464,12 @@ function SessionActions({
               if (dialogIntent.current) event.preventDefault();
             }}
           >
+            <SessionMetadataItems
+              session={session}
+              disabled={action.busy || deleting}
+              onRename={() => openAction('rename')}
+              onPin={() => void togglePin()}
+            />
             <DropdownMenu.Item
               className="menu-item"
               disabled={!canWrite || running}
@@ -568,30 +518,37 @@ function SessionActions({
           </DropdownMenu.Content>
         </DropdownMenu.Portal>
       </DropdownMenu.Root>
+      {dialog === 'rename' && (
+        <SessionRenameDialog session={session} onClose={closeAction} trigger={trigger} />
+      )}
       <Dialog
-        open={Boolean(dialog)}
+        open={Boolean(dialog) && dialog !== 'rename'}
         onOpenChange={(open) => {
           if (!open) closeAction();
         }}
         title={
-          dialog === 'fork'
-            ? 'Fork session'
-            : dialog === 'compact'
-              ? 'Compact context'
-              : dialog === 'delete'
-                ? 'Delete session'
-                : dialog === 'export'
-                  ? 'Export session'
-                  : dialog === 'tools'
-                    ? 'Available tools'
-                    : 'Rewind conversation'
+          dialog === 'pin'
+            ? 'Could not update pin'
+            : dialog === 'fork'
+              ? 'Fork session'
+              : dialog === 'compact'
+                ? 'Compact context'
+                : dialog === 'delete'
+                  ? 'Delete session'
+                  : dialog === 'export'
+                    ? 'Export session'
+                    : dialog === 'tools'
+                      ? 'Available tools'
+                      : 'Rewind conversation'
         }
         onCloseAutoFocus={(event) => {
           event.preventDefault();
           if (document.activeElement === document.body) trigger.current?.focus();
         }}
       >
-        {dialog === 'tools' ? (
+        {dialog === 'pin' ? (
+          <ErrorNotice error={action.error} />
+        ) : dialog === 'tools' ? (
           <SessionTools sessionId={session.id} />
         ) : dialog === 'export' ? (
           <>

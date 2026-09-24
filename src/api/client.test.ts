@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   ApiClient,
   ApiError,
+  ConnectionError,
   normalizeEndpoint,
   pause,
   retryDelay,
@@ -9,6 +10,125 @@ import {
 } from './client';
 
 describe('authenticated transport', () => {
+  it('reports one connection outage across failed reads and recovers on a fresh response', async () => {
+    vi.useFakeTimers();
+    try {
+      const report = vi.fn();
+      const client = new ApiClient('https://example.org', 'dummy', undefined, report);
+      const fetcher = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new TypeError('offline'));
+      const reads = Promise.allSettled([client.get('/v1/profiles'), client.get('/v1/memory')]);
+      await vi.runAllTimersAsync();
+      for (const result of await reads) {
+        expect(result.status).toBe('rejected');
+        if (result.status === 'rejected') {
+          expect(result.reason).toBeInstanceOf(ConnectionError);
+          expect(result.reason.reportedGlobally).toBe(true);
+        }
+      }
+      expect(report).toHaveBeenCalledExactlyOnceWith(false);
+      expect(fetcher).toHaveBeenCalledTimes(6);
+      fetcher.mockResolvedValueOnce(Response.json({ status: 'ok' }));
+      await client.get('/v1/health/live');
+      expect(report.mock.calls).toEqual([[false], [true]]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each(['get', 'blob', 'mutation'] as const)(
+    'classifies a dropped %s body without retrying the operation',
+    async (kind) => {
+      const report = vi.fn();
+      const client = new ApiClient('https://example.org', 'dummy', undefined, report);
+      const fetcher = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.error(new TypeError('body connection lost'));
+            },
+          }),
+        ),
+      );
+      const request =
+        kind === 'mutation'
+          ? client.mutate('POST', '/v1/sessions', {})
+          : kind === 'blob'
+            ? client.blob('/v1/sessions/s/export')
+            : client.get('/v1/info');
+      const error = await request.catch((error: unknown) => error);
+      if (kind === 'mutation') {
+        expect(error).toBeInstanceOf(UncertainMutationError);
+        expect((error as Error).cause).toBeInstanceOf(ConnectionError);
+      } else expect(error).toBeInstanceOf(ConnectionError);
+      expect(report).toHaveBeenCalledExactlyOnceWith(false);
+      expect(fetcher).toHaveBeenCalledOnce();
+    },
+  );
+
+  it('does not clear a newer outage with an old buffered response', async () => {
+    const report = vi.fn();
+    const client = new ApiClient('https://example.org', 'dummy', undefined, report);
+    let body!: ReadableStreamDefaultController<Uint8Array>;
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              body = controller;
+            },
+          }),
+        ),
+      )
+      .mockRejectedValueOnce(new TypeError('offline'))
+      .mockResolvedValueOnce(Response.json({ status: 'ok' }));
+    const old = client.get('/v1/info');
+    await expect(client.mutate('POST', '/v1/sessions', {})).rejects.toBeInstanceOf(
+      UncertainMutationError,
+    );
+    body.enqueue(new TextEncoder().encode('{}'));
+    body.close();
+    await old;
+    expect(report.mock.calls).toEqual([[false]]);
+    await client.get('/v1/health/live');
+    expect(report.mock.calls).toEqual([[false], [true]]);
+  });
+
+  it('reports a late dropped body even when another request succeeded earlier', async () => {
+    const report = vi.fn();
+    const client = new ApiClient('https://example.org', 'dummy', undefined, report);
+    let body!: ReadableStreamDefaultController<Uint8Array>;
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              body = controller;
+            },
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(Response.json({ status: 'ok' }));
+    const downloading = client.blob('/v1/sessions/s/export');
+    const failure = expect(downloading).rejects.toBeInstanceOf(ConnectionError);
+    await client.get('/v1/health/live');
+    body.error(new TypeError('connection lost during download'));
+    await failure;
+    expect(report.mock.calls).toEqual([[false]]);
+  });
+
+  it('keeps malformed JSON and API refusals distinct from transport failures', async () => {
+    const report = vi.fn();
+    const client = new ApiClient('https://example.org', 'dummy', undefined, report);
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response('not JSON'))
+      .mockResolvedValueOnce(Response.json({ detail: 'Invalid path' }, { status: 422 }));
+    await expect(client.get('/v1/info')).rejects.toBeInstanceOf(SyntaxError);
+    await expect(client.get('/v1/sessions/s')).rejects.toBeInstanceOf(ApiError);
+    expect(report).not.toHaveBeenCalled();
+    client.dispose();
+    client.reportConnectionError(new TypeError('late failure'));
+    expect(report).not.toHaveBeenCalled();
+  });
   it.each(['https://meka.run/errors/', 'https://meka.so/errors/'])(
     'recognizes exact meka Problem Details identifiers under %s',
     (prefix) => {

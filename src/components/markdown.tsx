@@ -7,6 +7,7 @@ import {
   type ReactElement,
 } from 'react';
 import ReactMarkdown from 'react-markdown';
+import { useQuery } from '@tanstack/react-query';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
@@ -16,6 +17,7 @@ import { CopyButton, ErrorNotice } from './common';
 import { Button } from './ui/button';
 import { Dialog } from './ui/dialog';
 import { Diagram } from './diagram';
+import { useBlobUrl } from './blob-url';
 import { scrollRegion } from './scrolling';
 import {
   normalizeMathDelimiters,
@@ -232,39 +234,23 @@ export function Attachment({
   hash?: string | null | undefined;
   mediaType: string;
 }) {
-  const { api } = useConnection();
+  const { api, connection } = useConnection();
   const [open, setOpen] = useState(false);
-  const [image, setImage] = useState<{
-    api: ApiClient;
-    sessionId: string;
-    hash: string;
-    url?: string;
-    error?: unknown;
-  }>();
-  const current =
-    image && image.api === api && image.sessionId === sessionId && image.hash === hash
-      ? image
-      : undefined;
-  useEffect(() => {
-    if (!api || !hash) return;
-    const abort = new AbortController();
-    let url = '';
-    void imageBlob(api, sessionId, hash, abort.signal)
-      .then((blob) => {
-        if (abort.signal.aborted) return;
-        url = URL.createObjectURL(blob);
-        setImage({ api, sessionId, hash, url });
-      })
-      .catch((error) => {
-        if (!abort.signal.aborted) setImage({ api, sessionId, hash, error });
-      });
-    return () => {
-      abort.abort();
-      if (url) URL.revokeObjectURL(url);
-    };
-  }, [api, sessionId, hash]);
-  if (current?.error) return <ErrorNotice error={current.error} />;
-  if (!current?.url)
+  const image = useQuery({
+    queryKey: [connection?.id, connection?.authority, 'attachment', sessionId, hash],
+    queryFn: ({ signal }) => {
+      if (!api || !hash) throw new Error('This image is unavailable.');
+      return imageBlob(api, sessionId, hash, signal);
+    },
+    enabled: Boolean(api && hash),
+    // Revalidate failed reads on recovery without downloading immutable images again.
+    staleTime: (query) => (query.state.data ? 'static' : Infinity),
+    gcTime: 0,
+    retry: false,
+  });
+  const url = useBlobUrl(image.data);
+  if (!image.data && image.error) return <ErrorNotice error={image.error} />;
+  if (!url)
     return (
       <p className="muted small">{hash ? 'Loading image…' : 'Image bytes are unavailable.'}</p>
     );
@@ -276,13 +262,13 @@ export function Attachment({
         aria-label="View image"
         onClick={() => setOpen(true)}
       >
-        <img src={current.url} alt="Conversation attachment" loading="lazy" />
+        <img src={url} alt="Conversation attachment" loading="lazy" />
       </button>
       <Dialog open={open} onOpenChange={setOpen} title="Image" wide>
-        <img className="image-preview" src={current.url} alt="Full-size conversation attachment" />
+        <img className="image-preview" src={url} alt="Full-size conversation attachment" />
         <div className="actions">
           <Button asChild variant="secondary">
-            <a href={current.url} download={`attachment.${mediaType.split('/')[1] ?? 'bin'}`}>
+            <a href={url} download={`attachment.${mediaType.split('/')[1] ?? 'bin'}`}>
               Download image
             </a>
           </Button>

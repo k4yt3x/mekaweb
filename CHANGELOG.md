@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-24
+
+### Added
+
+- Rename sessions from their heading or list, and pin favorites, on meka 0.64.0 or newer.
+- Search session titles and conversations, with matching excerpts in the session list.
+- Adjust conversation font size in Settings → Appearance.
+- Show primary arguments beside tool names in collapsed calls.
+
+### Changed
+
+- Update API support through meka 0.64.0, including inbox items without a source label.
+- Start the composer at two lines while keeping it expandable for longer drafts.
+- Show one connection-loss banner, with automatic recovery and a Retry button.
+
+### Fixed
+
+- Refresh session headings after the first message without reloading the page.
+
 ## [0.2.0] - 2026-09-23
 
 ### Added
@@ -49,6 +68,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Light and dark themes, narrow layouts, and collapsible, resizable session panels.
 - Hosting at the root or a subpath, with GitHub Pages deployment on version tags.
 
-[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.2.0...HEAD
+[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.3.0...HEAD
+[0.3.0]: https://github.com/k4yt3x/mekaweb/compare/0.2.0...0.3.0
 [0.2.0]: https://github.com/k4yt3x/mekaweb/compare/0.1.0...0.2.0
 [0.1.0]: https://github.com/k4yt3x/mekaweb/releases/tag/0.1.0

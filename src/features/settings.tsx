@@ -3,13 +3,13 @@ import { useRef, useState, type FormEvent } from 'react';
 import { ArrowRight, Plus, Unplug, KeyRound } from 'lucide-react';
 import { useConnection, useResource, useRuntime, useSettings } from '../connections/context';
 import type { Connection } from '../connections/storage';
+import { CONVERSATION_FONT } from '../connections/storage';
 import { download, normalizeEndpoint, type Schema } from '../api/client';
 import { Button } from '../components/ui/button';
 import { Dialog } from '../components/ui/dialog';
 import { ConfirmButton, ErrorNotice, Field, Json, Loading } from '../components/common';
 import { MekawebLink } from '../components/layout';
-
-const supportedVersions = ['0.59.0', '0.60.0'];
+import { supportedVersions } from '../api/version';
 
 export function ConnectionForm({
   existing,
@@ -184,7 +184,9 @@ export function SettingsPage() {
           <div className="setting-row" key={c.id}>
             <div>
               <strong>{c.name}</strong>
-              {state.connection?.id === c.id && <span className="badge">Connected</span>}
+              {state.connection?.id === c.id && (
+                <span className="badge">{state.connectionIssue ? 'Active' : 'Connected'}</span>
+              )}
               <p className="muted small break">{c.endpoint}</p>
               <small className="muted">
                 Token storage:{' '}
@@ -226,18 +228,38 @@ export function SettingsPage() {
       </section>
       <section className="panel">
         <h2>Appearance</h2>
-        <Field label="Color theme">
-          <select
-            value={settings.theme}
-            onChange={(event) =>
-              runtime.storage.theme(event.target.value as 'system' | 'light' | 'dark')
-            }
-          >
-            <option value="system">System</option>
-            <option value="light">Light</option>
-            <option value="dark">Dark</option>
-          </select>
-        </Field>
+        <div className="form-grid">
+          <Field label="Color theme">
+            <select
+              value={settings.theme}
+              onChange={(event) =>
+                runtime.storage.theme(event.target.value as 'system' | 'light' | 'dark')
+              }
+            >
+              <option value="system">System</option>
+              <option value="light">Light</option>
+              <option value="dark">Dark</option>
+            </select>
+          </Field>
+          <Field label="Conversation font size">
+            <select
+              value={settings.conversationFontSize}
+              onChange={(event) => runtime.storage.conversationFontSize(Number(event.target.value))}
+            >
+              {Array.from(
+                { length: CONVERSATION_FONT.max - CONVERSATION_FONT.min + 1 },
+                (_, index) => {
+                  const size = CONVERSATION_FONT.min + index;
+                  return (
+                    <option key={size} value={size}>
+                      {size} px{size === CONVERSATION_FONT.default ? ' (default)' : ''}
+                    </option>
+                  );
+                },
+              )}
+            </select>
+          </Field>
+        </div>
       </section>
       <section className="panel">
         <h2>Diagnostics</h2>

@@ -2,7 +2,7 @@
 
 A web interface for [meka](https://github.com/k4yt3x/meka). Chat with your agent, answer tool approvals, and manage sessions, memory, skills, schedules, and MCP servers from your browser.
 
-mekaweb is a static application that connects directly to your meka server. It does not require a separate application server or user account. The supported API versions are **meka 0.59.0 and 0.60.0**. See the [changelog](CHANGELOG.md) for release history.
+mekaweb is a static application that connects directly to your meka server. It does not require a separate application server or user account. The supported API versions are **meka 0.59.0–0.64.0**. See the [changelog](CHANGELOG.md) for release history.
 
 ## Getting started
 
@@ -31,7 +31,7 @@ scopes = [
 ]
 ```
 
-Set `MEKA_WEB_TOKEN` to your API token in the server's environment, then start or restart `meka serve`. You can keep an existing token entry instead; see meka's [token configuration](https://github.com/k4yt3x/meka/blob/0.60.0/docs/book/src/usage/http-api.md#token-configuration) for file-based tokens and scope options.
+Set `MEKA_WEB_TOKEN` to your API token in the server's environment, then start or restart `meka serve`. You can keep an existing token entry instead; see meka's [token configuration](https://github.com/k4yt3x/meka/blob/0.64.0/docs/book/src/usage/http-api.md#token-configuration) for file-based tokens and scope options.
 
 Enter that token and the appropriate **Meka base URL** in the web UI:
 
@@ -80,24 +80,28 @@ The interface has been checked in Chromium and Firefox, including narrow layouts
 
 ## Using mekaweb
 
-- **Messages:** Enter sends; Shift+Enter adds a newline. Drag the composer’s top grip upward for longer drafts, or focus it and use arrow keys. Its height resets after a successful send. When idle, a message starts a direct streaming turn. While the agent works, messages use Steer by default; choose Queue or Interrupt in the composer's Settings. When a turn is running and the input is empty, Send becomes a red Stop button for that turn.
+- **Messages:** Enter sends; Shift+Enter adds a newline. The composer starts at two lines. Drag its top grip upward for longer drafts, or focus it and use arrow keys. Its height resets after a successful send. When idle, a message starts a direct streaming turn. While the agent works, messages use Steer by default; choose Queue or Interrupt in the composer's Settings. When a turn is running and the input is empty, Send becomes a red Stop button for that turn.
+- **Text size:** Adjust conversation text under **Settings → Appearance → Conversation font size**. The preference is saved in your browser and applies to messages and their contents; navigation and composer controls retain their sizes.
 - **Permissions:** Change permission mode directly beside Send, or press Shift+Tab in the message input to cycle through enabled modes. Select the profile beside permissions while the session is idle. Settings contains approval mode, working directory, skills, and delivery options. Images and skills can be sent while the session is idle.
 - **Approvals:** Pending tool approvals remain visible when you move to another screen.
 - **Workspace:** Collapse the navigation or session list to focus on a conversation. The details panel stays open until closed. Drag a panel divider to resize it, or use arrow keys when the divider has keyboard focus. Double-click resets its width.
-- **Sessions:** The session menu offers fork, compact, rewind, export, and delete. Import accepts a meka JSON archive. Session-row deletion asks for confirmation; **Shift-click deletes immediately**, including sub-agent sessions.
+- **Session titles:** Click the conversation heading to rename it. Enter, the checkmark, or clicking away saves; Escape or the cancel button discards the edit. Clearing the title restores the first-message label.
+- **Sessions:** Search conversations from the session list. On meka 0.64.0 or newer, hover over a session or focus its row to reveal Rename, Pin, and Delete. These buttons stay visible in narrow and touch layouts, beside the title when space permits. Pins stay at the top of the list and are saved on the server. Use **Use first message** in Rename to reset a title. The session menu also offers fork, compact, rewind, export, and delete. Import accepts a meka JSON archive. Session-row deletion asks for confirmation; **Shift-click deletes immediately**, including sub-agent sessions.
 - **History:** The conversation shows meka's current model context. Compaction and rewind can replace it. Export the full transcript when you need earlier history.
 
 New sessions stream thinking when the provider supplies it. Injected context is hidden by default; enable **Show context added by meka** under **Settings → Diagnostics** to inspect it.
 
 Withdraw and delivery-recovery controls appear inside their messages. If a submission has an uncertain outcome, inspect saved state before sending again. Use **Retry same submission** when offered for an inbox message; streaming direct turns cannot be safely retried automatically.
 
-The interface supports Markdown tables, code highlighting and copying, math, diagrams, and authenticated image attachments. See [API support](docs/api-coverage.md) for available operations and backend limitations.
+The interface supports Markdown tables, code highlighting and copying, math, diagrams, and authenticated image attachments. Collapsed tool calls show their primary argument when available; expand a call to inspect its full arguments and result. See [API support](docs/api-coverage.md) for available operations and backend limitations.
 
 ## Connections and local data
 
 New connections default to **Local storage (persistent)**, which uses `localStorage` to keep the API token across browser restarts. Choose **Session storage (this tab)** in the **Token storage** selector to use `sessionStorage` for the current tab's session instead. Existing connections retain their saved choice. Use persistent storage only on a trusted browser profile and hosting origin.
 
 Connection settings, appearance, layout, and text drafts are saved in browser storage. File attachments are kept in memory and are lost on reload. Clearing browser data removes local settings and drafts, but does not delete server sessions.
+
+If the active endpoint becomes unreachable, one banner appears above the workspace. Mekaweb checks for recovery automatically; **Retry** checks immediately. Recovery preserves your open view and drafts and does not repeat submissions. Warnings about uncertain actions remain with those actions.
 
 Forgetting or replacing a token disconnects open tabs that used it. Forgetting a token does not revoke it on the server. Removing a connection, or replacing its endpoint URL, also removes that connection's local drafts. Provider credentials remain on the meka server. Disconnecting does not necessarily stop accepted work; use Stop first if you want to cancel the current turn.
 

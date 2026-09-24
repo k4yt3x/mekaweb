@@ -3,6 +3,13 @@ import { createId } from '../identifiers';
 
 const PREFIX = 'mekaweb:v1:';
 const SETTINGS = PREFIX + 'settings';
+export const CONVERSATION_FONT = { min: 12, max: 24, default: 14 } as const;
+
+function normalizeConversationFontSize(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value)
+    ? Math.round(Math.max(CONVERSATION_FONT.min, Math.min(CONVERSATION_FONT.max, value)))
+    : CONVERSATION_FONT.default;
+}
 export interface Connection {
   id: string;
   name: string;
@@ -15,6 +22,7 @@ export interface Settings {
   connections: Connection[];
   lastConnection?: string;
   theme: 'system' | 'light' | 'dark';
+  conversationFontSize: number;
   showTurnContext: boolean;
   layout: LayoutPreferences;
 }
@@ -35,6 +43,7 @@ const defaults = (): Settings => ({
   version: 1,
   connections: [],
   theme: 'system',
+  conversationFontSize: CONVERSATION_FONT.default,
   showTurnContext: false,
   layout: { navigationCollapsed: false, sessionsCollapsed: false, detailsOpen: false },
 });
@@ -117,6 +126,7 @@ export class BrowserStorage {
       version: 1,
       connections: value.connections.filter(connection).slice(0, 40),
       theme: value.theme === 'light' || value.theme === 'dark' ? value.theme : 'system',
+      conversationFontSize: normalizeConversationFontSize(value.conversationFontSize),
       showTurnContext: value.showTurnContext === true,
       layout: {
         navigationCollapsed: object(value.layout) && value.layout.navigationCollapsed === true,
@@ -275,6 +285,12 @@ export class BrowserStorage {
   }
   theme(theme: Settings['theme']) {
     this.save({ ...this.readSettings(), theme });
+  }
+  conversationFontSize(value: number) {
+    this.save({
+      ...this.readSettings(),
+      conversationFontSize: normalizeConversationFontSize(value),
+    });
   }
   showTurnContext(showTurnContext: boolean) {
     this.save({ ...this.readSettings(), showTurnContext });

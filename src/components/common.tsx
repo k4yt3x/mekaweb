@@ -8,12 +8,13 @@ import {
   type ReactNode,
 } from 'react';
 import { AlertCircle, Check, Copy, LoaderCircle } from 'lucide-react';
-import { errorMessage } from '../api/client';
+import { ConnectionError, errorMessage } from '../api/client';
 import { Button } from './ui/button';
 import { Dialog } from './ui/dialog';
 import { copyText } from './clipboard';
 import { scrollRegion } from './scrolling';
 export function ErrorNotice({ error }: { error: unknown }) {
+  if (error instanceof ConnectionError && error.reportedGlobally) return null;
   return error ? (
     <div className="notice error" role="alert">
       <AlertCircle size={17} />
