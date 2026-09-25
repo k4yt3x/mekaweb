@@ -1837,10 +1837,41 @@ progress::-moz-progress-bar {
 }
 .agent-waiting-status[data-status='working'] {
   color: #8a8a8a;
-  margin-inline-start: 16px;
+  min-height: 20px;
 }
 .dark .agent-waiting-status[data-status='working'] {
   color: #808080;
+}
+.agent-working-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.agent-working-dots > span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.65;
+  animation: agent-dot-pulse 1.2s ease-in-out infinite;
+}
+.agent-working-dots > span:nth-child(2) {
+  animation-delay: 0.16s;
+}
+.agent-working-dots > span:nth-child(3) {
+  animation-delay: 0.32s;
+}
+@keyframes agent-dot-pulse {
+  0%,
+  60%,
+  100% {
+    opacity: 0.35;
+    transform: translateY(0);
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
 }
 .conversation-notice {
   margin-block: 20px;

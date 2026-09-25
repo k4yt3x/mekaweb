@@ -357,7 +357,7 @@ function AgentActivity({
 }) {
   const Icon = status === 'approval' ? ShieldCheck : status === 'disconnected' ? Unplug : undefined;
   const label = {
-    working: 'Working...',
+    working: 'Agent is working',
     approval: 'Waiting for approval',
     connecting: 'Connecting…',
     reconnecting: 'Reconnecting…',
@@ -365,8 +365,21 @@ function AgentActivity({
   }[status];
   return (
     <p className="agent-waiting-status" data-status={status} role="status">
-      {Icon && <Icon size={16} aria-hidden="true" />}
-      {label}
+      {status === 'working' ? (
+        <>
+          <span className="agent-working-dots" aria-hidden="true">
+            <span />
+            <span />
+            <span />
+          </span>
+          <span className="sr-only">{label}</span>
+        </>
+      ) : (
+        <>
+          {Icon && <Icon size={16} aria-hidden="true" />}
+          {label}
+        </>
+      )}
     </p>
   );
 }
