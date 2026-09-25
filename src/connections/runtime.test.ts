@@ -42,6 +42,7 @@ it('cancels an in-progress credential edit when that connection is forgotten', a
 function fixture() {
   const storage = new BrowserStorage(undefined, undefined);
   const runtime = new ConnectionRuntime(storage, new QueryClient());
+  vi.spyOn(runtime.notifications, 'start').mockReturnValue({ opened: false, stop: () => {} });
   runtimes.push(runtime);
   return { runtime, storage };
 }

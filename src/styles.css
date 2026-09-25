@@ -156,12 +156,6 @@ textarea {
   min-height: 90px;
   line-height: 1.65;
 }
-input[type='checkbox'] {
-  accent-color: var(--accent);
-  width: 16px;
-  height: 16px;
-  flex-shrink: 0;
-}
 fieldset {
   border: 0;
   padding: 0;
@@ -635,6 +629,236 @@ nav a.active {
 .appearance-panel {
   container-type: inline-size;
 }
+.notification-settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.switch-field {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 36px;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  cursor: pointer;
+}
+.switch-field:has(:disabled) {
+  color: var(--muted);
+  cursor: not-allowed;
+}
+.switch-field > span {
+  min-width: 0;
+}
+.checkbox {
+  display: inline-flex;
+  position: relative;
+  width: 1em;
+  height: 1em;
+  flex-shrink: 0;
+  vertical-align: -0.125em;
+}
+.checkbox-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.checkbox-input:disabled {
+  cursor: default;
+}
+.checkbox-control {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  border: 1px solid var(--muted);
+  border-radius: 3px;
+  background: var(--bg);
+  pointer-events: none;
+}
+.checkbox-control svg {
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+}
+.checkbox-input:checked + .checkbox-control {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--bg);
+}
+.checkbox-input:checked + .checkbox-control svg {
+  opacity: 1;
+}
+:root:not([data-focus-input='pointer']) .checkbox:has(:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+@media (forced-colors: active) {
+  .checkbox-control {
+    forced-color-adjust: none;
+    border-color: CanvasText;
+    background: Canvas;
+  }
+  .checkbox-input:checked + .checkbox-control {
+    border-color: Highlight;
+    background: Highlight;
+    color: HighlightText;
+  }
+  .checkbox:has(:focus-visible) {
+    outline-color: Highlight;
+  }
+}
+.switch {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  width: 38px;
+  height: 22px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--border);
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease;
+}
+.switch-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--text);
+  box-shadow: 0 1px 2px #0003;
+  transition:
+    transform 140ms ease,
+    background-color 140ms ease;
+}
+.switch[aria-checked='true'] {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+.switch[aria-checked='true'] .switch-thumb {
+  transform: translateX(16px);
+  background: var(--bg);
+}
+@media (forced-colors: active) {
+  .switch {
+    forced-color-adjust: none;
+    border-color: ButtonText;
+    background: Canvas;
+  }
+  .switch-thumb {
+    background: ButtonText;
+    box-shadow: none;
+  }
+  .switch[aria-checked='true'] {
+    border-color: Highlight;
+    background: Highlight;
+  }
+  .switch[aria-checked='true'] .switch-thumb {
+    background: HighlightText;
+  }
+  .switch:disabled {
+    border-color: GrayText;
+  }
+}
+.notification-description {
+  margin-top: 10px;
+  font-size: 0.8rem;
+}
+.notification-settings-row ~ .notification-settings-row {
+  margin-top: 14px;
+}
+.notification-toasts {
+  position: fixed;
+  top: calc(var(--connection-banner-height, 0px) + 76px);
+  right: 16px;
+  z-index: 80;
+  display: grid;
+  gap: 10px;
+  width: min(360px, calc(100vw - 32px));
+  pointer-events: none;
+}
+.notification-toast {
+  display: flex;
+  align-items: flex-start;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--raised);
+  color: var(--text);
+  box-shadow: var(--shadow);
+  pointer-events: auto;
+  animation: notification-appear 160ms ease-out;
+}
+.notification-toast-open {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  padding: 14px 4px 14px 14px;
+  text-align: start;
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+.notification-toast-open > svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: var(--muted);
+}
+.notification-toast[data-outcome='failed'] .notification-toast-open > svg {
+  color: var(--danger);
+}
+.notification-toast-open > span {
+  min-width: 0;
+}
+.notification-toast-open strong {
+  font-weight: 600;
+}
+.notification-toast-title {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  margin-top: 2px;
+}
+.notification-toast-close {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  margin: 7px 7px 0 0;
+  border-radius: 6px;
+  color: var(--muted);
+}
+.notification-toast-close:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+@keyframes notification-appear {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@media (max-width: 760px) {
+  .notification-toasts {
+    top: calc(var(--connection-banner-height, 0px) + 64px);
+    right: 50%;
+    transform: translateX(50%);
+  }
+}
 .appearance-fields {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 220px;
@@ -687,14 +911,6 @@ nav a.active {
   color: var(--muted);
   line-height: 1.55;
   font-size: 0.7rem;
-}
-.check {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  font-size: 0.78rem;
-  line-height: 1.5;
-  margin: 4px 0;
 }
 .form-stack > .actions {
   justify-content: flex-end;
@@ -2673,9 +2889,8 @@ select option {
   list-style: none;
   padding-left: 0;
 }
-.markdown .task-list-item > input {
-  margin-right: 8px;
-  vertical-align: middle;
+.markdown .task-list-item .checkbox {
+  margin-right: 0.4em;
 }
 .markdown .task-list-item > p {
   display: inline;

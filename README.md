@@ -96,6 +96,14 @@ Withdraw and delivery-recovery controls appear inside their messages. If a submi
 
 The interface supports Markdown tables, code highlighting and copying, math, diagrams, and authenticated image attachments. Collapsed tool calls show their primary argument when available; expand a call to inspect its full arguments and result. See [API support](docs/api-coverage.md) for available operations and backend limitations.
 
+Completion alerts are configured under **Settings → Notifications**, with a **Test** button for each option:
+
+- **Browser notifications** are optional and appear when mekaweb is in the background. They require HTTPS (or localhost), browser permission, and a supported browser.
+- **In-app notifications** are enabled by default. When a different conversation finishes or fails, a toast shows its title and opens it when clicked. Toasts dismiss after six seconds, pausing while hovered or keyboard-focused.
+- **Completion sound** is optional and plays a short chime while mekaweb is in the foreground, including when you’re viewing the completed conversation. Background browser notifications use the operating system’s sound settings instead. Audio may require a click or key press after reloading the app.
+
+In-app alerts work independently of browser notification permission and service workers. Keep mekaweb open and connected: closed or suspended pages cannot receive completion events.
+
 ## Connections and local data
 
 New connections default to **Local storage (persistent)**, which uses `localStorage` to keep the API token across browser restarts. Choose **Session storage (this tab)** in the **Token storage** selector to use `sessionStorage` for the current tab's session instead. Existing connections retain their saved choice. Use persistent storage only on a trusted browser profile and hosting origin.

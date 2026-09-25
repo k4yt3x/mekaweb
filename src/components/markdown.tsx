@@ -16,6 +16,7 @@ import type { ThemedToken } from 'shiki';
 import { CopyButton } from './common';
 import { Diagram } from './diagram';
 import { MarkdownTable } from './markdown-table';
+import { Checkbox } from './ui/checkbox';
 import { scrollRegion } from './scrolling';
 import {
   normalizeMathDelimiters,
@@ -150,6 +151,10 @@ export const Markdown = memo(function Markdown({ text }: { text: string }) {
         components={{
           pre: FencedBlock,
           table: MarkdownTable,
+          input: ({ type, checked, 'aria-label': label }) =>
+            type === 'checkbox' ? (
+              <Checkbox checked={Boolean(checked)} disabled aria-label={label} />
+            ) : null,
           blockquote: ({ children, node }) => {
             const kind = String(node?.properties['data-alert'] ?? node?.properties.dataAlert ?? '');
             if (!Object.hasOwn(alertTitles, kind)) return <blockquote>{children}</blockquote>;

@@ -33,6 +33,9 @@ export interface Settings {
   conversationFontSize: number;
   conversationMaxWidth: ConversationMaxWidth;
   showTurnContext: boolean;
+  turnNotifications: boolean;
+  inAppNotifications: boolean;
+  completionSound: boolean;
   layout: LayoutPreferences;
 }
 export interface LayoutPreferences {
@@ -55,6 +58,9 @@ const defaults = (): Settings => ({
   conversationFontSize: CONVERSATION_FONT.default,
   conversationMaxWidth: CONVERSATION_WIDTH.default,
   showTurnContext: false,
+  turnNotifications: false,
+  inAppNotifications: true,
+  completionSound: false,
   layout: { navigationCollapsed: false, sessionsCollapsed: false, detailsOpen: false },
 });
 function object(value: unknown): value is Record<string, unknown> {
@@ -139,6 +145,9 @@ export class BrowserStorage {
       conversationFontSize: normalizeConversationFontSize(value.conversationFontSize),
       conversationMaxWidth: normalizeConversationMaxWidth(value.conversationMaxWidth),
       showTurnContext: value.showTurnContext === true,
+      turnNotifications: value.turnNotifications === true,
+      inAppNotifications: value.inAppNotifications !== false,
+      completionSound: value.completionSound === true,
       layout: {
         navigationCollapsed: object(value.layout) && value.layout.navigationCollapsed === true,
         sessionsCollapsed: object(value.layout) && value.layout.sessionsCollapsed === true,
@@ -318,6 +327,15 @@ export class BrowserStorage {
   }
   showTurnContext(showTurnContext: boolean) {
     this.save({ ...this.readSettings(), showTurnContext });
+  }
+  turnNotifications(turnNotifications: boolean) {
+    this.save({ ...this.readSettings(), turnNotifications });
+  }
+  inAppNotifications(inAppNotifications: boolean) {
+    this.save({ ...this.readSettings(), inAppNotifications });
+  }
+  completionSound(completionSound: boolean) {
+    this.save({ ...this.readSettings(), completionSound });
   }
   layout(patch: Partial<LayoutPreferences>) {
     const settings = this.readSettings();

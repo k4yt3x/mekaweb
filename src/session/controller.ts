@@ -88,6 +88,12 @@ export interface ComposerOptions {
   mode: string;
   source: string;
 }
+export interface TurnCompletion {
+  sessionId: string;
+  turnId: string;
+  outcome: 'completed' | 'failed';
+  title: string;
+}
 interface Entry {
   state: SessionState;
   abort: AbortController;
@@ -102,6 +108,9 @@ interface Entry {
   ready: Promise<void>;
   deliveries: Map<string, { state: Submission['state']; turnId?: string }>;
   outcomes: Map<string, Submission['state']>;
+  notificationTurns: Set<string>;
+  notifiedTurns: Set<string>;
+  notificationsSince: number;
   textIdleTimer?: ReturnType<typeof setTimeout>;
 }
 export function isSessionRunning(state: SessionState) {
@@ -150,6 +159,13 @@ export class SessionController {
   private snapshot: SessionState[] = [];
   private selected: string | undefined;
   private disposed = false;
+  private completionListeners = new Set<(completion: TurnCompletion) => void>();
+  onCompletion(listener: (completion: TurnCompletion) => void) {
+    this.completionListeners.add(listener);
+    return () => {
+      this.completionListeners.delete(listener);
+    };
+  }
   constructor(
     readonly api: ApiClient,
     readonly canWrite: boolean,
@@ -235,6 +251,9 @@ export class SessionController {
       ...(entry?.cursor ? { cursor: entry.cursor } : {}),
       deliveries: entry?.deliveries ?? new Map(),
       outcomes: entry?.outcomes ?? new Map(),
+      notificationTurns: entry?.notificationTurns ?? new Set(),
+      notifiedTurns: entry?.notifiedTurns ?? new Set(),
+      notificationsSince: entry?.notificationsSince ?? Infinity,
       abort: new AbortController(),
       selected: this.selected === id,
       followed: false,
@@ -278,6 +297,11 @@ export class SessionController {
         this.canWrite,
         entry.abort.signal,
       );
+      // Both this snapshot and turn.started use the server's clock. Initial replay predates
+      // the snapshot's last activity; never compare it with the browser's clock. Own
+      // submissions and explicit resumed-current-turn announcements need no timestamp check.
+      const updatedAt = Date.parse(session.updated_at);
+      entry.notificationsSince = Number.isFinite(updatedAt) ? updatedAt + 1 : Infinity;
       this.publish(entry, { feed: 'connected' });
       void this.consume(entry, response);
       await this.refresh(entry.state.id);
@@ -381,6 +405,12 @@ export class SessionController {
     if (entry.outcomes.has(turnId) && !frame.event.startsWith('inbox.') && frame.event !== 'notice')
       return;
     if (frame.event === 'turn.started') {
+      if (
+        data.resumed === true ||
+        Date.parse(string(data, 'started_at')) >= entry.notificationsSince
+      ) {
+        this.followCompletion(entry, turnId);
+      }
       if (entry.state.turnId !== turnId) {
         entry.epoch++;
         this.publish(entry, {
@@ -521,6 +551,14 @@ export class SessionController {
       void this.refresh(state.id);
     } else if (frame.event.startsWith('inbox.')) {
       const ids = Array.isArray(data.item_ids) ? data.item_ids : [data.item_id];
+      if (
+        frame.event === 'inbox.delivered' &&
+        turnId &&
+        state.submissions.some((submission) => ids.includes(submission.itemId))
+      ) {
+        this.followCompletion(entry, turnId);
+        this.notifyCompletion(entry, turnId, entry.outcomes.get(turnId));
+      }
       for (const id of ids)
         if (typeof id === 'string')
           entry.deliveries.set(id, {
@@ -570,6 +608,11 @@ export class SessionController {
     const outcome =
       event === 'turn.finished' ? 'completed' : event === 'turn.failed' ? 'failed' : 'canceled';
     const state = entry.state;
+    const notify =
+      entry.notificationTurns.delete(turnId) ||
+      state.submissions.some(
+        (submission) => submission.turnId === turnId && submission.state === 'running',
+      );
     const current = !state.turnId || state.turnId === turnId;
     if (current) entry.followed = false;
     entry.outcomes.set(turnId, outcome);
@@ -603,10 +646,43 @@ export class SessionController {
       ),
       notices: this.withNotice(entry, event, data),
     });
+    if (notify) this.notifyCompletion(entry, turnId, outcome);
     void this.refresh(state.id, current).then(() => {
       this.invalidated(state.id);
       this.release(entry);
     });
+  }
+  private followCompletion(entry: Entry, turnId: string) {
+    entry.notificationTurns.add(turnId);
+    if (entry.notificationTurns.size > 50)
+      entry.notificationTurns.delete(entry.notificationTurns.values().next().value!);
+  }
+  private notifyCompletion(entry: Entry, turnId: string, outcome: Submission['state'] | undefined) {
+    const state = entry.state;
+    if (outcome) entry.notificationTurns.delete(turnId);
+    if (
+      (outcome === 'completed' || outcome === 'failed') &&
+      !state.session?.parent_id &&
+      !state.deleting &&
+      !entry.notifiedTurns.has(turnId)
+    ) {
+      entry.notifiedTurns.add(turnId);
+      if (entry.notifiedTurns.size > 50)
+        entry.notifiedTurns.delete(entry.notifiedTurns.values().next().value!);
+      const completion: TurnCompletion = {
+        sessionId: state.id,
+        turnId,
+        outcome,
+        title: state.session?.title?.trim() || 'New conversation',
+      };
+      for (const listener of this.completionListeners) {
+        try {
+          listener(completion);
+        } catch {
+          // A presentation failure must not interrupt the turn's state or reconciliation.
+        }
+      }
+    }
   }
   deleteSession(id: string): Promise<string[]> {
     const pending = this.deletions.get(id);
@@ -1022,6 +1098,10 @@ export class SessionController {
                 : 'accepted'),
           ...(delivery?.turnId ? { turnId: delivery.turnId } : {}),
         });
+        if (delivery?.turnId) {
+          this.followCompletion(entry, delivery.turnId);
+          this.notifyCompletion(entry, delivery.turnId, outcome);
+        }
         if (outcome) entry.followed = false;
         // Delivery or completion can race ahead of the POST response. Once its item ID is
         // known, a fresh snapshot can replace this receipt, including after a safe retry.
@@ -1123,6 +1203,7 @@ export class SessionController {
         admitted = true;
         const outcome = current.outcomes.get(turnId);
         update(current, { turnId, state: outcome ?? 'running' });
+        this.notifyCompletion(current, turnId, outcome);
         accept(true);
         this.invalidated(id);
         if (outcome) void this.refresh(id, current.state.turnId === turnId);
@@ -1347,5 +1428,6 @@ export class SessionController {
     this.drafts.clear();
     this.snapshot = [];
     this.listeners.clear();
+    this.completionListeners.clear();
   }
 }

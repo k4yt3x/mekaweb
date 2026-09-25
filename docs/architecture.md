@@ -22,6 +22,8 @@ flowchart LR
 
 TanStack hash routing supports static hosting and subpaths without server rewrites. TanStack Query caches fetched resources by connection and credential authority. Components issue intents; transport, storage, and session coordination remain independent of page lifetime.
 
+Boolean settings use the shared `SwitchField` and `Switch` primitives in `src/components/ui/`, including label association, keyboard activation, disabled states, and theme styling. Content with checkbox semantics uses the shared `Checkbox` primitive; Markdown task markers retain their checked state and accessible labels and remain read-only. Features do not style or render standalone native checkboxes.
+
 ## Credentials and browser storage
 
 The API client preserves reverse-proxy paths, rejects credentials embedded in URLs, and sends bearer tokens only to the selected endpoint. Authenticated requests reject redirects. Images and exports use the API client and managed object URLs. SSE uses fetch so requests can carry the Authorization header.
@@ -55,6 +57,16 @@ Images, skill activation, and explicit direct-turn retention require an idle ses
 Inbox retries preserve their original body and idempotency key. Management mutations are never retried automatically. Lost responses, HTTP timeouts, and server/gateway errors have uncertain outcomes and are reconciled through reads where possible. Read retries and stream reconnects honor server retry timing.
 
 Pending settings and deletion remain controller state through navigation and feed replacement. New sends wait for acknowledgment. Retired controllers cannot reopen feeds, and stale completions cannot publish into replacement entries. Session dialogs close when navigation changes their target. Acknowledgments clear submitted drafts while preserving subsequent edits; conflicting edits from other tabs are surfaced.
+
+## Turn notifications
+
+In-app toasts default on; browser notifications and completion sound default off. Browser permission is requested only by an explicit action in Settings. The connection runtime owns a notification client independently of mounted pages. The session controller emits one completion signal per followed root turn, on success or failure, with no signal for cancellation. Locally acknowledged submissions, explicit resumed-current-turn announcements, and fresh timestamped starts qualify; old replayed terminals alone do not. The session snapshot's server-reported update time anchors fresh-start filtering without comparing server and browser clocks. Locally owned turns do not depend on timestamps. Late POST receipts can establish ownership after the feed terminal without producing a duplicate.
+
+Completion events are relayed over a deployment-scoped BroadcastChannel so a foreground page can alert for work followed by another tab. Foreground pages show toasts for other conversations and optionally play a Web Audio chime; the conversation being viewed gets sound only. Background pages request browser delivery and never play an additional chime. Audio is unlocked through user interaction, coalesces rapid completions, and is never queued for later playback. Toasts are capped at three, replace earlier alerts for the same conversation, and clear when the page loses focus. Their six-second dismissal pauses on hover or keyboard focus, and motion follows the reduced-motion preference.
+
+`public/notifications.js` is a notification-only service worker scoped to the deployment base path. It does not intercept requests, cache application files, retain API credentials, or open meka connections. Before display it asks same-scope windows for their current preference, authority, and foreground state. A focused, visible mekaweb window owns in-app delivery and suppresses system alerts. Both delivery paths use the page-side IndexedDB ledger; the worker asks the source page to claim delivery before showing a notification. Atomic claims of connection/authority/session/turn identifiers deduplicate across tabs and worker restarts. That metadata contains no message text, is capped at 500 entries, and is pruned after one day on subsequent claims. In-app delivery does not require service worker registration or notification permission and also works on HTTP origins.
+
+Notification clicks focus a matching connection's window or open the application with a one-use target containing only identifiers. The client validates the saved connection and authority before connecting or navigating; the URL parameter is removed at startup. Browser notifications require a secure context and permission. The app must continue receiving events; there is no Push API subscription or promise of delivery after the page is suspended or closed. Failures remain local to notification settings and cannot interrupt turn processing.
 
 ## Session organization
 

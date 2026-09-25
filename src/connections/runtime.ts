@@ -2,6 +2,7 @@ import { QueryClient } from '@tanstack/react-query';
 import { ApiClient, ConnectionError, errorMessage, type Schema } from '../api/client';
 import { SessionController } from '../session/controller';
 import { BrowserStorage, type Connection } from './storage';
+import { BrowserNotifications } from '../notifications/client';
 export interface RuntimeState {
   connection?: Connection;
   api?: ApiClient;
@@ -12,6 +13,7 @@ export interface RuntimeState {
   connectionIssue?: 'offline' | 'checking';
 }
 export class ConnectionRuntime {
+  readonly notifications: BrowserNotifications;
   private state: RuntimeState = { busy: false };
   private listeners = new Set<() => void>();
   private generation = 0;
@@ -23,7 +25,9 @@ export class ConnectionRuntime {
   constructor(
     readonly storage: BrowserStorage,
     readonly queries: QueryClient,
-  ) {}
+  ) {
+    this.notifications = new BrowserNotifications(this);
+  }
   subscribe = (listener: () => void) => {
     this.listeners.add(listener);
     return () => {
@@ -138,12 +142,15 @@ export class ConnectionRuntime {
           'This connection’s credentials changed. Reconnect to use its current authority.',
         );
     });
+    const notifications = this.notifications.start();
     const settings = this.storage.getSnapshot();
     const connection = settings.connections.find((c) => c.id === settings.lastConnection);
-    if (connection && this.storage.token(connection)) void this.connect(connection);
+    if (!notifications.opened && connection && this.storage.token(connection))
+      void this.connect(connection);
     return () => {
       detach();
       invalidate();
+      notifications.stop();
       this.disconnect();
     };
   }

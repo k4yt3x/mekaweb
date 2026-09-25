@@ -17,6 +17,28 @@ function storage(): Storage {
     clear: () => map.clear(),
   };
 }
+it('defaults notifications off and merges their preference with changes from other tabs', () => {
+  const local = storage();
+  const a = new BrowserStorage(local, storage()),
+    b = new BrowserStorage(local, storage());
+  expect(a.getSnapshot().turnNotifications).toBe(false);
+  expect(a.getSnapshot()).toMatchObject({ inAppNotifications: true, completionSound: false });
+  b.theme('dark');
+  a.turnNotifications(true);
+  b.refresh();
+  expect(b.getSnapshot()).toMatchObject({ theme: 'dark', turnNotifications: true });
+  b.turnNotifications(false);
+  a.refresh();
+  expect(a.getSnapshot().turnNotifications).toBe(false);
+  a.inAppNotifications(false);
+  b.completionSound(true);
+  a.refresh();
+  expect(a.getSnapshot()).toMatchObject({
+    inAppNotifications: false,
+    completionSound: true,
+    theme: 'dark',
+  });
+});
 it('keeps sessionStorage tokens tab scoped and invalidates other tabs without sending credentials', () => {
   const local = storage(),
     tab1 = storage(),

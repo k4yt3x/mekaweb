@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- In-app completion toasts and an optional chime, with separate browser notifications.
+
+### Changed
+
+- Use consistent switches for settings and checkbox styling for Markdown task lists.
+
 ## [0.4.1] - 2026-09-25
 
 ### Changed

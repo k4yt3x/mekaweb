@@ -105,6 +105,32 @@ async function fixture() {
   };
 }
 
+it('notifies once when the feed finishes before POST admission reaches the client', async () => {
+  const f = await fixture();
+  const completed = vi.fn();
+  f.controller.onCompletion(completed);
+  const sending = f.controller.submitMessage('s', 'Hello.', options());
+  await vi.waitFor(() => expect(f.request).toHaveBeenCalledOnce());
+  await f.feed.event('turn.started');
+  await f.feed.event('turn.finished');
+  await f.post.event('turn.started');
+  await sending;
+  await f.post.event('turn.finished');
+  expect(completed).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({ turnId: 'turn', outcome: 'completed' }),
+  );
+});
+
+it('notifies once for an owned turn despite terminals on both streams', async () => {
+  const f = await fixture();
+  const completed = vi.fn();
+  f.controller.onCompletion(completed);
+  await f.start();
+  await f.post.event('turn.finished');
+  await f.feed.event('turn.finished');
+  expect(completed).toHaveBeenCalledTimes(1);
+});
+
 it.each(['steer', 'followup', 'interrupt'])(
   'starts an idle streaming turn even when the busy mode is %s',
   async (mode) => {

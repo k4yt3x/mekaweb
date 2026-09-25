@@ -35,5 +35,9 @@ export default defineConfig([
       globals: { ...globals.browser, ...globals.node },
     },
   },
+  {
+    files: ['public/notifications.js'],
+    languageOptions: { globals: globals.serviceworker },
+  },
   prettier,
 ]);

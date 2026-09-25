@@ -6,11 +6,13 @@ import type { Connection } from '../connections/storage';
 import { CONVERSATION_FONT, CONVERSATION_WIDTH } from '../connections/storage';
 import { download, normalizeEndpoint, type Schema } from '../api/client';
 import { Button } from '../components/ui/button';
+import { SwitchField } from '../components/ui/switch';
 import { Dialog } from '../components/ui/dialog';
 import { ConfirmButton, ErrorNotice, Field, Json, Loading } from '../components/common';
 import { MekawebLink } from '../components/layout';
 import { PixelInput } from '../components/pixel-input';
 import { supportedVersions } from '../api/version';
+import { NotificationSettings } from '../notifications/settings';
 
 export function ConnectionForm({
   existing,
@@ -263,6 +265,7 @@ export function SettingsPage() {
           </Field>
         </div>
       </section>
+      <NotificationSettings />
       <section className="panel">
         <h2>Diagnostics</h2>
         <dl className="facts">
@@ -339,14 +342,11 @@ export function SettingsPage() {
         </div>
         <ErrorNotice error={action.error} />
         <div className="panel-footer">
-          <label className="check">
-            <input
-              type="checkbox"
-              checked={settings.showTurnContext}
-              onChange={(event) => runtime.storage.showTurnContext(event.target.checked)}
-            />
-            Show context added by meka
-          </label>
+          <SwitchField
+            label="Show context added by meka"
+            checked={settings.showTurnContext}
+            onCheckedChange={(checked) => runtime.storage.showTurnContext(checked)}
+          />
         </div>
       </section>
       <section className="panel">

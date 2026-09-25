@@ -24,6 +24,7 @@ import { ErrorNotice, Json, Loading } from './components/common';
 import { NavigationToggle } from './components/layout';
 import { ConnectionBanner } from './components/connection-banner';
 import { trackFocusInput } from './components/focus-input';
+import { NotificationToasts } from './notifications/toasts';
 
 export function App({ runtime }: { runtime: ConnectionRuntime }) {
   useEffect(trackFocusInput, []);
@@ -31,6 +32,7 @@ export function App({ runtime }: { runtime: ConnectionRuntime }) {
   return (
     <RuntimeContext.Provider value={runtime}>
       <Shell />
+      <NotificationToasts />
     </RuntimeContext.Provider>
   );
 }

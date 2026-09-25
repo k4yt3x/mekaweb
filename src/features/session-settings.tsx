@@ -4,6 +4,7 @@ import { useCan, useConnection, useResource } from '../connections/context';
 import type { Schema } from '../api/client';
 import { Field, ErrorNotice } from '../components/common';
 import { Button } from '../components/ui/button';
+import { SwitchField } from '../components/ui/switch';
 import type { ComposerOptions } from '../session/controller';
 
 export type TurnSettings = Pick<ComposerOptions, 'mode' | 'skill' | 'retention' | 'source'>;
@@ -194,22 +195,18 @@ export function SessionForm({
         {!session && (
           <details>
             <summary>Session capabilities</summary>
-            <label className="check">
-              <input
-                type="checkbox"
-                checked={reasoning}
-                onChange={(event) => setReasoning(event.target.checked)}
-              />
-              Receive reasoning when available
-            </label>
-            <label className="check">
-              <input
-                type="checkbox"
-                checked={prompts}
-                onChange={(event) => setPrompts(event.target.checked)}
-              />
-              Support permission prompts
-            </label>
+            <SwitchField
+              label="Receive reasoning when available"
+              checked={reasoning}
+              onCheckedChange={setReasoning}
+              disabled={!canWrite}
+            />
+            <SwitchField
+              label="Support permission prompts"
+              checked={prompts}
+              onCheckedChange={setPrompts}
+              disabled={!canWrite}
+            />
           </details>
         )}
         {children}

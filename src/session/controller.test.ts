@@ -14,11 +14,11 @@ afterEach(() => {
   controllers.length = 0;
   vi.useRealTimers();
 });
-async function fixture(canWrite = true) {
+async function fixture(canWrite = true, updatedAt = '2026-09-17T00:00:00Z') {
   const session: Schema['SessionResponse'] = {
     id: 's',
     created_at: '2026-09-17T00:00:00Z',
-    updated_at: '2026-09-17T00:00:00Z',
+    updated_at: updatedAt,
     approvals: true,
     profile: 'mock',
     title: '',
@@ -73,6 +73,67 @@ async function fixture(canWrite = true) {
     state: () => controller.getSnapshot()[0]!,
   };
 }
+it('notifies once for an observed live turn, but never for historical replay or cancellation', async () => {
+  const f = await fixture();
+  const completed = vi.fn();
+  f.controller.onCompletion(completed);
+  await f.event('turn.started', { turn_id: 'old', started_at: '2020-01-01T00:00:00Z' });
+  await f.event('turn.finished', { turn_id: 'old' });
+  expect(completed).not.toHaveBeenCalled();
+  await f.event('turn.started', {
+    turn_id: 'live',
+    started_at: new Date(Date.now() + 1000).toISOString(),
+  });
+  await f.event('turn.finished', { turn_id: 'live' });
+  await f.event('turn.finished', { turn_id: 'live' });
+  expect(completed).toHaveBeenCalledExactlyOnceWith({
+    sessionId: 's',
+    turnId: 'live',
+    outcome: 'completed',
+    title: 'New conversation',
+  });
+  await f.event('turn.started', { turn_id: 'cancel', resumed: true });
+  await f.event('turn.canceled', { turn_id: 'cancel' });
+  expect(completed).toHaveBeenCalledTimes(1);
+});
+
+it.each(['2020-01-01T12:00:00Z', '2030-01-01T12:00:00Z'])(
+  'uses the server session clock to distinguish new turns from replay: %s',
+  async (updatedAt) => {
+    const f = await fixture(true, updatedAt);
+    const completed = vi.fn();
+    f.controller.onCompletion(completed);
+    const serverTime = Date.parse(updatedAt);
+    await f.event('turn.started', {
+      turn_id: 'old',
+      started_at: new Date(serverTime - 1000).toISOString(),
+    });
+    await f.event('turn.finished', { turn_id: 'old' });
+    expect(completed).not.toHaveBeenCalled();
+    await f.event('turn.started', {
+      turn_id: 'fresh',
+      started_at: new Date(serverTime + 1000).toISOString(),
+    });
+    await f.event('turn.finished', { turn_id: 'fresh' });
+    expect(completed).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ turnId: 'fresh' }));
+  },
+);
+
+it('notifies for a running turn joined through resumed and isolates notification errors', async () => {
+  const f = await fixture();
+  f.controller.onCompletion(() => {
+    throw new Error('Notification unavailable');
+  });
+  const completed = vi.fn();
+  f.controller.onCompletion(completed);
+  await f.event('turn.started', { turn_id: 'live', resumed: true });
+  await f.event('turn.failed', { turn_id: 'live' });
+  expect(completed).toHaveBeenCalledWith(
+    expect.objectContaining({ turnId: 'live', outcome: 'failed' }),
+  );
+  expect(f.state().running).toBe(false);
+});
+
 it('tracks text bursts and quiet intervals without treating a pause as turn completion', async () => {
   const f = await fixture();
   vi.useFakeTimers();

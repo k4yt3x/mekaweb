@@ -4,6 +4,23 @@ import { Markdown } from './markdown';
 
 const render = (text: string) => renderToStaticMarkup(<Markdown text={text} />);
 
+it('renders labeled, read-only task markers through the shared checkbox primitive', () => {
+  const html = render('- [x] **Finished** item\n- [ ] Pending item\n  - [x] Nested item');
+  const inputs = html.match(/<input\b[^>]*>/g) ?? [];
+  expect(inputs).toHaveLength(3);
+  expect(inputs[0]).toContain('aria-label="Finished item"');
+  expect(inputs[1]).toContain('aria-label="Pending item"');
+  expect(inputs[2]).toContain('aria-label="Nested item"');
+  for (const input of inputs) {
+    expect(input).toContain('class="checkbox-input"');
+    expect(input).toContain('disabled=""');
+  }
+  expect(inputs[0]).toContain('checked=""');
+  expect(inputs[1]).not.toContain('checked=""');
+  expect(inputs[2]).toContain('checked=""');
+  expect(render('```html\n<input type="checkbox">\n```')).not.toContain('class="checkbox-input"');
+});
+
 it('renders bold Chinese list labels ending in punctuation without requiring extra spaces', () => {
   const labels = [
     '最低保障：加拿大更厚。',
