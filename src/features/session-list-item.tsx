@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { LoaderCircle, Pencil, Pin, PinOff, Trash2 } from 'lucide-react';
 import type { Schema } from '../api/client';
 import { supportsSessionOrganization } from '../api/version';
@@ -11,11 +11,15 @@ import { SessionRenameDialog } from './session-metadata';
 
 export function SessionListItem({
   session,
+  depth,
+  branches,
   selected,
   running,
   excerpt,
 }: {
   session: Schema['SessionResponse'];
+  depth: number;
+  branches: boolean[];
   selected: boolean;
   running: boolean;
   excerpt?: string | undefined;
@@ -51,8 +55,12 @@ export function SessionListItem({
   function remove() {
     const source = trigger.current;
     const row = source?.closest('.session-list-entry');
+    let nextRow = row?.nextElementSibling;
+    // Deleting a parent also removes its descendants, so focus must leave that subtree.
+    while (nextRow instanceof HTMLElement && Number(nextRow.dataset.depth) > depth)
+      nextRow = nextRow.nextElementSibling;
     const next =
-      row?.nextElementSibling?.querySelector<HTMLAnchorElement>('.session-item-link') ??
+      nextRow?.querySelector<HTMLAnchorElement>('.session-item-link') ??
       row?.previousElementSibling?.querySelector<HTMLAnchorElement>('.session-item-link') ??
       row?.closest('.session-list')?.querySelector<HTMLButtonElement>('[aria-label="New session"]');
     void action.run(async () => {
@@ -75,7 +83,23 @@ export function SessionListItem({
   }
   if (removed) return null;
   return (
-    <div className="session-list-entry">
+    <div
+      className="session-list-entry"
+      data-depth={depth}
+      style={{ '--session-depth': depth } as CSSProperties}
+    >
+      {branches.map((continues, index) =>
+        continues || index === depth - 1 ? (
+          <span
+            key={index}
+            className="session-tree-guide"
+            aria-hidden="true"
+            data-branch={index === depth - 1 || undefined}
+            data-last={!continues || undefined}
+            style={{ '--session-guide-level': index + 1 } as CSSProperties}
+          />
+        ) : null,
+      )}
       <div
         className={`session-item ${selected ? 'selected' : ''} ${editable ? 'session-item-editable' : ''}`}
         data-busy={busy || undefined}

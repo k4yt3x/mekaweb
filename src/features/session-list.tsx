@@ -10,6 +10,7 @@ import { useAction } from '../components/actions';
 import { ErrorNotice, Loading } from '../components/common';
 import { Button } from '../components/ui/button';
 import { SessionListItem } from './session-list-item';
+import { sessionTree } from './session-tree';
 
 export function SessionList({
   selectedId,
@@ -60,8 +61,11 @@ export function SessionList({
     ? (matches.data?.sessions ?? [])
     : (list.data?.pages.flatMap((page) => page.sessions) ?? []);
   // A session can move across page boundaries while the server is being updated.
-  // Keep the server's order (pin order for listings, relevance for searches).
+  // Keep the server's order before grouping descendants (pin order or search relevance).
   const items = [...new Map(rows.map((item) => [item.id, item])).values()];
+  const entries = searching
+    ? items.map((session) => ({ session, depth: 0, branches: [] }))
+    : sessionTree(items);
   const pending = waiting || (searching ? matches.isPending : list.isPending);
   const error = waiting ? undefined : searching ? matches.error : list.error;
   return (
@@ -121,10 +125,12 @@ export function SessionList({
         <ErrorNotice error={error} />
         {pending && <Loading label={searching ? 'Searching…' : 'Loading…'} />}
         {!waiting &&
-          items.map((item) => (
+          entries.map(({ session: item, depth, branches }) => (
             <SessionListItem
               key={item.id}
               session={item}
+              depth={depth}
+              branches={branches}
               selected={item.id === selectedId}
               excerpt={
                 'excerpt' in item && typeof item.excerpt === 'string' ? item.excerpt : undefined

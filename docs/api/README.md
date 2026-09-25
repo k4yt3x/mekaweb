@@ -2,6 +2,8 @@
 
 `meka-0.64.0.json` was captured from meka tag `0.64.0`, commit `e639b7843138d603aff34bd329ee90423b306510`, through `/v1/openapi.json` with `[serve].docs = true`. The generated REST types are committed in `src/api/schema.d.ts`; runtime connections do not require schema access.
 
+Meka 0.64.1, commit `c17a5f7c596d229dd716a543ddd380c450471c98`, was reviewed against that baseline. Its fix removes duplicate environment context from sub-agent prompts; REST shapes, SSE events, and tool parameters are unchanged. The 0.64.0 schema remains the generation source.
+
 Schema capture is a manual maintenance step. Choose a disposable meka instance with `[serve].docs = true`, confirm its version, and download its schema. For a 0.64.0 instance listening on port 8081:
 
 ```sh

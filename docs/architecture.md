@@ -74,7 +74,7 @@ Titles and pins belong to meka’s store. Metadata edits use the session control
 
 The selected session's metadata participates in query invalidation and polls while its screen is open. These reads update the controller's session record without replacing conversation history or live turn state. Reads overtaken by a settings acknowledgment or snapshot refresh cannot restore older metadata. The first provider event invalidates metadata again, since turn admission can precede the first user message being saved. Inline title edits keep their own draft through these updates.
 
-The sidebar preserves the server’s pin/recency order and passes pagination cursors through unchanged. Search is debounced, connection-scoped, and abortable; it uses the server’s conversation index, relevance order, and plain-text excerpts. Search has no cursor and caps results at 100. Controls for titles, pins, and search require a discovered version of at least 0.64.0, since older servers may ignore unknown PATCH fields.
+The sidebar groups loaded sub-agent sessions beneath their parents with indented tree guides, preserving the server’s pin/recency order among roots and siblings. Sessions whose parents have not been loaded remain at the top level until those parents arrive. Pagination cursors pass through unchanged. Search stays flat and is debounced, connection-scoped, and abortable; it uses the server’s conversation index, relevance order, and plain-text excerpts. Search has no cursor and caps results at 100. Controls for titles, pins, and search require a discovered version of at least 0.64.0, since older servers may ignore unknown PATCH fields.
 
 ## Saved history and live output
 

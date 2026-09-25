@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-09-25
+
 ### Added
 
 - In-app completion toasts and an optional chime, with separate browser notifications.
@@ -14,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Use consistent switches for settings and checkbox styling for Markdown task lists.
+- Group sub-agent sessions beneath their parents with indentation and tree guide lines.
+- Recognize meka 0.64.1 as a supported server version.
 
 ## [0.4.1] - 2026-09-25
 
@@ -101,7 +105,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Light and dark themes, narrow layouts, and collapsible, resizable session panels.
 - Hosting at the root or a subpath, with GitHub Pages deployment on version tags.
 
-[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.4.1...HEAD
+[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.5.0...HEAD
+[0.5.0]: https://github.com/k4yt3x/mekaweb/compare/0.4.1...0.5.0
 [0.4.1]: https://github.com/k4yt3x/mekaweb/compare/0.4.0...0.4.1
 [0.4.0]: https://github.com/k4yt3x/mekaweb/compare/0.3.0...0.4.0
 [0.3.0]: https://github.com/k4yt3x/mekaweb/compare/0.2.0...0.3.0

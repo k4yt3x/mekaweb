@@ -1,8 +1,8 @@
 # API support
 
-mekaweb targets **meka 0.64.0**, commit `e639b7843138d603aff34bd329ee90423b306510`. Meka 0.59.0–0.63.0 retain their existing features; titles, pins, and conversation search require 0.64.0. The table maps supported HTTP operations to the interface. Available actions depend on the token's scopes and the server's configuration.
+mekaweb targets **meka 0.64.1**, commit `c17a5f7c596d229dd716a543ddd380c450471c98`. Meka 0.59.0–0.64.0 retain their existing features; titles, pins, and conversation search require 0.64.0. The table maps supported HTTP operations to the interface. Available actions depend on the token's scopes and the server's configuration.
 
-See the [captured schema and generation instructions](api/README.md) for the wire contract and the [meka HTTP API reference](https://github.com/k4yt3x/meka/blob/0.64.0/docs/book/src/usage/http-api.md) for server behavior.
+See the [captured schema and generation instructions](api/README.md) for the wire contract and the [meka HTTP API reference](https://github.com/k4yt3x/meka/blob/0.64.1/docs/book/src/usage/http-api.md) for server behavior.
 
 | Method | Endpoint                                   | Interface support                                                               |
 | ------ | ------------------------------------------ | ------------------------------------------------------------------------------- |
@@ -55,8 +55,8 @@ See the [captured schema and generation instructions](api/README.md) for the wir
 
 ## Limits and behavior
 
-- **Sessions:** Lists use cursor pagination and can include sub-agents. Search returns up to 100 matches in server relevance order, including conversation text and titles. It excludes thinking and tool inputs/results. Refine the query when the result limit is reached; the search API has no pagination. Listings retain the server’s pin and recency order. Titles can be reset to the first message; neither renaming nor pinning changes `updated_at`. The interface does not offer a working-directory filter. Fork supports a working-directory override. Directory/profile changes require an idle session, while permission, approval mode, titles, and pins can change during a turn.
-- **Sub-agents:** Their parent drives them. Their history, context, and tasks can be inspected, but they cannot receive direct user turns or independent settings, title, or pin changes through the HTTP API.
+- **Sessions:** Lists use cursor pagination and can include sub-agents. Search returns up to 100 matches in server relevance order, including conversation text and titles. It excludes thinking and tool inputs/results. Refine the query when the result limit is reached; the search API has no pagination. Listings group loaded sub-agents beneath their parents, retaining the server’s pin and recency order among roots and siblings. Titles can be reset to the first message; neither renaming nor pinning changes `updated_at`. The interface does not offer a working-directory filter. Fork supports a working-directory override. Directory/profile changes require an idle session, while permission, approval mode, titles, and pins can change during a turn.
+- **Sub-agents:** Their parent drives them. Their history, context, and tasks can be inspected, but they cannot receive direct user turns or independent settings, title, or pin changes through the HTTP API. Meka 0.64.1 stops prepending environment context to their task text, so new sub-agent titles show the assigned task. Older stored prompts are unchanged.
 - **History:** Compaction and rewind alter model context. Live replay is bounded and cannot serve as a complete transcript. Export supports Markdown transcripts and JSON archives. Meka 0.64.0 exports archive format 4 and imports formats 3 and 4; older data conversion is handled by the server.
 - **Images and skills:** These use direct turns while idle; the inbox accepts text only. Skill activation is available from composer Settings.
 - **Sending:** Idle text uses a direct streaming turn; busy text uses the selected inbox mode. Only an explicit `turn-in-flight` conflict permits a text-only fallback to the inbox. Streaming turns are never retried automatically. The session feed supplies displayed events and approvals; the POST stream tracks admission and the submitted turn's outcome.
