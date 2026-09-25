@@ -46,6 +46,7 @@ import { SchedulesPage } from './schedules';
 import { NavigationToggle } from '../components/layout';
 import { useMediaQuery } from '../components/media-query';
 import { PanelResizeHandle } from '../components/panel-resize-handle';
+import { ReadingOptionsControl, SessionContent } from '../components/reading-options';
 export function SessionsPage({ id }: { id?: string | undefined }) {
   const state = useConnection();
   const runtime = useRuntime();
@@ -157,7 +158,7 @@ export function SessionsPage({ id }: { id?: string | undefined }) {
           />
         )}
       </aside>
-      <section className="session-main">
+      <SessionContent key={headingKey}>
         {(id || (desktop && layout.navigationCollapsed)) && (
           <header className="session-toolbar">
             {layout.navigationCollapsed && <NavigationToggle />}
@@ -218,6 +219,7 @@ export function SessionsPage({ id }: { id?: string | undefined }) {
             )}
             {selected?.session && (
               <div className="toolbar-actions">
+                <ReadingOptionsControl />
                 {selected.feed === 'unavailable' && (
                   <Button
                     variant="ghost"
@@ -287,7 +289,7 @@ export function SessionsPage({ id }: { id?: string | undefined }) {
             <ErrorNotice error={selected?.error} />
           </div>
         )}
-      </section>
+      </SessionContent>
       {desktop && details && selected?.session && (
         <aside id="session-details" className="session-details-panel" aria-label="Session details">
           <PanelResizeHandle

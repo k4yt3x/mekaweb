@@ -3,12 +3,20 @@ import { createId } from '../identifiers';
 
 const PREFIX = 'mekaweb:v1:';
 const SETTINGS = PREFIX + 'settings';
-export const CONVERSATION_FONT = { min: 12, max: 24, default: 14 } as const;
+export const CONVERSATION_FONT = { default: 14, step: 1 } as const;
+export const CONVERSATION_WIDTH = { default: 850, step: 100 } as const;
+type ConversationMaxWidth = number | 'full';
+
+function positivePixels(value: unknown, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 1 ? value : fallback;
+}
+
+function normalizeConversationMaxWidth(value: unknown): ConversationMaxWidth {
+  return value === 'full' ? 'full' : positivePixels(value, CONVERSATION_WIDTH.default);
+}
 
 function normalizeConversationFontSize(value: unknown): number {
-  return typeof value === 'number' && Number.isFinite(value)
-    ? Math.round(Math.max(CONVERSATION_FONT.min, Math.min(CONVERSATION_FONT.max, value)))
-    : CONVERSATION_FONT.default;
+  return positivePixels(value, CONVERSATION_FONT.default);
 }
 export interface Connection {
   id: string;
@@ -23,6 +31,7 @@ export interface Settings {
   lastConnection?: string;
   theme: 'system' | 'light' | 'dark';
   conversationFontSize: number;
+  conversationMaxWidth: ConversationMaxWidth;
   showTurnContext: boolean;
   layout: LayoutPreferences;
 }
@@ -44,6 +53,7 @@ const defaults = (): Settings => ({
   connections: [],
   theme: 'system',
   conversationFontSize: CONVERSATION_FONT.default,
+  conversationMaxWidth: CONVERSATION_WIDTH.default,
   showTurnContext: false,
   layout: { navigationCollapsed: false, sessionsCollapsed: false, detailsOpen: false },
 });
@@ -127,6 +137,7 @@ export class BrowserStorage {
       connections: value.connections.filter(connection).slice(0, 40),
       theme: value.theme === 'light' || value.theme === 'dark' ? value.theme : 'system',
       conversationFontSize: normalizeConversationFontSize(value.conversationFontSize),
+      conversationMaxWidth: normalizeConversationMaxWidth(value.conversationMaxWidth),
       showTurnContext: value.showTurnContext === true,
       layout: {
         navigationCollapsed: object(value.layout) && value.layout.navigationCollapsed === true,
@@ -290,6 +301,19 @@ export class BrowserStorage {
     this.save({
       ...this.readSettings(),
       conversationFontSize: normalizeConversationFontSize(value),
+    });
+  }
+  conversationMaxWidth(value: number | 'full') {
+    this.save({
+      ...this.readSettings(),
+      conversationMaxWidth: normalizeConversationMaxWidth(value),
+    });
+  }
+  conversationAppearance(fontSize: number, maxWidth: number | 'full') {
+    this.save({
+      ...this.readSettings(),
+      conversationFontSize: normalizeConversationFontSize(fontSize),
+      conversationMaxWidth: normalizeConversationMaxWidth(maxWidth),
     });
   }
   showTurnContext(showTurnContext: boolean) {

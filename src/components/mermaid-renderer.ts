@@ -83,6 +83,8 @@ export function renderDiagram(source: string, dark: boolean, signal: AbortSignal
       if (
         !width ||
         !height ||
+        width < 0 ||
+        height < 0 ||
         !Number.isFinite(width) ||
         !Number.isFinite(height) ||
         width > 8192 ||
@@ -95,6 +97,7 @@ export function renderDiagram(source: string, dark: boolean, signal: AbortSignal
       return {
         blob: new Blob([new XMLSerializer().serializeToString(svg)], { type: 'image/svg+xml' }),
         title,
+        size: { width: Math.ceil(width), height: Math.ceil(height) },
       };
     } finally {
       host.remove();

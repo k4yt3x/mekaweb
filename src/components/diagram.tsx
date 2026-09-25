@@ -1,8 +1,9 @@
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { CopyButton } from './common';
-import { Dialog } from './ui/dialog';
 import { Maximize2 } from 'lucide-react';
 import { scrollRegion } from './scrolling';
+import { MediaDialog } from './media-viewer';
+import type { Size } from './media-viewport';
 
 function subscribeTheme(listener: () => void) {
   const observer = new MutationObserver(listener);
@@ -10,6 +11,7 @@ function subscribeTheme(listener: () => void) {
   return () => observer.disconnect();
 }
 export function Diagram({ source }: { source: string }) {
+  const preview = useRef<HTMLButtonElement>(null);
   const [expanded, setExpanded] = useState(false);
   const dark = useSyncExternalStore(subscribeTheme, () =>
     document.documentElement.classList.contains('dark'),
@@ -20,6 +22,7 @@ export function Diagram({ source }: { source: string }) {
     url?: string;
     title?: string;
     error?: string;
+    size?: Size;
   }>();
   const current = result?.source === source && result.dark === dark ? result : undefined;
   useEffect(() => {
@@ -31,7 +34,7 @@ export function Diagram({ source }: { source: string }) {
         .then((image) => {
           if (abort.signal.aborted) return;
           url = URL.createObjectURL(image.blob);
-          setResult({ source, dark, url, title: image.title });
+          setResult({ source, dark, url, title: image.title, size: image.size });
         })
         .catch((error) => {
           if (!abort.signal.aborted)
@@ -53,6 +56,7 @@ export function Diagram({ source }: { source: string }) {
       {current?.url ? (
         <div className="diagram-scroll">
           <button
+            ref={preview}
             className="diagram-preview"
             aria-label="Expand diagram"
             title="Expand diagram"
@@ -89,19 +93,21 @@ export function Diagram({ source }: { source: string }) {
         </div>
         {current?.error && <p className="muted small">{current.error}</p>}
       </details>
-      <Dialog open={expanded} onOpenChange={setExpanded} title="Diagram" wide>
-        {current?.url && (
-          <div
-            className="diagram-expanded"
-            role="group"
-            aria-label="Expanded diagram"
-            tabIndex={0}
-            onKeyDown={scrollRegion}
-          >
-            <img src={current.url} alt={current.title ?? 'Mermaid diagram'} />
-          </div>
-        )}
-      </Dialog>
+      <MediaDialog
+        open={expanded}
+        onOpenChange={setExpanded}
+        kind="diagram"
+        image={
+          current?.url && current.size
+            ? { url: current.url, title: current.title ?? 'Mermaid diagram', size: current.size }
+            : undefined
+        }
+        status={current?.error ? 'Diagram preview unavailable.' : 'Rendering diagram…'}
+        onCloseAutoFocus={(event) => {
+          event.preventDefault();
+          preview.current?.focus({ preventScroll: true });
+        }}
+      />
     </figure>
   );
 }

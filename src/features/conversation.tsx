@@ -9,7 +9,6 @@ import {
   useSyncExternalStore,
   type KeyboardEvent,
   type ReactNode,
-  type CSSProperties,
 } from 'react';
 import {
   ArrowDown,
@@ -40,7 +39,8 @@ import { Empty, ErrorNotice, Loading } from '../components/common';
 import { NoticeMessage } from '../components/notice-message';
 import { ToolCard } from '../components/tool-card';
 import { ComposerResizeHandle } from '../components/composer-resize-handle';
-import { Attachment, Markdown, MarkdownPreview } from '../components/markdown';
+import { Markdown, MarkdownPreview } from '../components/markdown';
+import { Attachment, InlineAttachment, ImageViewerProvider } from '../components/image-attachment';
 import { scrollRegion } from '../components/scrolling';
 import { PermissionSelect } from '../components/ui/permission-select';
 import { ProfileSelect } from '../components/ui/profile-select';
@@ -74,7 +74,7 @@ export function Conversation({ state }: { state: SessionState }) {
     setInputHeight(DEFAULT_INPUT_HEIGHT);
     setResizeGeneration((value) => value + 1);
   }
-  const { showTurnContext, conversationFontSize } = useSettings();
+  const { showTurnContext } = useSettings();
   const scroller = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
   const dock = useRef<HTMLDivElement>(null);
@@ -163,176 +163,179 @@ export function Conversation({ state }: { state: SessionState }) {
     return () => observer.disconnect();
   }, [key]);
   return (
-    <div className="conversation-wrap">
-      <div
-        ref={scroller}
-        className="conversation-scroll"
-        onScroll={() => {
-          const node = scroller.current;
-          if (node) {
-            const remaining = node.scrollHeight - node.scrollTop - node.clientHeight;
-            following.current = remaining < 120;
-            setShowLatest(!following.current);
-            setContentBelow(remaining > 1);
-            positions.set(key, { top: node.scrollTop, following: following.current });
-          }
-        }}
-      >
+    <ImageViewerProvider onReturnFocus={() => scroller.current?.focus({ preventScroll: true })}>
+      <div className="conversation-wrap">
         <div
-          className="conversation-history"
-          ref={content}
-          style={{ '--conversation-font-size': `${conversationFontSize}px` } as CSSProperties}
+          ref={scroller}
+          className="conversation-scroll"
+          role="region"
+          aria-label="Conversation"
+          tabIndex={-1}
+          onScroll={() => {
+            const node = scroller.current;
+            if (node) {
+              const remaining = node.scrollHeight - node.scrollTop - node.clientHeight;
+              following.current = remaining < 120;
+              setShowLatest(!following.current);
+              setContentBelow(remaining > 1);
+              positions.set(key, { top: node.scrollTop, following: following.current });
+            }
+          }}
         >
-          <div
-            className="conversation-width"
-            onClick={(event) => {
-              if (event.target instanceof Element && event.target.closest('summary'))
-                following.current = false;
-            }}
-          >
-            {state.offset > 0 && (
-              <Button
-                variant="secondary"
-                onClick={() => {
-                  const node = scroller.current;
-                  const height = node?.scrollHeight ?? 0;
-                  void controller?.earlier(state.id).then(() =>
-                    requestAnimationFrame(() => {
-                      if (node) node.scrollTop += node.scrollHeight - height;
-                    }),
-                  );
-                }}
-              >
-                Load earlier messages ({state.offset})
-              </Button>
-            )}
-            {state.loading && !state.saved && <Loading label="Loading saved conversation…" />}
-            {state.saved?.messages.length === 0 &&
-              !live.length &&
-              !waiting &&
-              !state.notices.length &&
-              !recovered.length &&
-              !queued.length && <Empty title="Send a message to begin" />}
-            {messages.map((group) => (
-              <Message
-                key={`${state.saved?.revision}:${state.offset + group[0]!.index}`}
-                sessionId={state.id}
-                messages={group}
-                offset={state.offset}
-                toolResults={history.results}
-                showTurnContext={showTurnContext}
-              />
-            ))}
-            {state.partial && (
-              <div className="notice replay-notice">
-                Live replay may be incomplete. Saved conversation and live preview are shown
-                separately until the turn is reconciled.
-              </div>
-            )}
-            {(live.length > 0 || waiting) && (
-              <section className="live-preview">
-                {live.map((group, index) => (
-                  <Fragment key={group.key}>
-                    {waiting?.index === index && !appendActivity && (
-                      <WaitingMessage status={waiting.status} />
-                    )}
-                    {group.kind === 'user' ? (
-                      sentMessage(group.submission)
-                    ) : (
-                      <article className="message message-assistant">
-                        <MessageHeader
-                          author="Agent"
-                          status={isSessionRunning(state) ? 'Live' : 'Saving…'}
-                        />
-                        {group.blocks.map(({ block, index }) =>
-                          block.kind === 'tool' ? (
-                            <Tool key={block.id} tool={state.tools[block.id]} />
-                          ) : block.kind === 'thinking' ? (
-                            <Thinking key={index} text={block.text} />
-                          ) : (
-                            <Markdown key={index} text={block.text} />
-                          ),
-                        )}
-                        {waiting?.index === index + 1 && <AgentActivity status={waiting.status} />}
-                      </article>
-                    )}
-                  </Fragment>
-                ))}
-                {waiting?.index === live.length && !appendActivity && (
-                  <WaitingMessage status={waiting.status} />
-                )}
-              </section>
-            )}
-            {recovered.map((submission) => sentMessage(submission))}
-            {queued.map(({ item, submission }) =>
-              submission ? (
-                sentMessage(submission, item)
-              ) : (
-                <InboxMessage
-                  key={item.id}
-                  sessionId={state.id}
-                  item={item}
-                  canWithdraw={canWithdraw}
-                  onError={setFeedbackError}
-                />
-              ),
-            )}
-            {state.notices.map((notice) => (
-              <NoticeMessage key={notice.id} notice={notice} />
-            ))}
-            {draft.conflict && (
-              <div className="notice">
-                <div>
-                  <p>This draft changed in another tab. Choose which version to keep.</p>
-                  <div className="message-actions">
-                    <Button size="sm" variant="secondary" onClick={() => draft.resolve(false)}>
-                      Keep mine
-                    </Button>
-                    <Button size="sm" variant="secondary" onClick={() => draft.resolve(true)}>
-                      Use other tab
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            )}
-            <ErrorNotice error={state.error} />
-            <ErrorNotice error={feedbackError} />
-            <ErrorNotice error={profiles.error ?? inbox.error} />
-          </div>
-        </div>
-        <div className="composer-dock" ref={dock} data-content-below={contentBelow}>
-          {showLatest && (
-            <Button
-              className="jump-latest"
-              variant="secondary"
-              size="sm"
-              onClick={() => {
-                const node = scroller.current;
-                if (node) {
-                  following.current = true;
-                  node.scrollTop = node.scrollHeight;
-                  setShowLatest(false);
-                }
+          <div className="conversation-history" ref={content}>
+            <div
+              className="conversation-width"
+              onClick={(event) => {
+                if (event.target instanceof Element && event.target.closest('summary'))
+                  following.current = false;
               }}
             >
-              <ArrowDown size={14} />
-              Latest
-            </Button>
-          )}
-          <Composer
-            key={key}
-            state={state}
-            draft={draft}
-            profiles={profiles.data?.profiles ?? []}
-            onError={setFeedbackError}
-            inputHeight={inputHeight}
-            onResize={setInputHeight}
-            resizeGeneration={resizeGeneration}
-            onAccepted={acceptDraft}
-          />
+              {state.offset > 0 && (
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    const node = scroller.current;
+                    const height = node?.scrollHeight ?? 0;
+                    void controller?.earlier(state.id).then(() =>
+                      requestAnimationFrame(() => {
+                        if (node) node.scrollTop += node.scrollHeight - height;
+                      }),
+                    );
+                  }}
+                >
+                  Load earlier messages ({state.offset})
+                </Button>
+              )}
+              {state.loading && !state.saved && <Loading label="Loading saved conversation…" />}
+              {state.saved?.messages.length === 0 &&
+                !live.length &&
+                !waiting &&
+                !state.notices.length &&
+                !recovered.length &&
+                !queued.length && <Empty title="Send a message to begin" />}
+              {messages.map((group) => (
+                <Message
+                  key={`${state.saved?.revision}:${state.offset + group[0]!.index}`}
+                  sessionId={state.id}
+                  messages={group}
+                  offset={state.offset}
+                  toolResults={history.results}
+                  showTurnContext={showTurnContext}
+                />
+              ))}
+              {state.partial && (
+                <div className="notice replay-notice">
+                  Live replay may be incomplete. Saved conversation and live preview are shown
+                  separately until the turn is reconciled.
+                </div>
+              )}
+              {(live.length > 0 || waiting) && (
+                <section className="live-preview">
+                  {live.map((group, index) => (
+                    <Fragment key={group.key}>
+                      {waiting?.index === index && !appendActivity && (
+                        <WaitingMessage status={waiting.status} />
+                      )}
+                      {group.kind === 'user' ? (
+                        sentMessage(group.submission)
+                      ) : (
+                        <article className="message message-assistant">
+                          <MessageHeader
+                            author="Agent"
+                            status={isSessionRunning(state) ? 'Live' : 'Saving…'}
+                          />
+                          {group.blocks.map(({ block, index }) =>
+                            block.kind === 'tool' ? (
+                              <Tool key={block.id} tool={state.tools[block.id]} />
+                            ) : block.kind === 'thinking' ? (
+                              <Thinking key={index} text={block.text} />
+                            ) : (
+                              <Markdown key={index} text={block.text} />
+                            ),
+                          )}
+                          {waiting?.index === index + 1 && (
+                            <AgentActivity status={waiting.status} />
+                          )}
+                        </article>
+                      )}
+                    </Fragment>
+                  ))}
+                  {waiting?.index === live.length && !appendActivity && (
+                    <WaitingMessage status={waiting.status} />
+                  )}
+                </section>
+              )}
+              {recovered.map((submission) => sentMessage(submission))}
+              {queued.map(({ item, submission }) =>
+                submission ? (
+                  sentMessage(submission, item)
+                ) : (
+                  <InboxMessage
+                    key={item.id}
+                    sessionId={state.id}
+                    item={item}
+                    canWithdraw={canWithdraw}
+                    onError={setFeedbackError}
+                  />
+                ),
+              )}
+              {state.notices.map((notice) => (
+                <NoticeMessage key={notice.id} notice={notice} />
+              ))}
+              {draft.conflict && (
+                <div className="notice">
+                  <div>
+                    <p>This draft changed in another tab. Choose which version to keep.</p>
+                    <div className="message-actions">
+                      <Button size="sm" variant="secondary" onClick={() => draft.resolve(false)}>
+                        Keep mine
+                      </Button>
+                      <Button size="sm" variant="secondary" onClick={() => draft.resolve(true)}>
+                        Use other tab
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              )}
+              <ErrorNotice error={state.error} />
+              <ErrorNotice error={feedbackError} />
+              <ErrorNotice error={profiles.error ?? inbox.error} />
+            </div>
+          </div>
+          <div className="composer-dock" ref={dock} data-content-below={contentBelow}>
+            {showLatest && (
+              <Button
+                className="jump-latest"
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  const node = scroller.current;
+                  if (node) {
+                    following.current = true;
+                    node.scrollTop = node.scrollHeight;
+                    setShowLatest(false);
+                  }
+                }}
+              >
+                <ArrowDown size={14} />
+                Latest
+              </Button>
+            )}
+            <Composer
+              key={key}
+              state={state}
+              draft={draft}
+              profiles={profiles.data?.profiles ?? []}
+              onError={setFeedbackError}
+              inputHeight={inputHeight}
+              onResize={setInputHeight}
+              resizeGeneration={resizeGeneration}
+              onAccepted={acceptDraft}
+            />
+          </div>
         </div>
       </div>
-    </div>
+    </ImageViewerProvider>
   );
 }
 function WaitingMessage({
@@ -570,11 +573,9 @@ function SentMessage({
         }
       />
       {submission.body.message && <Markdown text={submission.body.message} />}
-      {images.length > 0 && (
-        <p className="muted small">
-          {images.length} image{images.length === 1 ? '' : 's'} attached
-        </p>
-      )}
+      {images.map((image, index) => (
+        <InlineAttachment key={index} image={image} index={index} />
+      ))}
       {skill && <p className="muted small">Skill: {skill}</p>}
       {recoverable && (
         <SubmissionRecovery
@@ -666,7 +667,7 @@ function ContentBlock({
     case 'redacted_thinking':
       return <p className="muted small">Thinking unavailable.</p>;
     case 'image':
-      return <Attachment sessionId={sessionId} hash={block.hash} mediaType={block.media_type} />;
+      return <Attachment sessionId={sessionId} hash={block.hash} />;
     case 'tool_use':
       return (
         <ToolCard
@@ -710,12 +711,7 @@ function ToolResultContent({
             {block.text}
           </pre>
         ) : (
-          <Attachment
-            key={index}
-            sessionId={sessionId}
-            hash={block.hash}
-            mediaType={block.media_type}
-          />
+          <Attachment key={index} sessionId={sessionId} hash={block.hash} />
         ),
       )}
     </ToolOutput>
@@ -1052,7 +1048,26 @@ function Composer({
               ))}
             </div>
           )}
-          <div className="composer-toolbar" role="group" aria-label="Message controls">
+          <div
+            className="composer-toolbar"
+            role="group"
+            aria-label="Message controls"
+            onFocusCapture={(event) => {
+              const toolbar = event.currentTarget;
+              const button = event.target.closest('button');
+              if (
+                !button ||
+                !toolbar.contains(button) ||
+                toolbar.scrollWidth <= toolbar.clientWidth
+              )
+                return;
+              // Native focus scrolling may expose only the center of a control in a very narrow row.
+              const control = button.getBoundingClientRect();
+              const bounds = toolbar.getBoundingClientRect();
+              if (control.right > bounds.right) toolbar.scrollLeft += control.right - bounds.right;
+              else if (control.left < bounds.left) toolbar.scrollLeft += control.left - bounds.left;
+            }}
+          >
             <input
               className="sr-only"
               type="file"

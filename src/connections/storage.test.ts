@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { BrowserStorage, CONVERSATION_FONT } from './storage';
+import { BrowserStorage, CONVERSATION_FONT, CONVERSATION_WIDTH } from './storage';
 function storage(): Storage {
   const map = new Map<string, string>();
   return {
@@ -216,13 +216,17 @@ it('adds a safe conversation font size to older or malformed settings', () => {
   }
 });
 
-it('bounds and normalizes font sizes read from storage and written through settings', () => {
+it('persists custom font sizes without rounding or restricting them to the old range', () => {
   const local = storage();
   const adapter = new BrowserStorage(local, storage());
   for (const [input, expected] of [
-    [-100, 12],
-    [999, 24],
-    [17.6, 18],
+    [-100, CONVERSATION_FONT.default],
+    [0, CONVERSATION_FONT.default],
+    [1, 1],
+    [10, 10],
+    [32, 32],
+    [999, 999],
+    [17.6, 17.6],
   ]) {
     local.setItem(
       'mekaweb:v1:settings',
@@ -264,4 +268,80 @@ it('shares the font preference across tabs without losing drafts, tokens, or oth
   other.conversationFontSize(CONVERSATION_FONT.default);
   first.refresh();
   expect(first.getSnapshot().conversationFontSize).toBe(CONVERSATION_FONT.default);
+});
+
+it('defaults missing or invalid conversation widths without accepting arbitrary CSS', () => {
+  const local = storage();
+  for (const value of [undefined, null, false, {}, [], '1050', '100vw', -100, 0, 0.5]) {
+    local.setItem(
+      'mekaweb:v1:settings',
+      JSON.stringify({ version: 1, connections: [], conversationMaxWidth: value }),
+    );
+    expect(new BrowserStorage(local, storage()).getSnapshot().conversationMaxWidth).toBe(
+      CONVERSATION_WIDTH.default,
+    );
+  }
+  const adapter = new BrowserStorage(local, storage());
+  for (const value of [NaN, Infinity, -Infinity, 0]) {
+    adapter.conversationMaxWidth(value);
+    expect(adapter.getSnapshot().conversationMaxWidth).toBe(CONVERSATION_WIDTH.default);
+  }
+});
+
+it('persists custom and legacy conversation widths, including full width', () => {
+  const local = storage();
+  const adapter = new BrowserStorage(local, storage());
+  for (const width of [1, 400, 650, 850, 935.5, 1050, 1250, 1600, 2400, 90000, 'full'] as const) {
+    adapter.conversationMaxWidth(width);
+    expect(new BrowserStorage(local, storage()).getSnapshot().conversationMaxWidth).toBe(width);
+  }
+});
+
+it('merges width changes across tabs without replacing fonts, layout, credentials, or drafts', () => {
+  const local = storage();
+  const first = new BrowserStorage(local, storage());
+  const connection = first.saveConnection('test', 'https://example.org', 'dummy', true);
+  const draft = first.saveDraft(connection.id, 's', 'Keep this draft');
+  const other = new BrowserStorage(local, storage());
+  first.conversationMaxWidth(1250);
+  other.conversationFontSize(18);
+  first.layout({ detailsOpen: true });
+  other.refresh();
+  expect(other.getSnapshot()).toMatchObject({
+    conversationMaxWidth: 1250,
+    conversationFontSize: 18,
+    layout: { detailsOpen: true },
+    connections: [connection],
+  });
+  expect(other.draft(connection.id, 's')).toEqual(draft);
+  expect(other.token(connection)).toBe('dummy');
+  other.conversationMaxWidth('full');
+  first.refresh();
+  expect(first.getSnapshot().conversationMaxWidth).toBe('full');
+});
+
+it('saves both reading defaults together while preserving newer settings from another tab', () => {
+  const local = storage();
+  const first = new BrowserStorage(local, storage());
+  const connection = first.saveConnection('test', 'https://example.org', 'dummy', true);
+  const draft = first.saveDraft(connection.id, 's', 'Keep this draft');
+  const other = new BrowserStorage(local, storage());
+  other.theme('dark');
+  other.layout({ detailsOpen: true });
+  const previous = other.getSnapshot();
+  const updates: unknown[] = [];
+  first.subscribe(() => updates.push(first.getSnapshot()));
+
+  first.conversationAppearance(18.6, 'full');
+
+  const expected = {
+    ...previous,
+    conversationFontSize: 18.6,
+    conversationMaxWidth: 'full',
+  };
+  expect(updates).toEqual([expected]);
+  const restored = new BrowserStorage(local, storage());
+  expect(restored.getSnapshot()).toEqual(expected);
+  expect(restored.draft(connection.id, 's')).toEqual(draft);
+  expect(restored.token(connection)).toBe('dummy');
 });

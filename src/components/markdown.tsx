@@ -7,17 +7,15 @@ import {
   type ReactElement,
 } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { useQuery } from '@tanstack/react-query';
+import remarkCjkFriendly from 'remark-cjk-friendly/parseOnly';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import { CircleAlert, Info, Lightbulb, OctagonAlert } from 'lucide-react';
 import type { ThemedToken } from 'shiki';
-import { CopyButton, ErrorNotice } from './common';
-import { Button } from './ui/button';
-import { Dialog } from './ui/dialog';
+import { CopyButton } from './common';
 import { Diagram } from './diagram';
-import { useBlobUrl } from './blob-url';
+import { MarkdownTable } from './markdown-table';
 import { scrollRegion } from './scrolling';
 import {
   normalizeMathDelimiters,
@@ -26,8 +24,6 @@ import {
   rehypeTaskLabels,
   rehypeMathAccessibility,
 } from './markdown-plugins';
-import { ApiClient, sessionPath, segment } from '../api/client';
-import { useConnection } from '../connections/context';
 import 'katex/dist/katex.min.css';
 
 export function MarkdownPreview({ text }: { text: string }) {
@@ -35,7 +31,12 @@ export function MarkdownPreview({ text }: { text: string }) {
   const source = text.trim();
   const preview = source.slice(0, 1024).replace(/\s+/g, ' ');
   return (
-    <ReactMarkdown allowedElements={['strong', 'em', 'del', 'code']} unwrapDisallowed skipHtml>
+    <ReactMarkdown
+      remarkPlugins={[remarkCjkFriendly]}
+      allowedElements={['strong', 'em', 'del', 'code']}
+      unwrapDisallowed
+      skipHtml
+    >
       {preview + (source.length > 1024 ? '…' : '')}
     </ReactMarkdown>
   );
@@ -124,7 +125,13 @@ export const Markdown = memo(function Markdown({ text }: { text: string }) {
       }}
     >
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkMath, remarkDisplayMath, remarkAdmonitions]}
+        remarkPlugins={[
+          remarkGfm,
+          remarkCjkFriendly,
+          remarkMath,
+          remarkDisplayMath,
+          remarkAdmonitions,
+        ]}
         rehypePlugins={[
           rehypeTaskLabels,
           [
@@ -142,17 +149,7 @@ export const Markdown = memo(function Markdown({ text }: { text: string }) {
         skipHtml
         components={{
           pre: FencedBlock,
-          table: ({ children }) => (
-            <div
-              className="table-scroll"
-              role="group"
-              aria-label="Table"
-              tabIndex={0}
-              onKeyDown={scrollRegion}
-            >
-              <table>{children}</table>
-            </div>
-          ),
+          table: MarkdownTable,
           blockquote: ({ children, node }) => {
             const kind = String(node?.properties['data-alert'] ?? node?.properties.dataAlert ?? '');
             if (!Object.hasOwn(alertTitles, kind)) return <blockquote>{children}</blockquote>;
@@ -219,61 +216,3 @@ export const Markdown = memo(function Markdown({ text }: { text: string }) {
     </div>
   );
 });
-async function imageBlob(api: ApiClient, id: string, hash: string, signal: AbortSignal) {
-  const blob = await api.blob(sessionPath(id) + '/blobs/' + segment(hash), undefined, signal);
-  if (!['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/bmp'].includes(blob.type))
-    throw new Error('The server returned an unsupported image type.');
-  return blob;
-}
-export function Attachment({
-  sessionId,
-  hash,
-  mediaType,
-}: {
-  sessionId: string;
-  hash?: string | null | undefined;
-  mediaType: string;
-}) {
-  const { api, connection } = useConnection();
-  const [open, setOpen] = useState(false);
-  const image = useQuery({
-    queryKey: [connection?.id, connection?.authority, 'attachment', sessionId, hash],
-    queryFn: ({ signal }) => {
-      if (!api || !hash) throw new Error('This image is unavailable.');
-      return imageBlob(api, sessionId, hash, signal);
-    },
-    enabled: Boolean(api && hash),
-    // Revalidate failed reads on recovery without downloading immutable images again.
-    staleTime: (query) => (query.state.data ? 'static' : Infinity),
-    gcTime: 0,
-    retry: false,
-  });
-  const url = useBlobUrl(image.data);
-  if (!image.data && image.error) return <ErrorNotice error={image.error} />;
-  if (!url)
-    return (
-      <p className="muted small">{hash ? 'Loading image…' : 'Image bytes are unavailable.'}</p>
-    );
-  return (
-    <>
-      <button
-        type="button"
-        className="attachment"
-        aria-label="View image"
-        onClick={() => setOpen(true)}
-      >
-        <img src={url} alt="Conversation attachment" loading="lazy" />
-      </button>
-      <Dialog open={open} onOpenChange={setOpen} title="Image" wide>
-        <img className="image-preview" src={url} alt="Full-size conversation attachment" />
-        <div className="actions">
-          <Button asChild variant="secondary">
-            <a href={url} download={`attachment.${mediaType.split('/')[1] ?? 'bin'}`}>
-              Download image
-            </a>
-          </Button>
-        </div>
-      </Dialog>
-    </>
-  );
-}

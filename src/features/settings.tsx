@@ -3,12 +3,13 @@ import { useRef, useState, type FormEvent } from 'react';
 import { ArrowRight, Plus, Unplug, KeyRound } from 'lucide-react';
 import { useConnection, useResource, useRuntime, useSettings } from '../connections/context';
 import type { Connection } from '../connections/storage';
-import { CONVERSATION_FONT } from '../connections/storage';
+import { CONVERSATION_FONT, CONVERSATION_WIDTH } from '../connections/storage';
 import { download, normalizeEndpoint, type Schema } from '../api/client';
 import { Button } from '../components/ui/button';
 import { Dialog } from '../components/ui/dialog';
 import { ConfirmButton, ErrorNotice, Field, Json, Loading } from '../components/common';
 import { MekawebLink } from '../components/layout';
+import { PixelInput } from '../components/pixel-input';
 import { supportedVersions } from '../api/version';
 
 export function ConnectionForm({
@@ -226,9 +227,9 @@ export function SettingsPage() {
           </Button>
         </div>
       </section>
-      <section className="panel">
+      <section className="panel appearance-panel">
         <h2>Appearance</h2>
-        <div className="form-grid">
+        <div className="appearance-fields">
           <Field label="Color theme">
             <select
               value={settings.theme}
@@ -242,22 +243,23 @@ export function SettingsPage() {
             </select>
           </Field>
           <Field label="Conversation font size">
-            <select
+            <PixelInput
+              label="Conversation font size"
               value={settings.conversationFontSize}
-              onChange={(event) => runtime.storage.conversationFontSize(Number(event.target.value))}
-            >
-              {Array.from(
-                { length: CONVERSATION_FONT.max - CONVERSATION_FONT.min + 1 },
-                (_, index) => {
-                  const size = CONVERSATION_FONT.min + index;
-                  return (
-                    <option key={size} value={size}>
-                      {size} px{size === CONVERSATION_FONT.default ? ' (default)' : ''}
-                    </option>
-                  );
-                },
-              )}
-            </select>
+              step={CONVERSATION_FONT.step}
+              onCommit={(size) => {
+                if (typeof size === 'number') runtime.storage.conversationFontSize(size);
+              }}
+            />
+          </Field>
+          <Field label="Conversation max width">
+            <PixelInput
+              label="Conversation max width"
+              value={settings.conversationMaxWidth}
+              step={CONVERSATION_WIDTH.step}
+              fullWidthFallback={CONVERSATION_WIDTH.default}
+              onCommit={(width) => runtime.storage.conversationMaxWidth(width)}
+            />
           </Field>
         </div>
       </section>

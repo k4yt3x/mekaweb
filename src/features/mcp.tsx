@@ -94,12 +94,6 @@ export function McpPage() {
         ))}
       </div>
       {servers.data?.length === 0 && <Empty title="No MCP servers configured" />}
-      <details className="page-note">
-        <summary>Server configuration</summary>
-        <p className="muted small">
-          Configure servers and authentication in meka. Interactive elicitation is unavailable.
-        </p>
-      </details>
       <Dialog
         open={Boolean(selected)}
         onOpenChange={(open) => {

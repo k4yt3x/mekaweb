@@ -34,3 +34,12 @@ it('bounds long previews and marks the truncation', () => {
   expect(html.endsWith('…')).toBe(true);
   expect(renderToStaticMarkup(<MarkdownPreview text={' \n\t '} />)).toBe('');
 });
+
+it('uses the same CJK emphasis rules in collapsed thinking previews', () => {
+  const html = renderToStaticMarkup(
+    <MarkdownPreview text={'**注意：**检查*（边界）*之后继续。`**保持原样：**代码`'} />,
+  );
+  expect(html).toBe(
+    '<strong>注意：</strong>检查<em>（边界）</em>之后继续。<code>**保持原样：**代码</code>',
+  );
+});

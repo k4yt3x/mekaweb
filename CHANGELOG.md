@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-25
+
+### Added
+
+- Set a conversation max width, including full width, in Settings → Appearance.
+- Adjust conversation font size and width from the header, with direct entry and saved defaults.
+
+### Changed
+
+- Size table columns to their contents, keeping short values together and wrapping longer text.
+- Open diagrams and images in a fitted viewer with zoom controls, dragging, and touch pinch/pan.
+- Show submitted image previews immediately while the agent is working.
+- Center the conversation and composer in the window as side panels change, when space allows.
+- Keep mouse and touch interactions visually quiet while preserving keyboard focus indicators.
+
+### Fixed
+
+- Render bold and italic text correctly beside Chinese, Japanese, and Korean punctuation.
+
 ## [0.3.0] - 2026-09-24
 
 ### Added
@@ -68,7 +87,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Light and dark themes, narrow layouts, and collapsible, resizable session panels.
 - Hosting at the root or a subpath, with GitHub Pages deployment on version tags.
 
-[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.3.0...HEAD
+[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.4.0...HEAD
+[0.4.0]: https://github.com/k4yt3x/mekaweb/compare/0.3.0...0.4.0
 [0.3.0]: https://github.com/k4yt3x/mekaweb/compare/0.2.0...0.3.0
 [0.2.0]: https://github.com/k4yt3x/mekaweb/compare/0.1.0...0.2.0
 [0.1.0]: https://github.com/k4yt3x/mekaweb/releases/tag/0.1.0

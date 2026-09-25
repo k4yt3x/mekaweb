@@ -23,8 +23,10 @@ import { Dialog } from './components/ui/dialog';
 import { ErrorNotice, Json, Loading } from './components/common';
 import { NavigationToggle } from './components/layout';
 import { ConnectionBanner } from './components/connection-banner';
+import { trackFocusInput } from './components/focus-input';
 
 export function App({ runtime }: { runtime: ConnectionRuntime }) {
+  useEffect(trackFocusInput, []);
   useEffect(() => runtime.start(), [runtime]);
   return (
     <RuntimeContext.Provider value={runtime}>

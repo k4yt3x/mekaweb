@@ -11,6 +11,9 @@ export function Dialog({
   wide = false,
   placement = 'center',
   onCloseAutoFocus,
+  onOpenAutoFocus,
+  className = '',
+  headerActions,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -20,14 +23,23 @@ export function Dialog({
   wide?: boolean;
   placement?: 'center' | 'left' | 'right';
   onCloseAutoFocus?: Primitive.DialogContentProps['onCloseAutoFocus'];
+  onOpenAutoFocus?: Primitive.DialogContentProps['onOpenAutoFocus'];
+  className?: string;
+  headerActions?: ReactNode;
 }) {
+  const close = (
+    <Primitive.Close className="button button-ghost button-icon" aria-label="Close dialog">
+      <X size={18} />
+    </Primitive.Close>
+  );
   return (
     <Primitive.Root open={open} onOpenChange={onOpenChange}>
       <Primitive.Portal>
         <Primitive.Overlay className="dialog-overlay" />
         <Primitive.Content
-          className={`dialog-content ${wide ? 'dialog-wide' : ''} dialog-${placement}`}
+          className={`dialog-content ${wide ? 'dialog-wide' : ''} dialog-${placement} ${className}`}
           onCloseAutoFocus={onCloseAutoFocus}
+          onOpenAutoFocus={onOpenAutoFocus}
           onInteractOutside={(event) => {
             const target = event.detail.originalEvent.target;
             // Recovery controls sit above modals; using them must not discard an editor.
@@ -37,9 +49,14 @@ export function Dialog({
         >
           <div className="dialog-heading">
             <Primitive.Title>{title}</Primitive.Title>
-            <Primitive.Close className="button button-ghost button-icon" aria-label="Close dialog">
-              <X size={18} />
-            </Primitive.Close>
+            {headerActions ? (
+              <div className="dialog-heading-actions">
+                {headerActions}
+                {close}
+              </div>
+            ) : (
+              close
+            )}
           </div>
           <Primitive.Description className={description ? 'muted' : 'sr-only'}>
             {description ?? title}
