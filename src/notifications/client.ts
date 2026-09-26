@@ -19,7 +19,7 @@ export interface CompletionToast {
   target?: Target;
 }
 interface NotificationState {
-  availability: 'available' | 'insecure' | 'unsupported';
+  availability: 'available' | 'insecure' | 'unsupported' | 'install';
   permission: NotificationPermission;
   busy: boolean;
   error?: string | undefined;
@@ -123,6 +123,12 @@ export class BrowserNotifications {
         typeof window.Notification?.requestPermission === 'function'
       )
         availability = 'available';
+      else if (
+        window.isSecureContext &&
+        (navigator as Navigator & { standalone?: boolean }).standalone === false &&
+        !window.matchMedia('(display-mode: standalone)').matches
+      )
+        availability = 'install';
     } catch {
       // Optional browser APIs may throw under storage or privacy policies.
       this.workers = undefined;

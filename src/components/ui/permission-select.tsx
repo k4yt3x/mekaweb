@@ -1,4 +1,5 @@
 import * as Select from '@radix-ui/react-select';
+import { useOverlayPadding } from '../visual-viewport';
 import {
   Check,
   ChevronDown,
@@ -43,6 +44,7 @@ export function PermissionSelect({
   onChange: (value: string) => void;
 }) {
   const values = value && !options.includes(value) ? [value, ...options] : options;
+  const collisionPadding = useOverlayPadding();
   return (
     <Select.Root value={value ?? ''} onValueChange={onChange} disabled={disabled}>
       <Select.Trigger
@@ -68,7 +70,7 @@ export function PermissionSelect({
           side="top"
           align="end"
           sideOffset={6}
-          collisionPadding={10}
+          collisionPadding={collisionPadding}
         >
           <Select.Viewport>
             {values.map((option) => (

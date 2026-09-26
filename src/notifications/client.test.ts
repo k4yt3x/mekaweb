@@ -171,6 +171,30 @@ it('reports insecure origins without attempting a prompt', async () => {
   expect(f.notification.requestPermission).not.toHaveBeenCalled();
 });
 
+it('explains Home Screen installation when an iOS browser tab lacks notifications', async () => {
+  const f = fixture();
+  Object.assign(navigator, { standalone: false });
+  Object.assign(f.window, {
+    Notification: undefined,
+    matchMedia: () => ({ matches: false }),
+  });
+  f.start();
+  expect(f.runtime.notifications.getSnapshot().availability).toBe('install');
+  await f.runtime.notifications.enable();
+  expect(f.notification.requestPermission).not.toHaveBeenCalled();
+  expect(f.serviceWorker.register).not.toHaveBeenCalled();
+});
+
+it('uses notification capabilities in Home Screen apps and does not suggest reinstalling them', () => {
+  const f = fixture();
+  Object.assign(navigator, { standalone: true });
+  f.start();
+  expect(f.runtime.notifications.getSnapshot().availability).toBe('available');
+  Object.assign(f.window, { Notification: undefined });
+  f.window.dispatchEvent(new Event('focus'));
+  expect(f.runtime.notifications.getSnapshot().availability).toBe('unsupported');
+});
+
 it('bounds registration failures and does not enable after a canceled or retired attempt', async () => {
   vi.useFakeTimers();
   const f = fixture();

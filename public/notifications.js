@@ -86,7 +86,7 @@ async function show(source, data) {
       body: test
         ? 'Notifications are enabled.'
         : data.title.trim().slice(0, 160) || 'New conversation',
-      icon: new URL('meka.ico', scope).href,
+      icon: new URL('meka-192.png', scope).href,
       tag,
       data: test ? null : data.target,
       renotify: false,

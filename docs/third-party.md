@@ -2,13 +2,13 @@
 
 The mekaweb project is licensed under AGPL-3.0-or-later. Third-party components retain their original licenses and notices.
 
-Dependencies and exact versions are recorded in `package-lock.json`; their licenses are distributed in their npm packages. Runtime JavaScript, highlighting assets, KaTeX fonts/styles, and Mermaid rendering modules are bundled locally. The rich-content renderer uses Mermaid (MIT), KaTeX (MIT), and DOMPurify (Apache-2.0 OR MPL-2.0); their dependency license files contain the complete terms.
+Dependencies and exact versions are recorded in `package-lock.json`; their licenses are distributed in their npm packages. Runtime JavaScript, highlighting assets, KaTeX fonts/styles, and Mermaid rendering modules are bundled locally. The rich-content renderer uses Mermaid (MIT), js-yaml (MIT), KaTeX (MIT), and DOMPurify (Apache-2.0 OR MPL-2.0); their dependency license files contain the complete terms.
 
 The themed select, dropdown menu, and reading options popover use Radix primitives (MIT).
 
 Chinese, Japanese, and Korean emphasis uses remark-cjk-friendly (MIT).
 
-The favicon is from [meka's assets](https://github.com/k4yt3x/meka/blob/0.59.0/assets/meka.ico).
+The favicon and Home Screen icons come from [meka's assets](https://github.com/k4yt3x/meka/tree/0.64.1/assets).
 
 The Button and Dialog compositions in `src/components/ui` are adapted from shadcn/ui, licensed under the MIT License:
 

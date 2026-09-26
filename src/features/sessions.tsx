@@ -44,9 +44,10 @@ import { SessionHeading } from './session-heading';
 import { SessionForm } from './session-settings';
 import { SchedulesPage } from './schedules';
 import { NavigationToggle } from '../components/layout';
-import { useMediaQuery } from '../components/media-query';
+import { DESKTOP_LAYOUT_QUERY, useMediaQuery } from '../components/media-query';
 import { PanelResizeHandle } from '../components/panel-resize-handle';
 import { ReadingOptionsControl, SessionContent } from '../components/reading-options';
+import { useOverlayPadding } from '../components/visual-viewport';
 export function SessionsPage({ id }: { id?: string | undefined }) {
   const state = useConnection();
   const runtime = useRuntime();
@@ -55,7 +56,7 @@ export function SessionsPage({ id }: { id?: string | undefined }) {
   const [create, setCreate] = useState(false);
   const [mobileDetails, setMobileDetails] = useState(false);
   const { layout } = useSettings();
-  const desktop = useMediaQuery('(min-width: 821px)');
+  const desktop = useMediaQuery(DESKTOP_LAYOUT_QUERY);
   const workspace = useRef<HTMLDivElement>(null);
   const [workspaceWidth, setWorkspaceWidth] = useState(window.innerWidth);
   const [resizing, setResizing] = useState<{ side: 'sessions' | 'details'; width: number }>();
@@ -359,6 +360,7 @@ function SessionActions({
   const runtime = useRuntime();
   const canWrite = useCan('sessions:w');
   const [menu, setMenu] = useState(false);
+  const collisionPadding = useOverlayPadding();
   const [dialog, setDialog] = useState('');
   const dialogIntent = useRef('');
   const trigger = useRef<HTMLButtonElement>(null);
@@ -461,7 +463,7 @@ function SessionActions({
             className="menu-panel"
             align="end"
             sideOffset={6}
-            collisionPadding={10}
+            collisionPadding={collisionPadding}
             onCloseAutoFocus={(event) => {
               if (dialogIntent.current) event.preventDefault();
             }}

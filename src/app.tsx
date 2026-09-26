@@ -25,6 +25,7 @@ import { NavigationToggle } from './components/layout';
 import { ConnectionBanner } from './components/connection-banner';
 import { trackFocusInput } from './components/focus-input';
 import { NotificationToasts } from './notifications/toasts';
+import { useVisualViewport } from './components/visual-viewport';
 
 export function App({ runtime }: { runtime: ConnectionRuntime }) {
   useEffect(trackFocusInput, []);
@@ -37,6 +38,7 @@ export function App({ runtime }: { runtime: ConnectionRuntime }) {
   );
 }
 function Shell() {
+  useVisualViewport();
   const state = useConnection();
   const runtime = useRuntime();
   const settings = useSettings();
@@ -50,6 +52,11 @@ function Shell() {
         'dark',
         settings.theme === 'dark' || (settings.theme === 'system' && media.matches),
       );
+      const themeColor = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
+      if (themeColor)
+        themeColor.content = getComputedStyle(document.documentElement)
+          .getPropertyValue('--bg')
+          .trim();
     };
     apply();
     media.addEventListener('change', apply);

@@ -73,6 +73,221 @@ async function fixture(canWrite = true, updatedAt = '2026-09-17T00:00:00Z') {
     state: () => controller.getSnapshot()[0]!,
   };
 }
+
+it.each(['assistant_text.delta', 'thinking.delta', 'tool_call.composing'])(
+  'loads another client’s user message during %s without copying its saved response',
+  async (event) => {
+    const f = await fixture(false);
+    f.session.turn_in_flight = true;
+    await f.event('turn.started', { turn_id: 'remote' });
+    // Admission can precede persistence; the provider event is the first safe read point.
+    expect(f.state().saved?.messages).toEqual([]);
+    const input: Schema['MessageView'] = {
+      role: 'user',
+      content: [
+        { type: 'turn_context', text: 'Environment' },
+        { type: 'text', text: 'Sent from another client' },
+        { type: 'image', media_type: 'image/png', hash: 'image-hash' },
+      ],
+    };
+    f.saved.messages = [
+      input,
+      { role: 'assistant', content: [{ type: 'text', text: 'Already persisted response' }] },
+    ];
+    f.saved.total = 2;
+    vi.mocked(f.api.get).mockClear();
+    await f.event(event, {
+      turn_id: 'remote',
+      text: 'Live output',
+      id: 'tool',
+      name: 'shell_execute',
+    });
+    await vi.waitFor(() => expect(f.state().saved?.messages).toEqual([input]));
+    expect(f.state().running).toBe(true);
+    expect(f.state().partial).toBe(false);
+    expect(f.state().blocks).toHaveLength(1);
+    const reads = vi.mocked(f.api.get).mock.calls.length;
+    await f.event('assistant_text.delta', { turn_id: 'remote', text: 'More output' });
+    expect(f.api.get).toHaveBeenCalledTimes(reads);
+    f.session.turn_in_flight = false;
+    await f.event('turn.finished', { turn_id: 'remote' });
+    await vi.waitFor(() => expect(f.state().blocks).toEqual([]));
+    expect(f.state().saved?.messages).toEqual(f.saved.messages);
+  },
+);
+
+it('appends a remote input after the loaded history by position, even when its text repeats', async () => {
+  const f = await fixture();
+  const input: Schema['MessageView'] = {
+    role: 'user',
+    content: [{ type: 'text', text: 'Again' }],
+  };
+  const answer: Schema['MessageView'] = {
+    role: 'assistant',
+    content: [{ type: 'text', text: 'Done' }],
+  };
+  f.saved.messages = [input, answer];
+  f.saved.total = 2;
+  await f.controller.refresh('s');
+  f.session.turn_in_flight = true;
+  await f.event('turn.started', { turn_id: 'remote' });
+  const result: Schema['MessageView'] = {
+    role: 'user',
+    content: [{ type: 'tool_result', tool_use_id: 'previous-tool', is_error: false, content: [] }],
+  };
+  f.saved.messages.push(result, input, answer);
+  f.saved.total = 5;
+  const get = vi.mocked(f.api.get).getMockImplementation()!;
+  vi.mocked(f.api.get).mockImplementation(
+    async <T>(path: string, query?: Query, signal?: AbortSignal) => {
+      if (path.endsWith('/messages'))
+        return {
+          ...f.saved,
+          messages: f.saved.messages.slice(
+            Number(query?.offset),
+            Number(query?.offset) + Number(query?.limit),
+          ),
+        } as T;
+      return (await get(path, query, signal)) as T;
+    },
+  );
+  vi.mocked(f.api.get).mockClear();
+  await f.event('assistant_text.delta', { turn_id: 'remote', text: 'Done' });
+  await vi.waitFor(() => expect(f.state().saved?.messages).toEqual([input, answer, result, input]));
+  expect(f.api.get).toHaveBeenCalledExactlyOnceWith(
+    '/v1/sessions/s/messages',
+    { offset: 2, limit: 100 },
+    expect.any(AbortSignal),
+  );
+  expect(f.state().blocks).toEqual([{ kind: 'text', text: 'Done' }]);
+});
+
+it.each(['new turn', 'refresh', 'rewrite', 'disconnect'])(
+  'discards an opening input read overtaken by a %s',
+  async (change) => {
+    const f = await fixture();
+    f.session.turn_in_flight = true;
+    await f.event('turn.started', { turn_id: 'remote' });
+    let complete!: (response: Schema['MessagesResponse']) => void;
+    vi.mocked(f.api.get).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          complete = resolve;
+        }),
+    );
+    await f.event('assistant_text.delta', { turn_id: 'remote', text: 'Live' });
+    await vi.waitFor(() => expect(complete).toBeDefined());
+    const response: Schema['MessagesResponse'] = {
+      ...f.saved,
+      total: 1,
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'Stale input' }] }],
+    };
+    if (change === 'new turn') await f.event('turn.started', { turn_id: 'new' });
+    if (change === 'refresh') await f.controller.refresh('s');
+    if (change === 'rewrite') response.revision++;
+    if (change === 'disconnect') f.controller.dispose();
+    const before = f.controller.getSnapshot();
+    complete(response);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(f.controller.getSnapshot()).toBe(before);
+  },
+);
+
+it('loads a remote input when its first output arrives during an idle history refresh', async () => {
+  const f = await fixture();
+  const before = structuredClone(f.saved);
+  let complete!: (response: Schema['MessagesResponse']) => void;
+  vi.mocked(f.api.get).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        complete = resolve;
+      }),
+  );
+  const reading = f.controller.refresh('s');
+  await vi.waitFor(() => expect(complete).toBeDefined());
+  f.session.turn_in_flight = true;
+  await f.event('turn.started', { turn_id: 'remote' });
+  f.saved.messages = [{ role: 'user', content: [{ type: 'text', text: 'Remote input' }] }];
+  f.saved.total = 1;
+  await f.event('thinking.delta', { turn_id: 'remote', text: 'Thinking while history loads' });
+  complete(before);
+  await reading;
+  await vi.waitFor(() => expect(f.state().saved?.messages).toEqual(f.saved.messages));
+  expect(f.state().blocks).toEqual([{ kind: 'thinking', text: 'Thinking while history loads' }]);
+  expect(f.state().running).toBe(true);
+});
+
+it('does not mistake an unreconciled previous turn’s input for a new turn’s input', async () => {
+  const f = await fixture();
+  await f.event('turn.started', { turn_id: 'old' });
+  vi.mocked(f.api.get).mockRejectedValueOnce(new Error('History temporarily unavailable'));
+  await f.event('turn.finished', { turn_id: 'old' });
+  await vi.waitFor(() => expect(f.state().error?.message).toBe('History temporarily unavailable'));
+  f.saved.messages = [
+    { role: 'user', content: [{ type: 'text', text: 'Old input' }] },
+    { role: 'assistant', content: [{ type: 'text', text: 'Old response' }] },
+    { role: 'user', content: [{ type: 'text', text: 'New input' }] },
+  ];
+  f.saved.total = 3;
+  f.session.turn_in_flight = true;
+  vi.mocked(f.api.get).mockClear();
+  await f.event('turn.started', { turn_id: 'new' });
+  await f.event('thinking.delta', { turn_id: 'new', text: 'New thinking' });
+  expect(f.api.get).not.toHaveBeenCalled();
+  expect(f.state().saved?.messages).toEqual([]);
+});
+
+it('preserves earlier pages when they overtake a remote-input read', async () => {
+  const f = await fixture();
+  f.saved.revision = 1;
+  f.saved.messages = Array.from({ length: 200 }, (_, index) => ({
+    role: 'user',
+    content: [{ type: 'text', text: `Earlier input ${index}` }],
+  }));
+  f.saved.total = 200;
+  const get = vi.mocked(f.api.get).getMockImplementation()!;
+  let complete: ((response: Schema['MessagesResponse']) => void) | undefined;
+  let hold = false;
+  vi.mocked(f.api.get).mockImplementation(
+    async <T>(path: string, query?: Query, signal?: AbortSignal) => {
+      if (!path.endsWith('/messages')) return (await get(path, query, signal)) as T;
+      if (hold && Number(query?.offset) === 200 && !complete)
+        return (await new Promise<Schema['MessagesResponse']>((resolve) => {
+          complete = resolve;
+        })) as T;
+      return {
+        ...f.saved,
+        messages: f.saved.messages.slice(
+          Number(query?.offset),
+          Number(query?.offset) + Number(query?.limit),
+        ),
+      } as T;
+    },
+  );
+  await f.controller.refresh('s');
+  expect(f.state().offset).toBe(100);
+  f.session.turn_in_flight = true;
+  await f.event('turn.started', { turn_id: 'remote' });
+  const input: Schema['MessageView'] = {
+    role: 'user',
+    content: [{ type: 'text', text: 'New input' }],
+  };
+  f.saved.messages.push(input);
+  f.saved.total++;
+  hold = true;
+  await f.event('thinking.delta', { turn_id: 'remote', text: 'Thinking' });
+  await vi.waitFor(() => expect(complete).toBeDefined());
+  await f.controller.earlier('s');
+  await vi.waitFor(() => expect(f.state().saved?.messages).toHaveLength(201));
+  complete!({ ...f.saved, messages: [input] });
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(f.state().offset).toBe(0);
+  expect(f.state().saved?.messages).toEqual(f.saved.messages);
+  expect(f.state().blocks).toEqual([{ kind: 'thinking', text: 'Thinking' }]);
+});
+
 it('notifies once for an observed live turn, but never for historical replay or cancellation', async () => {
   const f = await fixture();
   const completed = vi.fn();

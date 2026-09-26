@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-26
+
+### Added
+
+- Install mekaweb with the meka logo and a standalone Home Screen window on iPhone and iPad.
+
+### Fixed
+
+- Show messages sent from another client while the agent's response is streaming.
+- Keep mobile controls clear of screen cutouts and the keyboard, and avoid input focus zoom.
+- Keep the mobile layout when using a phone in landscape orientation.
+- Render Mermaid title frontmatter and formatted labels, and fix Gantt layout and contrast.
+
 ## [0.5.0] - 2026-09-25
 
 ### Added
@@ -105,7 +118,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Light and dark themes, narrow layouts, and collapsible, resizable session panels.
 - Hosting at the root or a subpath, with GitHub Pages deployment on version tags.
 
-[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.5.0...HEAD
+[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.6.0...HEAD
+[0.6.0]: https://github.com/k4yt3x/mekaweb/compare/0.5.0...0.6.0
 [0.5.0]: https://github.com/k4yt3x/mekaweb/compare/0.4.1...0.5.0
 [0.4.1]: https://github.com/k4yt3x/mekaweb/compare/0.4.0...0.4.1
 [0.4.0]: https://github.com/k4yt3x/mekaweb/compare/0.3.0...0.4.0

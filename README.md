@@ -104,6 +104,14 @@ Completion alerts are configured under **Settings → Notifications**, with a **
 
 In-app alerts work independently of browser notification permission and service workers. Keep mekaweb open and connected: closed or suspended pages cannot receive completion events.
 
+## iPhone and iPad
+
+In Safari, use **Share → Add to Home Screen**. Leave **Open as Web App** enabled if shown. Mekaweb opens with the meka icon and its own app window. It still needs a network connection to load and reach meka.
+
+Connect to your meka instance inside the installed app. Its browser storage is separate from Safari, so saved connections and tokens do not carry over. If an older installation still shows a letter icon after updating, remove it and add it again; you may need to enter your connection details again.
+
+On iOS, browser notifications require opening the Home Screen app. They are not a reliable background completion alert: iOS can suspend the app and its live connection when you switch away or lock the screen. Delivery while suspended would require server-side Web Push, which mekaweb does not use. See [WebKit’s Home Screen documentation](https://webkit.org/blog/13878/web-push-for-web-apps-on-ios-and-ipados/) and [storage behavior](https://webkit.org/blog/14787/webkit-features-in-safari-17-2/).
+
 ## Connections and local data
 
 New connections default to **Local storage (persistent)**, which uses `localStorage` to keep the API token across browser restarts. Choose **Session storage (this tab)** in the **Token storage** selector to use `sessionStorage` for the current tab's session instead. Existing connections retain their saved choice. Use persistent storage only on a trusted browser profile and hosting origin.

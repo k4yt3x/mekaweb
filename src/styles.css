@@ -23,6 +23,15 @@
   --message-border: #d7e3fa;
   --radius-card: 8px;
   --navigation-inset: 11px;
+  --viewport-height: 100dvh;
+  --viewport-bottom: max(0px, 100dvh - var(--viewport-height));
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --app-top: calc(var(--safe-top) + var(--connection-banner-height, 0px));
+  --app-height: calc(var(--viewport-height) - var(--app-top) - var(--safe-bottom));
+  --app-width: calc(100vw - var(--safe-left) - var(--safe-right));
   --danger: #b42332;
   --warning: #97620c;
   --shadow: 0 12px 48px #19264412;
@@ -326,10 +335,10 @@ progress {
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 .app-frame {
-  height: 100dvh;
+  height: var(--viewport-height);
   display: flex;
   flex-direction: column;
-  padding-top: var(--connection-banner-height, 0px);
+  padding: var(--app-top) var(--safe-right) var(--safe-bottom) var(--safe-left);
   overflow: hidden;
 }
 .app-shell {
@@ -343,7 +352,7 @@ progress {
 }
 .connection-banner {
   position: fixed;
-  inset: 0 0 auto;
+  inset: var(--safe-top) var(--safe-right) auto var(--safe-left);
   z-index: 120;
   pointer-events: auto;
   display: flex;
@@ -401,12 +410,14 @@ progress {
 }
 .navigation-restore {
   position: fixed;
-  top: calc(8px + var(--connection-banner-height, 0px));
-  left: 8px;
+  top: calc(8px + var(--app-top));
+  left: calc(8px + var(--safe-left));
   z-index: 35;
   background: var(--bg);
 }
-@media (min-width: 821px) {
+@media (min-width: 821px) and (min-height: 501px),
+  (min-width: 821px) and (pointer: fine),
+  (min-width: 821px) and (pointer: none) {
   .app-shell.navigation-collapsed {
     --navigation-width: 0px;
     grid-template-columns: minmax(0, 1fr);
@@ -494,13 +505,13 @@ nav a.active {
 .skip-link {
   position: fixed;
   top: -100px;
-  left: 12px;
+  left: calc(12px + var(--safe-left));
   z-index: 100;
   background: var(--bg);
   padding: 12px;
 }
 .skip-link:focus {
-  top: calc(8px + var(--connection-banner-height, 0px));
+  top: calc(8px + var(--app-top));
 }
 .page {
   width: 100%;
@@ -578,12 +589,17 @@ nav a.active {
   overflow-wrap: anywhere;
 }
 .welcome {
-  min-height: 100dvh;
+  --welcome-block-padding: 36px;
+  --welcome-inline-padding: 24px;
+  min-height: var(--viewport-height);
   display: flex;
   flex-direction: column;
   justify-content: center;
   max-width: 500px;
-  padding: 36px 24px;
+  padding: calc(var(--welcome-block-padding) + var(--safe-top))
+    calc(var(--welcome-inline-padding) + var(--safe-right))
+    calc(var(--welcome-block-padding) + var(--safe-bottom))
+    calc(var(--welcome-inline-padding) + var(--safe-left));
   margin: 0 auto;
 }
 .connection-card {
@@ -775,12 +791,12 @@ nav a.active {
 }
 .notification-toasts {
   position: fixed;
-  top: calc(var(--connection-banner-height, 0px) + 76px);
-  right: 16px;
+  top: calc(var(--app-top) + 76px);
+  right: calc(16px + var(--safe-right));
   z-index: 80;
   display: grid;
   gap: 10px;
-  width: min(360px, calc(100vw - 32px));
+  width: min(360px, calc(var(--app-width) - 32px));
   pointer-events: none;
 }
 .notification-toast {
@@ -854,8 +870,8 @@ nav a.active {
 }
 @media (max-width: 760px) {
   .notification-toasts {
-    top: calc(var(--connection-banner-height, 0px) + 64px);
-    right: 50%;
+    top: calc(var(--app-top) + 64px);
+    right: calc(var(--safe-right) + var(--app-width) / 2);
     transform: translateX(50%);
   }
 }
@@ -977,12 +993,13 @@ nav a.active {
 }
 .storage-warning {
   position: fixed;
-  bottom: 0;
+  bottom: var(--viewport-bottom);
   left: 0;
   right: 0;
   background: var(--raised);
   border-top: 1px solid var(--border);
-  padding: 9px 18px;
+  padding: 9px calc(18px + var(--safe-right)) calc(9px + var(--safe-bottom))
+    calc(18px + var(--safe-left));
   font-size: 0.75rem;
   z-index: 90;
 }
@@ -995,17 +1012,17 @@ nav a.active {
 }
 .dialog-content {
   position: fixed;
-  top: calc(50% + var(--connection-banner-height, 0px) / 2);
-  left: 50%;
+  top: calc(var(--app-top) + var(--app-height) / 2);
+  left: calc(var(--safe-left) + var(--app-width) / 2);
   transform: translate(-50%, -50%);
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 13px;
   box-shadow: 0 24px 100px #0003;
   padding: 24px;
-  width: calc(100% - 32px);
+  width: calc(var(--app-width) - 32px);
   max-width: 490px;
-  max-height: min(90dvh, calc(100dvh - var(--connection-banner-height, 0px) - 24px));
+  max-height: min(90dvh, calc(var(--app-height) - 24px));
   overflow: auto;
   z-index: 61;
 }
@@ -1824,7 +1841,9 @@ progress::-moz-progress-bar {
 }
 .conversation-wrap {
   /* Window center expressed in the main pane's coordinates, using the grid's actual widths. */
-  --conversation-center: calc(50vw - var(--navigation-width) - var(--visible-session-list-width));
+  --conversation-center: calc(
+    var(--app-width) / 2 - var(--navigation-width) - var(--visible-session-list-width)
+  );
   flex: 1;
   min-height: 0;
   position: relative;
@@ -2300,7 +2319,7 @@ progress::-moz-progress-bar {
 }
 .composer-area {
   position: relative;
-  padding: 18px 0 calc(24px + env(safe-area-inset-bottom));
+  padding: 18px 0 24px;
   min-height: 0;
   overflow: auto;
   overscroll-behavior: contain;
@@ -2515,10 +2534,10 @@ select option {
 
 .approval-tray {
   position: fixed;
-  right: 20px;
-  bottom: 20px;
+  right: calc(20px + var(--safe-right));
+  bottom: calc(20px + var(--safe-bottom) + var(--viewport-bottom));
   width: 380px;
-  max-height: 80dvh;
+  max-height: min(80dvh, calc(var(--app-height) - 40px));
   overflow: auto;
   z-index: 45;
   display: flex;
@@ -2593,10 +2612,11 @@ select option {
     justify-content: flex-start;
   }
   .welcome {
-    padding: 60px 32px;
+    --welcome-block-padding: 60px;
+    --welcome-inline-padding: 32px;
   }
 }
-@media (max-width: 820px) {
+@media (max-width: 820px), (pointer: coarse) and (max-height: 500px) {
   .desktop-control {
     display: none;
   }
@@ -2694,13 +2714,13 @@ select option {
     padding-top: 10px;
   }
   .composer-area {
-    padding-bottom: calc(18px + env(safe-area-inset-bottom));
+    padding-bottom: 18px;
   }
   .approval-tray {
-    width: calc(100% - 24px);
-    right: 12px;
-    bottom: 12px;
-    max-height: 70dvh;
+    width: calc(var(--app-width) - 24px);
+    right: calc(12px + var(--safe-right));
+    bottom: calc(12px + var(--safe-bottom) + var(--viewport-bottom));
+    max-height: min(70dvh, calc(var(--app-height) - 24px));
   }
   .approval-card .json {
     max-height: 180px;
@@ -2738,11 +2758,23 @@ select option {
     flex-direction: column;
   }
   .dialog-content {
-    max-height: min(94dvh, calc(100dvh - var(--connection-banner-height, 0px) - 20px));
-    width: calc(100% - 20px);
+    max-height: min(94dvh, calc(var(--app-height) - 20px));
+    width: calc(var(--app-width) - 20px);
   }
   .panel {
     padding: 17px;
+  }
+}
+@media (hover: none), (pointer: coarse) {
+  /* Small editable text triggers Safari's focus zoom. Keep pinch zoom available. */
+  :root
+    :is(input, textarea, select):not(
+      [type='checkbox'],
+      [type='file'],
+      [type='range'],
+      [type='hidden']
+    ) {
+    font-size: max(16px, 1rem);
   }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -2764,22 +2796,22 @@ select option {
 
 .dialog-left,
 .dialog-right {
-  top: var(--connection-banner-height, 0px);
+  top: var(--app-top);
   transform: none;
-  height: calc(100dvh - var(--connection-banner-height, 0px));
-  max-height: calc(100dvh - var(--connection-banner-height, 0px));
+  height: var(--app-height);
+  max-height: var(--app-height);
   border-radius: 0;
-  width: min(92vw, 560px);
+  width: min(calc(var(--app-width) * 0.92), 560px);
 }
 .dialog-left {
-  left: 0;
+  left: var(--safe-left);
   max-width: 340px;
   display: flex;
   flex-direction: column;
 }
 .dialog-right {
   left: auto;
-  right: 0;
+  right: var(--safe-right);
 }
 :root:not([data-focus-input='pointer']) .list-footer label:has(:focus-visible) {
   outline: 2px solid var(--accent);
@@ -3064,7 +3096,8 @@ select option {
 }
 @media (max-width: 820px) {
   .welcome {
-    padding: 30px 22px;
+    --welcome-block-padding: 30px;
+    --welcome-inline-padding: 22px;
     max-width: 480px;
   }
   .connection-card {
@@ -3105,8 +3138,8 @@ select option {
 .dialog-content.media-dialog {
   display: flex;
   flex-direction: column;
-  width: calc(100% - 48px);
-  height: calc(100dvh - var(--connection-banner-height, 0px) - 48px);
+  width: calc(var(--app-width) - 48px);
+  height: calc(var(--app-height) - 48px);
   max-width: none;
   max-height: none;
   overflow: hidden;
@@ -3183,8 +3216,8 @@ select option {
 }
 @media (max-width: 600px) {
   .dialog-content.media-dialog {
-    width: calc(100% - 16px);
-    height: calc(100dvh - var(--connection-banner-height, 0px) - 16px);
+    width: calc(var(--app-width) - 16px);
+    height: calc(var(--app-height) - 16px);
     padding: 12px;
   }
 }

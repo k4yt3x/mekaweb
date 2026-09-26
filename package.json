@@ -1,6 +1,6 @@
 {
   "name": "mekaweb",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "private": true,
   "description": "The web interface for meka",
   "license": "AGPL-3.0-or-later",
@@ -34,6 +34,7 @@
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
     "dompurify": "3.4.15",
+    "js-yaml": "4.3.2",
     "katex": "0.16.47",
     "lucide-react": "1.47.0",
     "mermaid": "11.17.2",
@@ -52,6 +53,7 @@
     "@eslint/js": "10.0.1",
     "@tailwindcss/vite": "4.3.3",
     "@types/hast": "3.0.5",
+    "@types/js-yaml": "4.0.9",
     "@types/mdast": "4.0.4",
     "@types/node": "24.13.5",
     "@types/react": "19.3.0",

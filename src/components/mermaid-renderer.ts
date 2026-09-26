@@ -1,21 +1,13 @@
 import mermaid from 'mermaid';
 import DOMPurify from 'dompurify';
 import { createId } from '../identifiers';
+import { prepareDiagram } from './mermaid-source';
 
 let queue: Promise<unknown> = Promise.resolve();
 export function renderDiagram(source: string, dark: boolean, signal: AbortSignal) {
   const render = async () => {
     signal.throwIfAborted();
-    if (source.length > 20000) throw new Error('This diagram is too large to preview.');
-    // Content cannot override security, styling, or resource limits through frontmatter/directives.
-    if (/^\s*---|%%\s*\{/m.test(source))
-      throw new Error('Diagram configuration directives are not supported.');
-    if (
-      /(?:\b(?:https?|ftp|file|data|javascript):|\/\/|\b(?:img|image)\s*:|\burl\s*\(|@import|@font-face)/i.test(
-        source,
-      )
-    )
-      throw new Error('External resources and image nodes are not supported in diagram previews.');
+    const prepared = prepareDiagram(source);
     const config = {
       startOnLoad: false,
       securityLevel: 'strict' as const,
@@ -38,6 +30,15 @@ export function renderDiagram(source: string, dark: boolean, signal: AbortSignal
         edgeLabelBackground: dark ? '#161616' : '#ffffff',
         noteBkgColor: dark ? '#1f1f1f' : '#f7f8fa',
         noteTextColor: dark ? '#ebebeb' : '#202632',
+        activeTaskBkgColor: dark ? '#1e4067' : '#dbeafe',
+        activeTaskBorderColor: dark ? '#82adff' : '#4774b9',
+        doneTaskBkgColor: dark ? '#333333' : '#e5e8ee',
+        doneTaskBorderColor: dark ? '#777777' : '#656f80',
+        taskTextDarkColor: dark ? '#ebebeb' : '#202632',
+        taskTextOutsideColor: dark ? '#ebebeb' : '#202632',
+        critBkgColor: dark ? '#6b2828' : '#fde2e2',
+        critBorderColor: dark ? '#e59b9b' : '#b42332',
+        gridColor: dark ? '#333333' : '#d5d9e1',
       },
       fontFamily: 'system-ui, sans-serif',
       htmlLabels: false,
@@ -48,10 +49,13 @@ export function renderDiagram(source: string, dark: boolean, signal: AbortSignal
     };
     mermaid.initialize({ ...config, secure: Object.keys(config) });
     const host = document.createElement('div');
-    host.style.cssText = 'position:fixed;left:-10000px;top:0;visibility:hidden;pointer-events:none';
+    // Width-dependent diagrams otherwise measure a shrink-to-fit SVG viewport of only 300px.
+    // Use a stable canvas on mobile as well; the resulting image is fitted by the viewer.
+    host.style.cssText =
+      'position:fixed;left:-10000px;top:0;width:1200px;visibility:hidden;pointer-events:none';
     document.body.append(host);
     try {
-      const result = await mermaid.render(`diagram-${createId()}`, source, host);
+      const result = await mermaid.render(`diagram-${createId()}`, prepared.source, host);
       signal.throwIfAborted();
       const clean = DOMPurify.sanitize(result.svg, {
         USE_PROFILES: { svg: true, svgFilters: true },
@@ -93,7 +97,10 @@ export function renderDiagram(source: string, dark: boolean, signal: AbortSignal
         throw new Error('This diagram is too large to preview.');
       svg.setAttribute('width', String(Math.ceil(width)));
       svg.setAttribute('height', String(Math.ceil(height)));
-      const title = svg.querySelector('title')?.textContent || 'Mermaid diagram';
+      const title =
+        prepared.title ||
+        svg.querySelector('title, .titleText, .flowchartTitleText')?.textContent ||
+        'Mermaid diagram';
       return {
         blob: new Blob([new XMLSerializer().serializeToString(svg)], { type: 'image/svg+xml' }),
         title,

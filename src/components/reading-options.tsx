@@ -16,6 +16,7 @@ import { useRuntime, useSettings } from '../connections/context';
 import { CONVERSATION_FONT, CONVERSATION_WIDTH, type Settings } from '../connections/storage';
 import { Button } from './ui/button';
 import { PixelInput } from './pixel-input';
+import { useOverlayPadding } from './visual-viewport';
 
 type ReadingOptions = {
   fontSize: number;
@@ -128,6 +129,7 @@ export function SessionContent({ children }: { children: ReactNode }) {
 
 export function ReadingOptionsControl() {
   const value = useContext(ReadingContext);
+  const collisionPadding = useOverlayPadding();
   if (!value) throw new Error('Reading options require SessionContent.');
   return (
     <Popover.Root>
@@ -149,7 +151,7 @@ export function ReadingOptionsControl() {
           aria-label="Reading options"
           align="end"
           sideOffset={6}
-          collisionPadding={10}
+          collisionPadding={collisionPadding}
         >
           <ReadingOptionsForm value={value} />
         </Popover.Content>

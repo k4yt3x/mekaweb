@@ -1,6 +1,7 @@
 import * as Select from '@radix-ui/react-select';
 import { Check, ChevronDown } from 'lucide-react';
 import type { Schema } from '../../api/client';
+import { useOverlayPadding } from '../visual-viewport';
 
 export function ProfileSelect({
   value,
@@ -18,6 +19,7 @@ export function ProfileSelect({
   onChange: (value: string) => void;
 }) {
   const missing = value && !profiles.some((profile) => profile.name === value);
+  const collisionPadding = useOverlayPadding();
   return (
     <Select.Root value={value ?? ''} onValueChange={onChange} disabled={disabled}>
       <Select.Trigger
@@ -42,7 +44,7 @@ export function ProfileSelect({
           side="top"
           align="end"
           sideOffset={6}
-          collisionPadding={10}
+          collisionPadding={collisionPadding}
         >
           <Select.Viewport>
             {missing && (

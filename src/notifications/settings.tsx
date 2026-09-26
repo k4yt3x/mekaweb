@@ -11,11 +11,13 @@ export function NotificationSettings() {
   const problem =
     state.availability === 'insecure'
       ? 'Browser notifications require HTTPS or localhost.'
-      : state.availability === 'unsupported'
-        ? 'Browser notifications are unavailable in this browser.'
-        : state.permission === 'denied'
-          ? 'Notifications are blocked. Allow them in your browser’s site settings.'
-          : state.error;
+      : state.availability === 'install'
+        ? 'Add mekaweb to your Home Screen and open it there to enable browser notifications.'
+        : state.availability === 'unsupported'
+          ? 'Browser notifications are unavailable in this browser.'
+          : state.permission === 'denied'
+            ? 'Notifications are blocked. Allow them in your browser’s site settings.'
+            : state.error;
   return (
     <section className="panel">
       <h2>Notifications</h2>

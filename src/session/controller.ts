@@ -112,6 +112,12 @@ interface Entry {
   notifiedTurns: Set<string>;
   notificationsSince: number;
   textIdleTimer?: ReturnType<typeof setTimeout>;
+  opening?: {
+    saved: Schema['MessagesResponse'];
+    offset: number;
+    progressed: boolean;
+    requested: boolean;
+  };
 }
 export function isSessionRunning(state: SessionState) {
   return state.running || state.submissions.some((submission) => submission.state === 'running');
@@ -412,6 +418,19 @@ export class SessionController {
         this.followCompletion(entry, turnId);
       }
       if (entry.state.turnId !== turnId) {
+        delete entry.opening;
+        if (
+          entry.state.saved &&
+          !entry.state.partial &&
+          entry.reconcileEpoch === undefined &&
+          !data.resumed
+        )
+          entry.opening = {
+            saved: entry.state.saved,
+            offset: entry.state.offset,
+            progressed: false,
+            requested: false,
+          };
         entry.epoch++;
         this.publish(entry, {
           turnId,
@@ -614,7 +633,10 @@ export class SessionController {
         (submission) => submission.turnId === turnId && submission.state === 'running',
       );
     const current = !state.turnId || state.turnId === turnId;
-    if (current) entry.followed = false;
+    if (current) {
+      entry.followed = false;
+      delete entry.opening;
+    }
     entry.outcomes.set(turnId, outcome);
     if (entry.outcomes.size > 50) entry.outcomes.delete(entry.outcomes.keys().next().value!);
     const message = sessionNotice(event, data)?.text;
@@ -910,10 +932,13 @@ export class SessionController {
         ...(epoch === entry.epoch ? { running: session.turn_in_flight } : {}),
         ...(reconciled ? { tools: {}, partial: false } : {}),
       });
+      this.syncTurnInput(entry);
       if (pendingInbox.length || wasFollowed) this.release(entry);
     } catch (error) {
-      if (!entry.abort.signal.aborted && request === entry.snapshotEpoch)
+      if (!entry.abort.signal.aborted && request === entry.snapshotEpoch) {
         this.publish(entry, { loading: false, error: asError(error) });
+        this.syncTurnInput(entry);
+      }
     }
   }
   private async loadSnapshot(
@@ -976,6 +1001,7 @@ export class SessionController {
         saved: { ...page, messages: [...page.messages, ...previous.messages] },
         offset,
       });
+      this.syncTurnInput(entry);
     } catch (error) {
       this.publish(entry, { error: asError(error) });
     }
@@ -1268,6 +1294,10 @@ export class SessionController {
     }
   }
   private markTurnProgress(entry: Entry, turnId: string) {
+    if (turnId === entry.state.turnId && entry.opening) {
+      entry.opening.progressed = true;
+      this.syncTurnInput(entry);
+    }
     if (
       !entry.state.submissions.some(
         (submission) =>
@@ -1287,6 +1317,84 @@ export class SessionController {
     // turn.started precedes the eager user-message save. The first provider event
     // gives both the list and header another read after that title can be derived.
     this.invalidated(entry.state.id);
+  }
+  private syncTurnInput(entry: Entry) {
+    if (this.disposed || entry.abort.signal.aborted || this.entries.get(entry.state.id) !== entry)
+      return;
+    const opening = entry.opening;
+    const saved = entry.state.saved;
+    if (
+      !opening?.progressed ||
+      !saved ||
+      entry.state.loading ||
+      entry.state.submissions.some((submission) => submission.preview)
+    )
+      return;
+    if (opening.saved !== saved) {
+      // An idle refresh or earlier-page read may finish after turn admission. The same
+      // revision and end position still identify the prefix, without comparing text.
+      if (
+        opening.saved.revision !== saved.revision ||
+        opening.offset + opening.saved.messages.length !==
+          entry.state.offset + saved.messages.length
+      ) {
+        delete entry.opening;
+        return;
+      }
+      opening.saved = saved;
+      opening.offset = entry.state.offset;
+      opening.requested = false;
+    }
+    if (opening.requested) return;
+    opening.requested = true;
+    void this.refreshTurnInput(entry, opening);
+    this.invalidated(entry.state.id);
+  }
+  private async refreshTurnInput(entry: Entry, opening: NonNullable<Entry['opening']>) {
+    const request = entry.snapshotEpoch;
+    const current = () =>
+      !this.disposed &&
+      !entry.abort.signal.aborted &&
+      this.entries.get(entry.state.id) === entry &&
+      entry.opening === opening &&
+      entry.snapshotEpoch === request &&
+      entry.state.saved === opening.saved &&
+      !entry.state.submissions.some((submission) => submission.preview);
+    const messages: Schema['MessageView'][] = [];
+    let offset = opening.offset + opening.saved.messages.length;
+    try {
+      // The feed has no user-message payload. After the first provider event, fetch the
+      // appended input by position and revision, stopping before this turn's saved output.
+      // Copying the whole snapshot would duplicate the response already being streamed.
+      while (current()) {
+        const page = await this.api.get<Schema['MessagesResponse']>(
+          sessionPath(entry.state.id) + '/messages',
+          { offset, limit: 100 },
+          entry.abort.signal,
+        );
+        if (!current() || page.revision !== opening.saved.revision || !page.messages.length) return;
+        // Tool results also use the user role; only text or images identify an input.
+        const input = page.messages.findIndex(
+          (message) =>
+            message.role === 'user' &&
+            message.content.some((block) => block.type === 'text' || block.type === 'image'),
+        );
+        messages.push(...(input < 0 ? page.messages : page.messages.slice(0, input + 1)));
+        if (input >= 0) {
+          this.publish(entry, {
+            saved: {
+              ...page,
+              messages: [...opening.saved.messages, ...messages],
+            },
+          });
+          return;
+        }
+        offset += page.messages.length;
+        if (offset >= page.total) return;
+      }
+    } catch (error) {
+      if (current()) this.publish(entry, { error: asError(error) });
+    }
   }
   async retryInbox(id: string, key: string) {
     const entry = await this.ensure(id);
