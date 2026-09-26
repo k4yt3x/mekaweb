@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState, type RefObject } from 'react';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { Import, ListTree, Plus, Search, X } from 'lucide-react';
 import type { Schema } from '../api/client';
@@ -11,19 +11,26 @@ import { ErrorNotice, Loading } from '../components/common';
 import { Button } from '../components/ui/button';
 import { SessionListItem } from './session-list-item';
 import { sessionTree } from './session-tree';
+import { useShortcut } from '../components/use-shortcut';
+import { adjacentSession, shortcutAttribute, shortcutHint } from '../components/shortcut-keys';
 
 export function SessionList({
   selectedId,
   onCreate,
+  searchInput,
+  onOpen,
 }: {
   selectedId: string | undefined;
   onCreate: () => void;
+  searchInput: RefObject<HTMLInputElement | null>;
+  onOpen: () => void;
 }) {
   const { api, connection, info } = useConnection();
   const runtime = useRuntime();
   const canWrite = useCan('sessions:w');
   const sessions = useSessionStates();
   const action = useAction();
+  const sessionItems = useRef<HTMLDivElement>(null);
   const [children, setChildren] = useState(false);
   const [search, setSearch] = useState('');
   const query = search.trim();
@@ -68,6 +75,25 @@ export function SessionList({
     : sessionTree(items);
   const pending = waiting || (searching ? matches.isPending : list.isPending);
   const error = waiting ? undefined : searching ? matches.error : list.error;
+  function moveSession(direction: -1 | 1) {
+    const next = adjacentSession(
+      entries.map(({ session }) => session.id),
+      selectedId,
+      direction,
+    );
+    if (!next) return;
+    const link = sessionItems.current?.querySelector<HTMLAnchorElement>(
+      `a[href="#/sessions/${encodeURIComponent(next)}"]`,
+    );
+    if (link?.getClientRects().length) {
+      link.focus({ preventScroll: true });
+      link.scrollIntoView({ block: 'nearest' });
+    } else document.getElementById('main-content')?.focus({ preventScroll: true });
+    location.hash = '/sessions/' + encodeURIComponent(next);
+    onOpen();
+  }
+  useShortcut('previousSession', () => moveSession(-1), !pending && !error);
+  useShortcut('nextSession', () => moveSession(1), !pending && !error);
   return (
     <>
       <header>
@@ -87,6 +113,8 @@ export function SessionList({
             variant="ghost"
             size="icon"
             aria-label="New session"
+            title={`New session (${shortcutHint('newSession')})`}
+            aria-keyshortcuts={shortcutAttribute('newSession')}
             disabled={!canWrite}
             onClick={onCreate}
           >
@@ -98,7 +126,10 @@ export function SessionList({
         <div className="session-search">
           <Search size={15} aria-hidden="true" />
           <input
+            ref={searchInput}
             aria-label="Search sessions"
+            title={`Search sessions (${shortcutHint('searchSessions')})`}
+            aria-keyshortcuts={shortcutAttribute('searchSessions')}
             placeholder="Search sessions…"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
@@ -121,7 +152,7 @@ export function SessionList({
           )}
         </div>
       )}
-      <div className="session-items" aria-busy={pending}>
+      <div className="session-items" aria-busy={pending} ref={sessionItems}>
         <ErrorNotice error={error} />
         {pending && <Loading label={searching ? 'Searching…' : 'Loading…'} />}
         {!waiting &&
@@ -132,6 +163,7 @@ export function SessionList({
               depth={depth}
               branches={branches}
               selected={item.id === selectedId}
+              onOpen={onOpen}
               excerpt={
                 'excerpt' in item && typeof item.excerpt === 'string' ? item.excerpt : undefined
               }

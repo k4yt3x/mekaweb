@@ -45,7 +45,7 @@ function channel() {
     },
   };
 }
-async function fixture() {
+async function fixture(open = true) {
   const api = new ApiClient('https://example.invalid', 'synthetic-token');
   const session: Schema['SessionResponse'] = {
     id: 's',
@@ -79,9 +79,9 @@ async function fixture() {
   const invalidated = vi.fn();
   const controller = new SessionController(api, true, invalidated);
   controllers.push(controller);
-  controller.select('s');
+  if (open) controller.select('s');
   const state = () => controller.getSnapshot()[0]!;
-  await vi.waitFor(() => expect(state().saved).toBeDefined());
+  if (open) await vi.waitFor(() => expect(state().saved).toBeDefined());
   async function start() {
     const sending = controller.submitMessage('s', 'Hello.', options());
     await vi.waitFor(() => expect(request).toHaveBeenCalledOnce());
@@ -525,4 +525,120 @@ it('does not accept a turn response identifying a different session', async () =
   expect(f.state().submissions[0]?.state).toBe('uncertain');
   expect(f.post.canceled()).toBe(true);
   expect(f.mutate).not.toHaveBeenCalled();
+});
+
+it('previews a first message while opening its feed and keeps it through route changes', async () => {
+  const f = await fixture(false);
+  let connect!: (response: Response) => void;
+  vi.mocked(f.api.stream).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        connect = resolve;
+      }),
+  );
+  const sending = f.controller.submitInitialMessage(f.session, 'First input', options());
+  expect(f.state().session?.id).toBe('s');
+  expect(f.state().submissions[0]).toMatchObject({
+    state: 'sending',
+    preview: true,
+    body: { message: 'First input' },
+  });
+  f.controller.select(undefined);
+  await vi.waitFor(() => expect(connect).toBeDefined());
+  expect(f.request).not.toHaveBeenCalled();
+  connect(f.feed.response);
+  await vi.waitFor(() => expect(f.request).toHaveBeenCalledOnce());
+  expect(f.feed.canceled()).toBe(false);
+  expect(f.state().saved?.total).toBe(0);
+  await f.feed.event('turn.started');
+  expect(f.state().partial).toBe(false);
+  await f.post.event('turn.started');
+  expect(await sending).toBe(true);
+  expect(f.state().submissions).toHaveLength(1);
+  expect(f.mutate).not.toHaveBeenCalled();
+});
+
+it('retains a failed first message for retry within its created session', async () => {
+  const f = await fixture(false);
+  f.request.mockRejectedValueOnce(new ApiError(422, { detail: 'Rejected input' }));
+  expect(await f.controller.submitInitialMessage(f.session, 'Retry this', options())).toBe(false);
+  expect(f.state().submissions[0]).toMatchObject({
+    state: 'failed',
+    body: { message: 'Retry this' },
+  });
+  await expect(
+    f.controller.submitInitialMessage(f.session, 'Retry this', options()),
+  ).rejects.toThrow('already started');
+  const retry = f.controller.submitMessage('s', 'Retry this', options());
+  await vi.waitFor(() => expect(f.request).toHaveBeenCalledTimes(2));
+  await f.post.event('turn.started');
+  expect(await retry).toBe(true);
+  expect(f.mutate).not.toHaveBeenCalled();
+});
+
+it('does not send a first turn when its attending feed could not open', async () => {
+  const f = await fixture(false);
+  vi.mocked(f.api.stream).mockRejectedValueOnce(new Error('Feed unavailable'));
+  expect(await f.controller.submitInitialMessage(f.session, 'Keep draft', options())).toBe(false);
+  expect(f.request).not.toHaveBeenCalled();
+  expect(f.state().submissions[0]).toMatchObject({ state: 'failed', preview: false });
+  expect(f.state().error?.message).toBe('Feed unavailable');
+});
+
+it('does not replay an uncertain first turn', async () => {
+  const f = await fixture(false);
+  f.request.mockRejectedValueOnce(new UncertainMutationError());
+  expect(await f.controller.submitInitialMessage(f.session, 'Only once', options())).toBe(false);
+  expect(f.state().submissions[0]?.state).toBe('uncertain');
+  await expect(f.controller.submitMessage('s', 'Only once', options())).rejects.toThrow(
+    'pending submission',
+  );
+  expect(f.request).toHaveBeenCalledOnce();
+});
+
+it('abandons a first-turn handoff when the connection is retired', async () => {
+  const f = await fixture(false);
+  let connect!: (response: Response) => void;
+  vi.mocked(f.api.stream).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        connect = resolve;
+      }),
+  );
+  const sending = f.controller.submitInitialMessage(f.session, 'Old connection', options());
+  await vi.waitFor(() => expect(connect).toBeDefined());
+  f.controller.dispose();
+  connect(f.feed.response);
+  expect(await sending).toBe(false);
+  expect(f.request).not.toHaveBeenCalled();
+});
+
+it('fails a first turn whose feed restarts before sending, so it can be sent again', async () => {
+  const f = await fixture(false);
+  let connect!: (response: Response) => void;
+  vi.mocked(f.api.stream).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        connect = resolve;
+      }),
+  );
+  const sending = f.controller.submitInitialMessage(f.session, 'Interrupted', options());
+  await vi.waitFor(() => expect(connect).toBeDefined());
+  const reconnecting = f.controller.reconnect('s');
+  connect(channel().response);
+  await reconnecting;
+  expect(await sending).toBe(false);
+  expect(f.request).not.toHaveBeenCalled();
+  await vi.waitFor(() =>
+    expect(f.state().submissions[0]).toMatchObject({
+      state: 'failed',
+      preview: false,
+      body: { message: 'Interrupted' },
+    }),
+  );
+  expect(f.state().saved?.total).toBe(0);
+  const retry = f.controller.submitMessage('s', 'Interrupted', options());
+  await vi.waitFor(() => expect(f.request).toHaveBeenCalledOnce());
+  await f.post.event('turn.started');
+  expect(await retry).toBe(true);
 });

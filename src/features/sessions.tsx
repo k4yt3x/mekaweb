@@ -3,6 +3,7 @@ import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type FormEvent,
@@ -13,13 +14,11 @@ import {
   CornerUpLeft,
   Ellipsis,
   Folder,
-  MessageSquare,
   PanelRight,
   List,
   ListCollapse,
   X,
   RefreshCw,
-  Plus,
   Share as Export,
 } from 'lucide-react';
 import { download, sessionPath, type Schema } from '../api/client';
@@ -37,23 +36,27 @@ import { Button } from '../components/ui/button';
 import { Dialog } from '../components/ui/dialog';
 import { Empty, ErrorNotice, Field, Json, Loading } from '../components/common';
 import { Conversation } from './conversation';
+import { NewConversation } from './new-conversation';
 import { SessionContext } from './session-context';
 import { SessionList } from './session-list';
-import { SessionMetadataItems, SessionRenameDialog } from './session-metadata';
+import { SessionDeleteDialog, SessionMetadataItems, SessionRenameDialog } from './session-metadata';
 import { SessionHeading } from './session-heading';
-import { SessionForm } from './session-settings';
 import { SchedulesPage } from './schedules';
 import { NavigationToggle } from '../components/layout';
 import { DESKTOP_LAYOUT_QUERY, useMediaQuery } from '../components/media-query';
 import { PanelResizeHandle } from '../components/panel-resize-handle';
 import { ReadingOptionsControl, SessionContent } from '../components/reading-options';
 import { useOverlayPadding } from '../components/visual-viewport';
+import { useSessionNavigation } from './session-navigation';
+import { useShortcut } from '../components/use-shortcut';
+import { shortcutAttribute, shortcutHint } from '../components/shortcut-keys';
 export function SessionsPage({ id }: { id?: string | undefined }) {
   const state = useConnection();
   const runtime = useRuntime();
   const canRead = useCan('sessions:r');
-  const canWrite = useCan('sessions:w');
-  const [create, setCreate] = useState(false);
+  const { newSession, searchRequested, finishSearch, mobileSessionsOpen, setMobileSessionsOpen } =
+    useSessionNavigation();
+  const searchInput = useRef<HTMLInputElement>(null);
   const [mobileDetails, setMobileDetails] = useState(false);
   const { layout } = useSettings();
   const desktop = useMediaQuery(DESKTOP_LAYOUT_QUERY);
@@ -71,7 +74,7 @@ export function SessionsPage({ id }: { id?: string | undefined }) {
   const preferredDetails = layout.detailsWidth ?? 360;
   const canFitBoth = workspaceWidth >= preferredList + preferredDetails + 340;
   const listCollapsed =
-    desktop && Boolean(id) && (layout.sessionsCollapsed || (layout.detailsOpen && !canFitBoth));
+    desktop && (layout.sessionsCollapsed || (Boolean(id) && layout.detailsOpen && !canFitBoth));
   const details = desktop ? layout.detailsOpen : mobileDetails;
   const listDesired = resizing?.side === 'sessions' ? resizing.width : preferredList;
   const detailsDesired = resizing?.side === 'details' ? resizing.width : preferredDetails;
@@ -120,6 +123,43 @@ export function SessionsPage({ id }: { id?: string | undefined }) {
     [headingKey],
   );
   const selectedRunning = selected ? isSessionRunning(selected) : false;
+  useLayoutEffect(() => {
+    if (!searchRequested || !canRead || !searchInput.current) return;
+    if (!desktop && !mobileSessionsOpen) return;
+    // Read the committed width too: the initial ResizeObserver notification may still be pending.
+    // Only a displayed details panel competes with the list; keep the saved preference otherwise.
+    const closeDetails =
+      desktop &&
+      Boolean(id) &&
+      layout.detailsOpen &&
+      (!canFitBoth ||
+        (workspace.current?.clientWidth ?? workspaceWidth) <
+          preferredList + preferredDetails + 340);
+    if (listCollapsed || closeDetails) {
+      runtime.storage.layout({
+        sessionsCollapsed: false,
+        ...(closeDetails ? { detailsOpen: false } : {}),
+      });
+      return;
+    }
+    searchInput.current.focus();
+    searchInput.current.select();
+    finishSearch();
+  }, [
+    searchRequested,
+    canRead,
+    desktop,
+    id,
+    mobileSessionsOpen,
+    listCollapsed,
+    canFitBoth,
+    workspaceWidth,
+    preferredList,
+    preferredDetails,
+    layout.detailsOpen,
+    runtime,
+    finishSearch,
+  ]);
   useEffect(() => {
     if (canRead) state.controller?.select(id);
     return () => state.controller?.select(undefined);
@@ -139,13 +179,14 @@ export function SessionsPage({ id }: { id?: string | undefined }) {
           '--details-width': `${detailsWidth}px`,
         } as CSSProperties
       }
-      className={`sessions-workspace ${id ? 'has-session' : ''} ${listCollapsed ? 'sessions-collapsed' : ''} ${desktop && details && selected?.session ? 'details-open' : ''}`}
+      className={`sessions-workspace ${desktop || !mobileSessionsOpen ? 'has-session' : ''} ${listCollapsed ? 'sessions-collapsed' : ''} ${desktop && details && selected?.session ? 'details-open' : ''}`}
     >
       <aside id="session-list" className="session-list" aria-label="Session list">
         <SessionList
-          key={`${state.connection?.id}:${state.connection?.authority}`}
           selectedId={id}
-          onCreate={() => setCreate(true)}
+          onCreate={newSession}
+          searchInput={searchInput}
+          onOpen={() => setMobileSessionsOpen(false)}
         />
         {desktop && (
           <PanelResizeHandle
@@ -160,116 +201,104 @@ export function SessionsPage({ id }: { id?: string | undefined }) {
         )}
       </aside>
       <SessionContent key={headingKey}>
-        {(id || (desktop && layout.navigationCollapsed)) && (
-          <header className="session-toolbar">
-            {layout.navigationCollapsed && <NavigationToggle />}
-            {id && (
-              <Button
-                className="desktop-control"
-                variant="ghost"
-                size="icon"
-                aria-label={listCollapsed ? 'Show session list' : 'Hide session list'}
-                title={listCollapsed ? 'Show session list' : 'Hide session list'}
-                aria-expanded={!listCollapsed}
-                aria-controls="session-list"
-                onClick={toggleList}
-              >
-                {listCollapsed ? <List size={18} /> : <ListCollapse size={18} />}
-              </Button>
-            )}
-            {id && (
-              <a
-                className="button button-ghost button-icon mobile-back"
-                href="#/sessions"
-                aria-label="Back to sessions"
-              >
-                <ChevronLeft size={18} />
-              </a>
-            )}
-            {id && (
-              <div className="session-title">
-                {selected?.session ? (
-                  <SessionHeading
-                    key={headingKey}
-                    session={selected.session}
-                    disabled={selected.deleting || selected.settingsPending}
-                    onError={reportHeadingError}
-                  />
-                ) : (
-                  <h1>New conversation</h1>
-                )}
-                <p>
-                  {selected?.session?.parent_id ? (
-                    <a
-                      className="parent-session-link"
-                      href={`#/sessions/${selected.session.parent_id}`}
-                      aria-label="Back to parent session"
-                      title="Back to parent session"
-                    >
-                      <CornerUpLeft size={12} aria-hidden="true" />
-                      <span>Parent session</span>
-                    </a>
-                  ) : (
-                    <>
-                      <Folder size={12} aria-hidden="true" />
-                      <span>{selected?.session?.cwd ?? 'Working directory not recorded'}</span>
-                    </>
-                  )}
-                </p>
-              </div>
-            )}
-            {selected?.session && (
-              <div className="toolbar-actions">
-                <ReadingOptionsControl />
-                {selected.feed === 'unavailable' && (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    aria-label="Reconnect session feed"
-                    onClick={() =>
-                      void action.run(async () => state.controller?.reconnect(selected.id))
-                    }
-                  >
-                    <RefreshCw size={18} />
-                  </Button>
-                )}
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  aria-label="Session details"
-                  ref={detailsButton}
-                  title={details ? 'Hide session details' : 'Show session details'}
-                  aria-expanded={details}
-                  aria-controls="session-details"
-                  onClick={() => setDetails(!details)}
-                >
-                  <PanelRight size={18} />
-                </Button>
-                <SessionActions
-                  key={`${state.connection?.id}:${state.connection?.authority}:${selected.id}`}
+        <header className="session-toolbar">
+          {layout.navigationCollapsed && <NavigationToggle />}
+          <Button
+            className="desktop-control"
+            variant="ghost"
+            size="icon"
+            aria-label={listCollapsed ? 'Show session list' : 'Hide session list'}
+            title={listCollapsed ? 'Show session list' : 'Hide session list'}
+            aria-expanded={!listCollapsed}
+            aria-controls="session-list"
+            onClick={toggleList}
+          >
+            {listCollapsed ? <List size={18} /> : <ListCollapse size={18} />}
+          </Button>
+          <Button
+            variant="ghost"
+            size={id ? 'icon' : 'default'}
+            className="mobile-back"
+            onClick={() => setMobileSessionsOpen(true)}
+            aria-label={id ? 'Show session list' : undefined}
+          >
+            <ChevronLeft size={18} aria-hidden="true" />
+            {!id && <span>Sessions</span>}
+          </Button>
+          {id && (
+            <div className="session-title">
+              {selected?.session ? (
+                <SessionHeading
+                  key={headingKey}
                   session={selected.session}
-                  running={selectedRunning}
-                  deleting={selected.deleting}
+                  disabled={selected.deleting || selected.settingsPending}
+                  onError={reportHeadingError}
                 />
-              </div>
-            )}
-          </header>
-        )}
+              ) : (
+                <h1>New conversation</h1>
+              )}
+              <p>
+                {selected?.session?.parent_id ? (
+                  <a
+                    className="parent-session-link"
+                    href={`#/sessions/${selected.session.parent_id}`}
+                    aria-label="Back to parent session"
+                    title="Back to parent session"
+                  >
+                    <CornerUpLeft size={12} aria-hidden="true" />
+                    <span>Parent session</span>
+                  </a>
+                ) : (
+                  <>
+                    <Folder size={12} aria-hidden="true" />
+                    <span>{selected?.session?.cwd ?? 'Working directory not recorded'}</span>
+                  </>
+                )}
+              </p>
+            </div>
+          )}
+          {selected?.session && (
+            <div className="toolbar-actions">
+              <ReadingOptionsControl />
+              {selected.feed === 'unavailable' && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label="Reconnect session feed"
+                  onClick={() =>
+                    void action.run(async () => state.controller?.reconnect(selected.id))
+                  }
+                >
+                  <RefreshCw size={18} />
+                </Button>
+              )}
+              <Button
+                size="icon"
+                variant="ghost"
+                aria-label="Session details"
+                ref={detailsButton}
+                title={details ? 'Hide session details' : 'Show session details'}
+                aria-expanded={details}
+                aria-controls="session-details"
+                onClick={() => setDetails(!details)}
+              >
+                <PanelRight size={18} />
+              </Button>
+              <SessionActions
+                key={`${state.connection?.id}:${state.connection?.authority}:${selected.id}`}
+                session={selected.session}
+                running={selectedRunning}
+                deleting={selected.deleting}
+              />
+            </div>
+          )}
+        </header>
         <ErrorNotice error={action.error} />
         <div id="session-title-error">
           <ErrorNotice error={headingError?.key === headingKey ? headingError.error : undefined} />
         </div>
         {!id ? (
-          <div className="session-welcome">
-            <div className="empty-icon">
-              <MessageSquare size={28} />
-            </div>
-            <h1>Select a session</h1>
-            <Button disabled={!canWrite} onClick={() => setCreate(true)}>
-              <Plus size={16} />
-              New session
-            </Button>
-          </div>
+          <NewConversation />
         ) : selected?.session ? (
           <Conversation
             key={`${state.connection?.id}:${state.connection?.authority}:${selected.id}`}
@@ -321,17 +350,6 @@ export function SessionsPage({ id }: { id?: string | undefined }) {
           </div>
         </aside>
       )}
-      <Dialog open={create} onOpenChange={setCreate} title="New session">
-        {create && (
-          <SessionForm
-            onSaved={(id) => {
-              setCreate(false);
-              void runtime.queries.invalidateQueries();
-              location.hash = '/sessions/' + id;
-            }}
-          />
-        )}
-      </Dialog>
       {!desktop && (
         <Dialog
           open={mobileDetails}
@@ -380,6 +398,11 @@ function SessionActions({
     dialogIntent.current = '';
     setDialog('');
   }
+  useShortcut(
+    'deleteSession',
+    () => openAction('delete'),
+    canWrite && !running && !deleting && !action.busy,
+  );
   function exportSession(format: 'markdown' | 'json') {
     openAction('export');
     void action.run(async () => {
@@ -399,6 +422,16 @@ function SessionActions({
       dialogIntent.current = 'pin';
       setDialog('pin');
     }
+  }
+  async function remove() {
+    await action.run(async () => {
+      if (!controller || !canWrite || running || deleting) return;
+      const deleted = await controller.deleteSession(session.id);
+      if (!deleted.length || runtime.getSnapshot().controller !== controller) return;
+      closeAction();
+      if (deleted.some((id) => location.hash === `#/sessions/${encodeURIComponent(id)}`))
+        location.hash = '/sessions';
+    });
   }
   async function execute(event: FormEvent) {
     event.preventDefault();
@@ -432,13 +465,6 @@ function SessionActions({
         );
         await controller?.refresh(session.id, true);
         return result;
-      } else if (dialog === 'delete') {
-        const deleted = await controller?.deleteSession(session.id);
-        if (!deleted?.length) return;
-        closeAction();
-        if (deleted.some((id) => location.hash === `#/sessions/${encodeURIComponent(id)}`))
-          location.hash = '/sessions';
-        return;
       }
       await runtime.queries.invalidateQueries();
     });
@@ -515,6 +541,8 @@ function SessionActions({
             <DropdownMenu.Item
               className="menu-item menu-item-danger"
               disabled={!canWrite || running}
+              aria-keyshortcuts={shortcutAttribute('deleteSession')}
+              title={`Delete session (${shortcutHint('deleteSession')})`}
               onSelect={() => openAction('delete')}
             >
               Delete session
@@ -525,8 +553,20 @@ function SessionActions({
       {dialog === 'rename' && (
         <SessionRenameDialog session={session} onClose={closeAction} trigger={trigger} />
       )}
+      <SessionDeleteDialog
+        title={session.title}
+        open={dialog === 'delete'}
+        onOpenChange={(open) => {
+          if (!open) closeAction();
+        }}
+        onDelete={() => void remove()}
+        disabled={!canWrite || running || deleting}
+        busy={action.busy}
+        error={action.error}
+        trigger={trigger}
+      />
       <Dialog
-        open={Boolean(dialog) && dialog !== 'rename'}
+        open={Boolean(dialog) && dialog !== 'rename' && dialog !== 'delete'}
         onOpenChange={(open) => {
           if (!open) closeAction();
         }}
@@ -537,13 +577,11 @@ function SessionActions({
               ? 'Fork session'
               : dialog === 'compact'
                 ? 'Compact context'
-                : dialog === 'delete'
-                  ? 'Delete session'
-                  : dialog === 'export'
-                    ? 'Export session'
-                    : dialog === 'tools'
-                      ? 'Available tools'
-                      : 'Rewind conversation'
+                : dialog === 'export'
+                  ? 'Export session'
+                  : dialog === 'tools'
+                    ? 'Available tools'
+                    : 'Rewind conversation'
         }
         onCloseAutoFocus={(event) => {
           event.preventDefault();
@@ -605,11 +643,6 @@ function SessionActions({
               </>
             )}
 
-            {dialog === 'delete' && (
-              <p className="muted">
-                Delete this session, its conversation, and its sub-agent sessions.
-              </p>
-            )}
             <ErrorNotice error={action.error} />
             {action.result !== undefined && (
               <div role="status">
@@ -618,7 +651,7 @@ function SessionActions({
             )}
             <Button
               type="submit"
-              variant={dialog === 'rewind' || dialog === 'delete' ? 'destructive' : 'default'}
+              variant={dialog === 'rewind' ? 'destructive' : 'default'}
               disabled={action.busy}
             >
               {action.busy
@@ -627,9 +660,7 @@ function SessionActions({
                   ? 'Confirm rewind'
                   : dialog === 'fork'
                     ? 'Create fork'
-                    : dialog === 'delete'
-                      ? 'Delete session'
-                      : 'Compact now'}
+                    : 'Compact now'}
             </Button>
           </form>
         )}

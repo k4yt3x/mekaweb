@@ -415,6 +415,60 @@ progress {
   z-index: 35;
   background: var(--bg);
 }
+.navigation-shortcuts {
+  margin-top: auto;
+  justify-content: flex-start;
+  padding: 11px 4px;
+  gap: 8px;
+  font-size: 0.75rem;
+  text-align: left;
+  white-space: normal;
+}
+.navigation-shortcuts svg {
+  flex-shrink: 0;
+}
+.shortcuts-restore {
+  position: fixed;
+  bottom: calc(8px + var(--safe-bottom) + var(--viewport-bottom));
+  left: calc(8px + var(--safe-left));
+  z-index: 35;
+  background: var(--bg);
+}
+.shortcut-list {
+  margin: 20px 0;
+}
+.shortcut-list > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 0;
+  font-size: 0.83rem;
+}
+.shortcut-list dd {
+  display: flex;
+  gap: 4px;
+  margin: 0;
+  flex-shrink: 0;
+}
+.shortcut-list kbd {
+  font: inherit;
+  font-size: 0.73rem;
+  line-height: 1.4;
+  padding: 3px 5px;
+  min-width: 23px;
+  text-align: center;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--muted);
+}
+.shortcut-existing {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+  line-height: 1.6;
+}
 @media (min-width: 821px) and (min-height: 501px),
   (min-width: 821px) and (pointer: fine),
   (min-width: 821px) and (pointer: none) {
@@ -1559,26 +1613,139 @@ progress::-moz-progress-bar {
   min-height: 0;
   position: relative;
 }
-.session-welcome {
-  margin: auto;
+.new-conversation-content {
+  margin-block: auto;
+  /* Sit slightly above the geometric center, where the eye expects it. */
+  padding-block: 32px max(32px, 8vh);
+}
+.new-session-intro > h1,
+.new-session-intro > p {
   text-align: center;
-  padding: 30px;
 }
-.session-welcome h1 {
-  font-size: 1.7rem;
-  margin-bottom: 12px;
+.new-session-intro h1 {
+  font-size: 1.6rem;
+  margin-bottom: 6px;
 }
-.empty-icon {
-  display: grid;
-  place-items: center;
-  background: var(--surface);
+.new-session-recovery {
+  margin-block: 12px;
+}
+.new-session-recovery > .notice {
+  margin: 0;
+}
+.new-conversation .composer-area {
+  padding-top: 26px;
+}
+.new-session-context {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  /* Align the controls with the composer's toolbar, which extends past the column padding. */
+  margin: 8px calc(-1 * var(--user-message-inset)) 0;
+  padding-inline: 10px;
+}
+@container (max-width: 600px) {
+  /* A centered composer keeps its card edges where the conversation would dock it full width. */
+  .new-conversation .composer,
+  .new-session-context {
+    margin-inline: 0;
+  }
+}
+.directory-trigger {
+  min-width: 0;
+  max-width: 100%;
+  height: 32px;
+  gap: 7px;
+  padding-inline: 8px;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+.directory-trigger:hover:not(:disabled),
+.directory-trigger[data-state='open'] {
+  color: var(--text);
+}
+.directory-trigger svg {
+  flex-shrink: 0;
+}
+.directory-trigger-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.directory-picker {
+  z-index: 80;
+  width: min(360px, calc(100vw - 20px));
+  max-height: var(--radix-popover-content-available-height);
+  overflow: auto;
+  padding: 6px;
   border: 1px solid var(--border);
-  border-radius: 14px;
-  color: var(--accent);
-  width: 62px;
-  height: 62px;
-  margin: 0 auto 24px;
+  border-radius: var(--radius-card);
+  background: var(--raised);
+  color: var(--text);
+  box-shadow: var(--shadow);
 }
+.directory-form {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 6px 6px 10px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.78rem;
+  font-weight: 550;
+}
+.directory-section {
+  padding: 8px 10px 4px;
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+.directory-option {
+  display: grid;
+  grid-template-columns: 15px minmax(0, 1fr) 14px;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  min-height: 36px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text);
+  font-size: 0.78rem;
+  line-height: 1.4;
+  text-align: left;
+  cursor: pointer;
+  outline: none;
+}
+.directory-option:hover,
+.directory-option:focus-visible {
+  background: var(--border);
+}
+.directory-option > svg:first-child {
+  color: var(--muted);
+}
+.directory-option-text {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.directory-option-text > * {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.directory-option-text small {
+  /* The name keeps its width first; the parent path absorbs the truncation. */
+  flex: 1 1 0;
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+.directory-option-check {
+  color: var(--accent);
+}
+
 .session-toolbar {
   height: 77px;
   border-bottom: 1px solid var(--border);
@@ -1838,6 +2005,10 @@ progress::-moz-progress-bar {
 }
 .mobile-back {
   display: none;
+}
+.mobile-back:not(.button-icon) {
+  /* Keep the chevron where the icon-only button places it. */
+  padding-inline: 7px 12px;
 }
 .conversation-wrap {
   /* Window center expressed in the main pane's coordinates, using the grid's actual widths. */

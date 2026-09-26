@@ -6,8 +6,7 @@ import { useCan, useConnection, useRuntime } from '../connections/context';
 import { useAction } from '../components/actions';
 import { ErrorNotice } from '../components/common';
 import { Button } from '../components/ui/button';
-import { Dialog } from '../components/ui/dialog';
-import { SessionRenameDialog } from './session-metadata';
+import { SessionDeleteDialog, SessionRenameDialog } from './session-metadata';
 
 export function SessionListItem({
   session,
@@ -16,6 +15,7 @@ export function SessionListItem({
   selected,
   running,
   excerpt,
+  onOpen,
 }: {
   session: Schema['SessionResponse'];
   depth: number;
@@ -23,6 +23,7 @@ export function SessionListItem({
   selected: boolean;
   running: boolean;
   excerpt?: string | undefined;
+  onOpen: () => void;
 }) {
   const { controller, info } = useConnection();
   const runtime = useRuntime();
@@ -109,6 +110,9 @@ export function SessionListItem({
           href={`#/sessions/${encodeURIComponent(session.id)}`}
           aria-current={selected ? 'page' : undefined}
           title={title}
+          onClick={(event) => {
+            if (!event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) onOpen();
+          }}
         >
           <div className="session-item-title">
             <span className={`status-dot ${running ? 'busy' : ''}`} />
@@ -220,26 +224,16 @@ export function SessionListItem({
           onClose={() => setRename(false)}
         />
       )}
-      <Dialog
+      <SessionDeleteDialog
+        title={title}
         open={confirm}
         onOpenChange={setConfirm}
-        title="Delete session"
-        description={`Delete “${title}”, its conversation, and its sub-agent sessions?`}
-        onCloseAutoFocus={(event) => {
-          event.preventDefault();
-          if (document.activeElement === document.body) trigger.current?.focus();
-        }}
-      >
-        <ErrorNotice error={action.error} />
-        <div className="actions">
-          <Button variant="secondary" onClick={() => setConfirm(false)}>
-            {action.busy ? 'Close' : 'Cancel'}
-          </Button>
-          <Button variant="destructive" disabled={running || action.busy} onClick={remove}>
-            {action.busy ? 'Deleting…' : 'Delete session'}
-          </Button>
-        </div>
-      </Dialog>
+        onDelete={remove}
+        disabled={!canWrite || running}
+        busy={action.busy}
+        error={action.error}
+        trigger={trigger}
+      />
     </div>
   );
 }

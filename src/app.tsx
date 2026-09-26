@@ -1,5 +1,5 @@
 import { useAction } from './components/actions';
-import { useEffect, useState, Suspense } from 'react';
+import { useEffect, useRef, useState, Suspense } from 'react';
 import { Outlet, useLocation } from '@tanstack/react-router';
 import {
   BookOpen,
@@ -26,6 +26,11 @@ import { ConnectionBanner } from './components/connection-banner';
 import { trackFocusInput } from './components/focus-input';
 import { NotificationToasts } from './notifications/toasts';
 import { useVisualViewport } from './components/visual-viewport';
+import { KeyboardShortcutsButton, KeyboardShortcutsDialog } from './components/shortcuts';
+import { useShortcut } from './components/use-shortcut';
+import { SessionNavigationContext } from './features/session-navigation';
+import { useNewConversation } from './features/use-new-conversation';
+import { supportsSessionOrganization } from './api/version';
 
 export function App({ runtime }: { runtime: ConnectionRuntime }) {
   useEffect(trackFocusInput, []);
@@ -38,6 +43,11 @@ export function App({ runtime }: { runtime: ConnectionRuntime }) {
   );
 }
 function Shell() {
+  const { connection } = useConnection();
+  // The single remount point for connection or credential changes; nothing below needs its own key.
+  return <Workspace key={connection?.id + ':' + connection?.authority} />;
+}
+function Workspace() {
   useVisualViewport();
   const state = useConnection();
   const runtime = useRuntime();
@@ -45,6 +55,80 @@ function Shell() {
   const [nav, setNav] = useState(false);
   const location = useLocation();
   const sessions = useSessionStates();
+  const [mobileSessionsOpen, setMobileSessionsOpen] = useState(false);
+  const [searchRequested, setSearchRequested] = useState(false);
+  const [keymap, setKeymap] = useState(false);
+  const keymapFocus = useRef<HTMLElement | null>(null);
+  const composerFocusRef = useRef<string | null>(null);
+  useEffect(() => {
+    const expected =
+      composerFocusRef.current === 'new' ? '/sessions' : '/sessions/' + composerFocusRef.current;
+    if (
+      composerFocusRef.current &&
+      location.pathname !== expected &&
+      !(composerFocusRef.current === 'new' && location.pathname === '/')
+    )
+      composerFocusRef.current = null;
+  }, [location.pathname]);
+  const canCreate = Boolean(state.api && state.info?.scopes.includes('sessions:w'));
+  const newConversation = useNewConversation((id) => {
+    if (['', '#/', '#/sessions'].includes(window.location.hash)) {
+      composerFocusRef.current = id;
+      setMobileSessionsOpen(false);
+      window.location.hash = '/sessions/' + id;
+    }
+  });
+  function newSession() {
+    if (!canCreate) return;
+    setSearchRequested(false);
+    setMobileSessionsOpen(false);
+    composerFocusRef.current = 'new';
+    if (location.pathname !== '/' && location.pathname !== '/sessions')
+      window.location.hash = '/sessions';
+    else {
+      const input = document.querySelector<HTMLTextAreaElement>(
+        '.new-conversation textarea[aria-label="Message"]',
+      );
+      if (input && !input.disabled && input.getClientRects().length) {
+        composerFocusRef.current = null;
+        input.focus();
+      }
+    }
+  }
+  function openKeymap() {
+    keymapFocus.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setNav(false);
+    setKeymap(true);
+  }
+  useShortcut('newSession', newSession, canCreate);
+  useShortcut(
+    'searchSessions',
+    () => {
+      composerFocusRef.current = null;
+      setSearchRequested(true);
+      setMobileSessionsOpen(true);
+      if (
+        location.pathname !== '/' &&
+        location.pathname !== '/sessions' &&
+        !location.pathname.startsWith('/sessions/')
+      )
+        window.location.hash = '/sessions';
+    },
+    Boolean(
+      state.api &&
+      state.info?.scopes.includes('sessions:r') &&
+      supportsSessionOrganization(state.info.version),
+    ),
+  );
+  useShortcut(
+    'showShortcuts',
+    () => {
+      if (keymap) setKeymap(false);
+      else openKeymap();
+    },
+    Boolean(state.api),
+  );
   useEffect(() => {
     const media = window.matchMedia('(prefers-color-scheme: dark)');
     const apply = () => {
@@ -96,81 +180,114 @@ function Shell() {
       </>
     );
   return (
-    <div className="app-frame">
-      <ConnectionBanner />
-      <div
-        className={`app-shell ${settings.layout.navigationCollapsed ? 'navigation-collapsed' : ''}`}
-      >
-        <a
-          href="#main-content"
-          className="skip-link"
-          onClick={(event) => {
-            event.preventDefault();
-            document.getElementById('main-content')?.focus();
-          }}
+    <SessionNavigationContext.Provider
+      value={{
+        newSession,
+        searchRequested,
+        finishSearch: () => setSearchRequested(false),
+        composerFocusRef,
+        mobileSessionsOpen,
+        setMobileSessionsOpen,
+        newConversation,
+      }}
+    >
+      <div className="app-frame">
+        <ConnectionBanner />
+        <div
+          className={`app-shell ${settings.layout.navigationCollapsed ? 'navigation-collapsed' : ''}`}
         >
-          Skip to content
-        </a>
-        <aside id="workspace-navigation" className="app-sidebar" aria-label="Workspace navigation">
-          <Navigation />
-        </aside>
-        {settings.layout.navigationCollapsed &&
-          (!state.info?.scopes.includes('sessions:r') ||
-            (!location.pathname.startsWith('/sessions') && location.pathname !== '/')) && (
-            <NavigationToggle className="navigation-restore" />
+          <a
+            href="#main-content"
+            className="skip-link"
+            onClick={(event) => {
+              event.preventDefault();
+              document.getElementById('main-content')?.focus();
+            }}
+          >
+            Skip to content
+          </a>
+          <aside
+            id="workspace-navigation"
+            className="app-sidebar"
+            aria-label="Workspace navigation"
+          >
+            <Navigation onShortcuts={openKeymap} />
+          </aside>
+          {settings.layout.navigationCollapsed && (
+            <KeyboardShortcutsButton collapsed onClick={openKeymap} />
           )}
-        <header className="mobile-header">
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label="Open navigation"
-            onClick={() => setNav(true)}
+          {settings.layout.navigationCollapsed &&
+            (!state.info?.scopes.includes('sessions:r') ||
+              (!location.pathname.startsWith('/sessions') && location.pathname !== '/')) && (
+              <NavigationToggle className="navigation-restore" />
+            )}
+          <header className="mobile-header">
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="Open navigation"
+              onClick={() => setNav(true)}
+            >
+              <Menu size={20} />
+            </Button>
+            <strong>meka</strong>
+            <span className="muted small">{state.connection?.name}</span>
+          </header>
+          <main id="main-content" tabIndex={-1} className="main-content">
+            <Suspense
+              fallback={
+                <div className="page">
+                  <Loading />
+                </div>
+              }
+            >
+              <Outlet />
+            </Suspense>
+          </main>
+          <Dialog
+            open={nav}
+            onOpenChange={setNav}
+            title="Navigation"
+            placement="left"
+            onCloseAutoFocus={(event) => {
+              if (keymap) event.preventDefault();
+            }}
           >
-            <Menu size={20} />
-          </Button>
-          <strong>meka</strong>
-          <span className="muted small">{state.connection?.name}</span>
-        </header>
-        <main
-          id="main-content"
-          tabIndex={-1}
-          className="main-content"
-          key={state.connection?.id + ':' + state.connection?.authority}
-        >
-          <Suspense
-            fallback={
-              <div className="page">
-                <Loading />
-              </div>
-            }
-          >
-            <Outlet />
-          </Suspense>
-        </main>
-        <Dialog open={nav} onOpenChange={setNav} title="Navigation" placement="left">
-          <Navigation onNavigate={() => setNav(false)} />
-        </Dialog>
-        {runtime.storage.warning && (
-          <p className="storage-warning" role="status">
-            {runtime.storage.warning}
-          </p>
-        )}
-        <div className="approval-tray" role="region" aria-label="Pending approvals">
-          {sessions
-            .flatMap((s) => s.approvals)
-            .map((approval) => (
-              <ApprovalCard key={approval.id} approval={approval} />
-            ))}
+            <Navigation onNavigate={() => setNav(false)} onShortcuts={openKeymap} />
+          </Dialog>
+          <KeyboardShortcutsDialog
+            open={keymap}
+            onOpenChange={setKeymap}
+            returnFocus={keymapFocus}
+          />
+          {runtime.storage.warning && (
+            <p className="storage-warning" role="status">
+              {runtime.storage.warning}
+            </p>
+          )}
+          <div className="approval-tray" role="region" aria-label="Pending approvals">
+            {sessions
+              .flatMap((s) => s.approvals)
+              .map((approval) => (
+                <ApprovalCard key={approval.id} approval={approval} />
+              ))}
+          </div>
+          <span className="sr-only" aria-live="polite">
+            {sessions.reduce((sum, s) => sum + s.approvals.length, 0)} approvals waiting.{' '}
+            {location.pathname.split('/')[1] || 'Sessions'} view.
+          </span>
         </div>
-        <span className="sr-only" aria-live="polite">
-          {sessions.reduce((sum, s) => sum + s.approvals.length, 0)} approvals waiting.{' '}
-          {location.pathname.split('/')[1] || 'Sessions'} view.
-        </span>
       </div>
-    </div>
+    </SessionNavigationContext.Provider>
   );
 }
-function Navigation({ onNavigate }: { onNavigate?: () => void }) {
+function Navigation({
+  onNavigate,
+  onShortcuts,
+}: {
+  onNavigate?: () => void;
+  onShortcuts: () => void;
+}) {
   const state = useConnection();
   const runtime = useRuntime();
   const settings = useSettings();
@@ -235,6 +352,7 @@ function Navigation({ onNavigate }: { onNavigate?: () => void }) {
             );
           })}
       </nav>
+      <KeyboardShortcutsButton onClick={onShortcuts} />
     </>
   );
 }

@@ -4,7 +4,6 @@ import { useCan, useConnection, useResource } from '../connections/context';
 import type { Schema } from '../api/client';
 import { Field, ErrorNotice } from '../components/common';
 import { Button } from '../components/ui/button';
-import { SwitchField } from '../components/ui/switch';
 import type { ComposerOptions } from '../session/controller';
 
 export type TurnSettings = Pick<ComposerOptions, 'mode' | 'skill' | 'retention' | 'source'>;
@@ -24,10 +23,33 @@ export function ComposerSettingsForm({
 }) {
   const [draft, setDraft] = useState(options);
   const canWrite = useCan('sessions:w') && !session.parent_id;
+  return (
+    <SessionForm session={session} running={running} onSaved={() => onSaved(draft)}>
+      <TurnSettingsFields
+        draft={draft}
+        setDraft={setDraft}
+        canWrite={canWrite}
+        hasImages={hasImages}
+      />
+    </SessionForm>
+  );
+}
+
+export function TurnSettingsFields({
+  draft,
+  setDraft,
+  canWrite,
+  hasImages,
+}: {
+  draft: TurnSettings;
+  setDraft: (value: TurnSettings) => void;
+  canWrite: boolean;
+  hasImages: boolean;
+}) {
   const skills = useResource<Schema['SkillView'][]>('/v1/skills');
   const direct = hasImages || Boolean(draft.skill) || draft.retention !== 'keep';
   return (
-    <SessionForm session={session} running={running} onSaved={() => onSaved(draft)}>
+    <>
       <Field
         label="While the agent is working"
         hint={direct ? 'Unavailable with the selected delivery options.' : undefined}
@@ -78,58 +100,39 @@ export function ComposerSettingsForm({
         />
       </Field>
       <ErrorNotice error={skills.error} />
-    </SessionForm>
+    </>
   );
 }
 
-export function SessionForm({
+function SessionForm({
   session,
   onSaved,
   children,
   running = false,
 }: {
-  session?: Schema['SessionResponse'];
+  session: Schema['SessionResponse'];
   onSaved: (id: string) => void;
   children?: ReactNode;
   running?: boolean;
 }) {
-  const { api, info, controller } = useConnection();
-  const profiles = useResource<Schema['ProfilesResponse']>('/v1/profiles', undefined, !session);
+  const { controller } = useConnection();
   const [initial] = useState(session);
   const canWrite = useCan('sessions:w') && !session?.parent_id;
   const activeTurn = running || session?.turn_in_flight;
   const [cwd, setCwd] = useState(session?.cwd ?? '');
-  const [profile, setProfile] = useState(session?.profile ?? '');
-  const [permission, setPermission] = useState(session?.permission ?? '');
-  const [approvals, setApprovals] = useState(session ? String(session.approvals) : '');
-  const [reasoning, setReasoning] = useState(true);
-  const [prompts, setPrompts] = useState(true);
+  const [approvals, setApprovals] = useState(String(session.approvals));
   const action = useAction();
   async function submit(event: FormEvent) {
     event.preventDefault();
     await action.run(async () => {
-      if (!api) return;
-      let response: Schema['SessionResponse'];
-      if (session) {
-        const body: Schema['PatchSessionRequest'] = {
-          ...(cwd !== (initial?.cwd ?? '') ? { cwd } : {}),
-          ...(approvals !== String(initial?.approvals) ? { approvals: approvals === 'true' } : {}),
-        };
-        if (!controller) throw new Error('Reconnect before changing session settings.');
-        response = Object.keys(body).length
-          ? await controller.patchSettings(session.id, body)
-          : session;
-      } else
-        response = await api.mutate('POST', '/v1/sessions', {
-          ...(cwd ? { cwd } : {}),
-          ...(profile ? { profile } : {}),
-          ...(permission ? { permission } : {}),
-          ...(approvals ? { approvals: approvals === 'true' } : {}),
-          capabilities: {
-            supports_permission_prompts: prompts,
-            supports_reasoning_stream: reasoning,
-          },
-        } satisfies Schema['CreateSessionRequest']);
+      const body: Schema['PatchSessionRequest'] = {
+        ...(cwd !== (initial.cwd ?? '') ? { cwd } : {}),
+        ...(approvals !== String(initial.approvals) ? { approvals: approvals === 'true' } : {}),
+      };
+      if (!controller) throw new Error('Reconnect before changing session settings.');
+      const response = Object.keys(body).length
+        ? await controller.patchSettings(session.id, body)
+        : session;
       onSaved(response.id);
     });
   }
@@ -147,72 +150,20 @@ export function SessionForm({
             placeholder="Server default"
           />
         </Field>
-        {!session && (
-          <Field label="Profile">
-            <select
-              value={profile}
-              disabled={!canWrite || activeTurn}
-              onChange={(event) => setProfile(event.target.value)}
-            >
-              <option value="">Server default</option>
-              {profiles.data?.profiles.map((p) => (
-                <option key={p.name} value={p.name}>
-                  {p.name} · {p.model ?? 'No model'}
-                </option>
-              ))}
-            </select>
-          </Field>
-        )}
-        <div className={session ? undefined : 'form-grid'}>
-          {!session && (
-            <Field label="Permission">
-              <select
-                value={permission}
-                disabled={!canWrite}
-                onChange={(event) => setPermission(event.target.value)}
-              >
-                <option value="">Server default ({info?.default_permission})</option>
-                {info?.enabled_permissions.map((value) => (
-                  <option key={value} value={value}>
-                    {value}
-                  </option>
-                ))}
-              </select>
-            </Field>
-          )}
-          <Field label="Approval mode">
-            <select
-              value={approvals}
-              disabled={!canWrite}
-              onChange={(event) => setApprovals(event.target.value)}
-            >
-              {!session && <option value="">Server default</option>}
-              <option value="true">Ask for approval</option>
-              <option value="false">Deny above permission level</option>
-            </select>
-          </Field>
-        </div>
-        {!session && (
-          <details>
-            <summary>Session capabilities</summary>
-            <SwitchField
-              label="Receive reasoning when available"
-              checked={reasoning}
-              onCheckedChange={setReasoning}
-              disabled={!canWrite}
-            />
-            <SwitchField
-              label="Support permission prompts"
-              checked={prompts}
-              onCheckedChange={setPrompts}
-              disabled={!canWrite}
-            />
-          </details>
-        )}
+        <Field label="Approval mode">
+          <select
+            value={approvals}
+            disabled={!canWrite}
+            onChange={(event) => setApprovals(event.target.value)}
+          >
+            <option value="true">Ask for approval</option>
+            <option value="false">Deny above permission level</option>
+          </select>
+        </Field>
         {children}
-        <ErrorNotice error={action.error ?? (!session ? profiles.error : undefined)} />
+        <ErrorNotice error={action.error} />
         <Button type="submit" disabled={action.busy || !canWrite}>
-          {action.busy ? 'Saving…' : session ? 'Save settings' : 'Create session'}
+          {action.busy ? 'Saving…' : 'Save settings'}
         </Button>
       </fieldset>
     </form>

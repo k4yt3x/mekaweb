@@ -38,6 +38,55 @@ export function SessionMetadataItems({
   );
 }
 
+export function SessionDeleteDialog({
+  title,
+  open,
+  onOpenChange,
+  onDelete,
+  disabled,
+  busy,
+  error,
+  trigger,
+}: {
+  title: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onDelete: () => void;
+  disabled: boolean;
+  busy: boolean;
+  error: unknown;
+  trigger: RefObject<HTMLButtonElement | null>;
+}) {
+  const cancel = useRef<HTMLButtonElement>(null);
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={onOpenChange}
+      title="Delete session"
+      description={`Delete “${title || 'New conversation'}”, its conversation, and its sub-agent sessions?`}
+      onOpenAutoFocus={(event) => {
+        // The shortcut works while typing; a following Enter must not confirm the deletion.
+        event.preventDefault();
+        cancel.current?.focus();
+      }}
+      onCloseAutoFocus={(event) => {
+        event.preventDefault();
+        if (document.activeElement === document.body) trigger.current?.focus();
+      }}
+    >
+      <ErrorNotice error={error} />
+      <div className="actions">
+        <Button ref={cancel} variant="secondary" onClick={() => onOpenChange(false)}>
+          {busy ? 'Close' : 'Cancel'}
+        </Button>
+        <Button variant="destructive" disabled={disabled || busy} onClick={onDelete}>
+          {busy ? 'Deleting…' : 'Delete session'}
+        </Button>
+      </div>
+    </Dialog>
+  );
+}
+
 // Mounted for each rename so polling cannot replace a title being edited.
 export function SessionRenameDialog({
   session,

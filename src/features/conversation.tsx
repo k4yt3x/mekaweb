@@ -1,28 +1,15 @@
 import { useAction } from '../components/actions';
+import { useShortcut } from '../components/use-shortcut';
 import {
   Fragment,
   useEffect,
-  useId,
   useMemo,
   useRef,
   useState,
   useSyncExternalStore,
-  type KeyboardEvent,
   type ReactNode,
 } from 'react';
-import {
-  ArrowDown,
-  CornerDownRight,
-  ImagePlus,
-  ListPlus,
-  SendHorizontal,
-  Settings as SettingsIcon,
-  ShieldCheck,
-  Square,
-  Unplug,
-  X,
-  Zap,
-} from 'lucide-react';
+import { ArrowDown, ShieldCheck, Unplug } from 'lucide-react';
 import { sessionPath, type Schema } from '../api/client';
 import {
   useCan,
@@ -38,12 +25,9 @@ import { Button } from '../components/ui/button';
 import { Empty, ErrorNotice, Loading } from '../components/common';
 import { NoticeMessage } from '../components/notice-message';
 import { ToolCard } from '../components/tool-card';
-import { ComposerResizeHandle } from '../components/composer-resize-handle';
 import { Markdown, MarkdownPreview } from '../components/markdown';
 import { Attachment, InlineAttachment, ImageViewerProvider } from '../components/image-attachment';
 import { scrollRegion } from '../components/scrolling';
-import { PermissionSelect } from '../components/ui/permission-select';
-import { ProfileSelect } from '../components/ui/profile-select';
 import { Dialog } from '../components/ui/dialog';
 import { ComposerSettingsForm } from './session-settings';
 import {
@@ -56,9 +40,13 @@ import {
   type ToolResultBlock,
   type ToolUseBlock,
 } from './conversation-history';
+import { MessageComposer } from '../components/message-composer';
+import {
+  DEFAULT_INPUT_HEIGHT,
+  emptyComposerOptions,
+  remainingComposerOptions,
+} from '../session/composer-options';
 const positions = new Map<string, { top: number; following: boolean }>();
-// Includes the editor's 22px vertical padding and room for two lines of text.
-const DEFAULT_INPUT_HEIGHT = 68;
 export function Conversation({ state }: { state: SessionState }) {
   const { controller, connection, connectionIssue } = useConnection();
   const runtime = useRuntime();
@@ -793,31 +781,6 @@ function Tool({ tool }: { tool: LiveTool | undefined }) {
     </ToolCard>
   );
 }
-async function fileImage(file: File): Promise<Schema['ImageInput'] & { name: string }> {
-  if (file.size > 3_750_000)
-    throw new Error(`${file.name} is larger than meka’s 3.75 MB image limit.`);
-  const data = await new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result).split(',')[1] ?? '');
-    reader.onerror = () => reject(new Error(`Could not read ${file.name}.`));
-    reader.readAsDataURL(file);
-  });
-  return { name: file.name, media_type: file.type || 'application/octet-stream', data };
-}
-const emptyComposerOptions: ComposerOptions = {
-  images: [],
-  skill: '',
-  retention: 'keep',
-  mode: 'steer',
-  source: '',
-};
-const composerActions = {
-  send: { Icon: SendHorizontal, label: 'Send message' },
-  steer: { Icon: CornerDownRight, label: 'Steer message' },
-  queue: { Icon: ListPlus, label: 'Queue message' },
-  interrupt: { Icon: Zap, label: 'Interrupt and send' },
-  stop: { Icon: Square, label: 'Stop current turn' },
-};
 const subscribeToNothing = () => () => {};
 function Composer({
   state,
@@ -840,31 +803,6 @@ function Composer({
 }) {
   const { controller, info } = useConnection();
   const canWrite = useCan('sessions:w');
-  const inputId = useId();
-  const editor = useRef<HTMLDivElement>(null);
-  const area = useRef<HTMLDivElement>(null);
-  const box = useRef<HTMLDivElement>(null);
-  const [maxInputHeight, setMaxInputHeight] = useState(DEFAULT_INPUT_HEIGHT);
-  useEffect(() => {
-    const inputBox = editor.current;
-    const container = area.current;
-    const composer = box.current;
-    const scroller = container?.closest('.conversation-scroll');
-    if (!inputBox || !container || !composer || !scroller) return;
-    const observer = new ResizeObserver(() => {
-      // Account for the toolbar, attachments, and bottom inset so controls stay reachable.
-      const overhead = container.scrollHeight - inputBox.offsetHeight;
-      const maximum = Math.max(
-        DEFAULT_INPUT_HEIGHT,
-        Math.floor(scroller.clientHeight * 0.75 - overhead),
-      );
-      setMaxInputHeight(maximum);
-      if (inputBox.offsetHeight > maximum) onResize(maximum);
-    });
-    observer.observe(scroller);
-    observer.observe(composer);
-    return () => observer.disconnect();
-  }, [onResize]);
   const options =
     useSyncExternalStore(controller?.subscribe ?? subscribeToNothing, () =>
       controller?.draft(state.id),
@@ -897,7 +835,6 @@ function Composer({
   const permissions = info?.enabled_permissions ?? [];
   const settingsSaving = settingsAction.busy || state.settingsPending;
   const permissionDisabled = !mutableSettings || settingsSaving;
-  const fileInput = useRef<HTMLInputElement>(null);
   const running = isSessionRunning(state);
   const direct = images.length > 0 || Boolean(skill) || retention !== 'keep';
   const uncertain = state.submissions.find((s) => s.state === 'uncertain');
@@ -914,7 +851,6 @@ function Composer({
         : mode === 'interrupt'
           ? 'interrupt'
           : 'steer';
-  const { Icon: ActionIcon, label: actionLabel } = composerActions[actionKind];
   const observedTurn = Boolean(
     state.turnId || state.submissions.some((s) => s.state === 'running' && s.turnId),
   );
@@ -943,10 +879,7 @@ function Composer({
       const ok = await controller.submitMessage(state.id, submitted, options);
       if (ok) {
         onAccepted(submitted);
-        updateOptions((current) => ({
-          images: current.images.filter((image) => !images.includes(image)),
-          skill: current.skill === skill ? '' : current.skill,
-        }));
+        updateOptions((current) => remainingComposerOptions(current, options));
       }
     });
   }
@@ -954,6 +887,7 @@ function Composer({
     if (!running || stopDisabled || !controller) return;
     await cancelAction.run(() => controller.cancel(state.id));
   }
+  useShortcut('stopTurn', () => void stop(), running && !stopDisabled);
   function changePermission(permission: string) {
     if (permissionDisabled || !permissions.includes(permission)) return;
     void settingsAction.run(async () => controller?.patchSettings(state.id, { permission }));
@@ -967,216 +901,76 @@ function Composer({
       return;
     void settingsAction.run(async () => controller?.patchSettings(state.id, { profile }));
   }
-  function keydown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (
-      event.key === 'Tab' &&
-      event.shiftKey &&
-      !event.ctrlKey &&
-      !event.altKey &&
-      !event.metaKey &&
-      !event.nativeEvent.isComposing &&
-      mutableSettings &&
-      permissions.length > 0
-    ) {
-      event.preventDefault();
-      // Keep focus and the draft in place; a held key or pending PATCH must not cycle repeatedly.
-      if (event.repeat || permissionDisabled) return;
-      const current = state.session?.permission ?? '';
-      const next = permissions[(permissions.indexOf(current) + 1) % permissions.length];
-      if (next && next !== current) changePermission(next);
-      return;
-    }
-    if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
-      event.preventDefault();
-      // An empty Enter never cancels work; Stop is an explicit button action.
-      if (!blocked && hasMessage) void send();
-    }
-  }
   return (
-    <div className="composer-area" ref={area}>
-      <div className="conversation-width">
-        {settingsSaving && (
-          <span className="sr-only" role="status">
-            Saving session settings…
-          </span>
-        )}
-        {mutableSettings && state.session?.permission && (
-          <span className="sr-only" role="status">
-            Permission mode: {state.session.permission}
-          </span>
-        )}
-        {mutableSettings && state.session?.profile && (
-          <span className="sr-only" role="status">
-            Profile: {state.session.profile}
-          </span>
-        )}
-        <div className="composer" ref={box}>
-          <ComposerResizeHandle
-            key={resizeGeneration}
-            inputId={inputId}
-            height={inputHeight}
-            min={DEFAULT_INPUT_HEIGHT}
-            max={maxInputHeight}
-            onResize={onResize}
-          />
-          <div className="composer-editor" ref={editor} style={{ height: inputHeight }}>
-            <textarea
-              id={inputId}
-              aria-label="Message"
-              aria-keyshortcuts={
-                mutableSettings && permissions.length > 0 ? 'Shift+Tab' : undefined
-              }
-              placeholder={
-                !canWrite || state.session?.parent_id
-                  ? 'Read-only session'
-                  : state.feed !== 'connected'
-                    ? 'Waiting for session connection…'
-                    : running
-                      ? mode === 'followup'
-                        ? 'Queue a message…'
-                        : mode === 'interrupt'
-                          ? 'Interrupt with a message…'
-                          : 'Steer the agent as it works…'
-                      : 'Ask meka to work on something…'
-              }
-              value={draft.text}
-              onChange={(event) => draft.setText(event.target.value)}
-              onKeyDown={keydown}
-              rows={2}
-              disabled={!canWrite || Boolean(state.session?.parent_id) || state.deleting}
-            />
-          </div>
-          {images.length > 0 && (
-            <div className="attachment-chips">
-              {images.map((file, index) => (
-                <span className="tag" key={index}>
-                  {file.name}
-                  <button
-                    aria-label={`Remove ${file.name}`}
-                    onClick={() => setImages(images.filter((_, i) => index !== i))}
-                  >
-                    <X size={12} />
-                  </button>
-                </span>
-              ))}
-            </div>
-          )}
-          <div
-            className="composer-toolbar"
-            role="group"
-            aria-label="Message controls"
-            onFocusCapture={(event) => {
-              const toolbar = event.currentTarget;
-              const button = event.target.closest('button');
-              if (
-                !button ||
-                !toolbar.contains(button) ||
-                toolbar.scrollWidth <= toolbar.clientWidth
-              )
-                return;
-              // Native focus scrolling may expose only the center of a control in a very narrow row.
-              const control = button.getBoundingClientRect();
-              const bounds = toolbar.getBoundingClientRect();
-              if (control.right > bounds.right) toolbar.scrollLeft += control.right - bounds.right;
-              else if (control.left < bounds.left) toolbar.scrollLeft += control.left - bounds.left;
+    <MessageComposer
+      text={draft.text}
+      onTextChange={draft.setText}
+      readOnly={!canWrite || Boolean(state.session?.parent_id) || state.deleting}
+      focusId={state.id}
+      inputHeight={inputHeight}
+      onResize={onResize}
+      resizeGeneration={resizeGeneration}
+      placeholder={
+        !canWrite || state.session?.parent_id
+          ? 'Read-only session'
+          : state.feed !== 'connected'
+            ? 'Waiting for session connection…'
+            : running
+              ? mode === 'followup'
+                ? 'Queue a message…'
+                : mode === 'interrupt'
+                  ? 'Interrupt with a message…'
+                  : 'Steer the agent as it works…'
+              : 'Ask meka to work on something…'
+      }
+      permission={{
+        value: state.session?.permission ?? undefined,
+        options: permissions,
+        disabled: permissionDisabled,
+        busy: mutableSettings && settingsSaving,
+        onChange: changePermission,
+      }}
+      profile={{
+        value: state.session?.profile,
+        profiles,
+        disabled: profileDisabled,
+        busy: mutableSettings && !profileLocked && settingsSaving,
+        locked: profileLocked,
+        onChange: changeProfile,
+      }}
+      attachments={{
+        value: images,
+        disabled: !canWrite || Boolean(state.session?.parent_id) || pending || state.deleting,
+        onChange: setImages,
+      }}
+      action={{
+        kind: actionKind,
+        disabled: showStop ? stopDisabled : blocked || !hasMessage,
+        busy: showStop ? cancelAction.busy : action.busy,
+        run: () => void (showStop ? stop() : send()),
+      }}
+      settings={{
+        disabled: !state.session || settingsSaving || state.deleting,
+        busy: Boolean(state.session) && !state.deleting && settingsSaving,
+        open: () => setSettingsOpen(true),
+      }}
+      onError={onError}
+    >
+      <Dialog open={settingsOpen} onOpenChange={setSettingsOpen} title="Session settings">
+        {settingsOpen && state.session && (
+          <ComposerSettingsForm
+            session={state.session}
+            options={{ mode, skill, retention, source }}
+            hasImages={images.length > 0}
+            running={running}
+            onSaved={(values) => {
+              updateOptions(values);
+              setSettingsOpen(false);
             }}
-          >
-            <input
-              className="sr-only"
-              type="file"
-              accept="image/*,.png,.jpg,.jpeg,.gif,.webp,.bmp,.tif,.tiff,.ico,.hdr,.exr,.tga,.pnm,.ppm,.pgm,.pbm,.qoi,.dds,.ff"
-              aria-label="Image files"
-              tabIndex={-1}
-              multiple
-              ref={fileInput}
-              onChange={(event) => {
-                const files = Array.from(event.target.files ?? []);
-                void action.run(async () => {
-                  const added = await Promise.all(files.map(fileImage));
-                  setImages((current) => [...current, ...added]);
-                });
-                event.target.value = '';
-              }}
-            />
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label="Attach images"
-              title="Attach images (idle sessions only)"
-              disabled={!canWrite || Boolean(state.session?.parent_id) || pending || state.deleting}
-              onClick={() => fileInput.current?.click()}
-            >
-              <ImagePlus size={18} />
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="composer-settings-button"
-              aria-label="Session settings"
-              aria-haspopup="dialog"
-              title="Session settings"
-              disabled={!state.session || settingsSaving || state.deleting}
-              data-saving={
-                (Boolean(state.session) && !state.deleting && settingsSaving) || undefined
-              }
-              aria-busy={settingsSaving || undefined}
-              onClick={() => setSettingsOpen(true)}
-            >
-              <SettingsIcon className="composer-settings-icon" size={18} aria-hidden="true" />
-              <span className="composer-control-label">Settings</span>
-            </Button>
-            <div className="composer-selectors">
-              <PermissionSelect
-                value={state.session?.permission ?? undefined}
-                options={permissions}
-                disabled={permissionDisabled}
-                busy={mutableSettings && settingsSaving}
-                onChange={changePermission}
-              />
-              <ProfileSelect
-                value={state.session?.profile}
-                profiles={profiles}
-                disabled={profileDisabled}
-                busy={mutableSettings && !profileLocked && settingsSaving}
-                locked={profileLocked}
-                onChange={changeProfile}
-              />
-            </div>
-            <Button
-              size="icon"
-              variant={showStop ? 'destructive' : 'default'}
-              className={showStop ? 'stop-turn-button' : undefined}
-              aria-label={actionLabel}
-              title={showStop && cancelAction.busy ? 'Stopping turn…' : actionLabel}
-              aria-busy={(showStop ? cancelAction.busy : action.busy) || undefined}
-              disabled={showStop ? stopDisabled : blocked || !hasMessage}
-              onClick={() => void (showStop ? stop() : send())}
-            >
-              <ActionIcon
-                size={showStop ? 18 : 19}
-                fill={showStop ? 'currentColor' : 'none'}
-                strokeWidth={showStop ? 0 : 2}
-                aria-hidden="true"
-              />
-            </Button>
-          </div>
-        </div>
-        <Dialog open={settingsOpen} onOpenChange={setSettingsOpen} title="Session settings">
-          {settingsOpen && state.session && (
-            <ComposerSettingsForm
-              session={state.session}
-              options={{ mode, skill, retention, source }}
-              hasImages={images.length > 0}
-              running={running}
-              onSaved={(values) => {
-                updateOptions(values);
-                setSettingsOpen(false);
-              }}
-            />
-          )}
-        </Dialog>
-      </div>
-    </div>
+          />
+        )}
+      </Dialog>
+    </MessageComposer>
   );
 }
 function SubmissionRecovery({

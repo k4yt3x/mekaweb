@@ -4,6 +4,8 @@ import type { Schema } from '../api/client';
 import { supportsSessionOrganization } from '../api/version';
 import { useCan, useConnection } from '../connections/context';
 import { Button } from '../components/ui/button';
+import { useShortcut } from '../components/use-shortcut';
+import { shortcutAttribute, shortcutHint } from '../components/shortcut-keys';
 
 export function SessionHeading({
   session,
@@ -28,6 +30,14 @@ export function SessionHeading({
   const input = useRef<HTMLInputElement>(null);
   const editor = useRef<HTMLSpanElement>(null);
   const open = draft !== undefined;
+  function rename() {
+    changed.current = false;
+    editing.current = true;
+    setDraft(session.title);
+    setFailed(false);
+    onError(undefined);
+  }
+  useShortcut('renameSession', rename, editable && !disabled && !open);
   useEffect(() => {
     mounted.current = true;
     onError(undefined);
@@ -163,15 +173,10 @@ export function SessionHeading({
           ref={trigger}
           type="button"
           className="session-title-button"
-          title="Rename session"
+          title={`Rename session (${shortcutHint('renameSession')})`}
+          aria-keyshortcuts={shortcutAttribute('renameSession')}
           disabled={disabled}
-          onClick={() => {
-            changed.current = false;
-            editing.current = true;
-            setDraft(session.title);
-            setFailed(false);
-            onError(undefined);
-          }}
+          onClick={rename}
         >
           {title}
         </button>

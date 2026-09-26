@@ -112,6 +112,7 @@ interface Entry {
   notifiedTurns: Set<string>;
   notificationsSince: number;
   textIdleTimer?: ReturnType<typeof setTimeout>;
+  preparing?: string;
   opening?: {
     saved: Schema['MessagesResponse'];
     offset: number;
@@ -146,6 +147,23 @@ function needsFollowing(submission: Submission) {
     ['sending', 'uncertain', 'running'].includes(submission.state) ||
     (submission.state === 'accepted' && submission.preview)
   );
+}
+function turnBody(message: string, options: ComposerOptions): Schema['TurnRequest'] {
+  return {
+    message,
+    stream: true,
+    ...(options.images.length
+      ? { images: options.images.map(({ media_type, data }) => ({ media_type, data })) }
+      : {}),
+    ...(options.skill || options.retention !== 'keep'
+      ? {
+          options: {
+            ...(options.skill ? { skill: options.skill } : {}),
+            ...(options.retention !== 'keep' ? { unanswered_message: options.retention } : {}),
+          },
+        }
+      : {}),
+  };
 }
 export class SessionController {
   private lifetime = new AbortController();
@@ -893,7 +911,7 @@ export class SessionController {
         entry.state.submissions.some(
           (submission) =>
             submission.preview &&
-            (submission.state === 'sending' ||
+            ((submission.state === 'sending' && submission.key !== entry.preparing) ||
               (submission.state === 'running' && !receipts.has(submission.key))),
         )
       ) {
@@ -1006,6 +1024,64 @@ export class SessionController {
       this.publish(entry, { error: asError(error) });
     }
   }
+  async submitInitialMessage(
+    session: Schema['SessionResponse'],
+    message: string,
+    options: ComposerOptions,
+  ): Promise<boolean> {
+    if (this.disposed || !this.canWrite || session.parent_id)
+      throw new Error('An active writable connection is required to start a conversation.');
+    const existing = this.entries.get(session.id)?.state;
+    if (existing?.submissions.length || existing?.saved?.total || existing?.running)
+      throw new Error('This session has already started.');
+    const ready = this.ensure(session.id);
+    const entry = this.entries.get(session.id)!;
+    const submission: Submission = {
+      key: createId(),
+      kind: 'turn',
+      body: turnBody(message, options),
+      createdAt: new Date().toISOString(),
+      preview: true,
+      state: 'sending',
+    };
+    // Hold the attending feed across navigation and show the first input immediately.
+    entry.followed = true;
+    entry.preparing = submission.key;
+    this.publish(entry, {
+      session,
+      submissions: [submission],
+      blocks: [{ kind: 'submission', key: submission.key }],
+    });
+    let sent = false;
+    try {
+      await ready;
+      delete entry.preparing;
+      if (this.disposed) return false;
+      // A reopened feed replaces this entry, and its replacement inherits the preview. Nothing
+      // was sent, so the input fails there and can be sent again.
+      if (entry.abort.signal.aborted)
+        throw new Error('The session connection restarted before sending. Send the message again.');
+      if (entry.state.feed !== 'connected')
+        throw new Error('Wait for the session connection before sending.');
+      sent = true;
+      return await this.send(entry, submission);
+    } catch (error) {
+      delete entry.preparing;
+      const current = this.entries.get(session.id);
+      // Once sent, send() owns the outcome; a retired entry must not override it.
+      if (this.disposed || !current || (sent && entry.abort.signal.aborted)) return false;
+      current.followed = false;
+      this.publish(current, {
+        error: asError(error),
+        submissions: current.state.submissions.map((item) =>
+          item.key === submission.key ? { ...item, state: 'failed', preview: false } : item,
+        ),
+      });
+      // The replacement's first read may have waited for this preview to settle.
+      if (current.snapshotDeferred) void this.refresh(session.id);
+      return false;
+    }
+  }
   async submitMessage(id: string, message: string, options: ComposerOptions): Promise<boolean> {
     const entry = await this.ensure(id);
     const requiresDirect =
@@ -1016,26 +1092,7 @@ export class SessionController {
       ...(options.source ? { source: options.source } : {}),
     };
     if (isSessionRunning(entry.state) && !requiresDirect) return this.submit(id, inbox, 'inbox');
-    return this.submit(
-      id,
-      {
-        message,
-        stream: true,
-        ...(options.images.length
-          ? { images: options.images.map(({ media_type, data }) => ({ media_type, data })) }
-          : {}),
-        ...(options.skill || options.retention !== 'keep'
-          ? {
-              options: {
-                ...(options.skill ? { skill: options.skill } : {}),
-                ...(options.retention !== 'keep' ? { unanswered_message: options.retention } : {}),
-              },
-            }
-          : {}),
-      },
-      'turn',
-      requiresDirect ? undefined : inbox,
-    );
+    return this.submit(id, turnBody(message, options), 'turn', requiresDirect ? undefined : inbox);
   }
   async submit(
     id: string,
