@@ -1,14 +1,14 @@
 # API schema maintenance
 
-`meka-0.64.0.json` was captured from meka tag `0.64.0`, commit `e639b7843138d603aff34bd329ee90423b306510`, through `/v1/openapi.json` with `[serve].docs = true`. The generated REST types are committed in `src/api/schema.d.ts`; runtime connections do not require schema access.
+`meka-0.65.0.json` was captured from meka tag `0.65.0`, commit `61de2537fcfd3bb16ee1b46748254f40a399ac48`, through `/v1/openapi.json` with `[serve].docs = true`. The generated REST types are committed in `src/api/schema.d.ts`; runtime connections do not require schema access.
 
-Meka 0.64.1, commit `c17a5f7c596d229dd716a543ddd380c450471c98`, was reviewed against that baseline. Its fix removes duplicate environment context from sub-agent prompts; REST shapes, SSE events, and tool parameters are unchanged. The 0.64.0 schema remains the generation source.
+Compared with 0.64.0, the 0.65.0 schema changes only the description of the compaction response's `source`: `checkpoint_text` is gone, leaving `checkpoint` and `summarizer`, on the response and the `context.compacted` event alike. The client treats `source` as an opaque string. 0.64.1 changed no REST shapes, SSE events, or tool parameters. 0.65.0 also replaces `offset` and `limit` with `start` and `end` in `file_read` and `scratchpad_read`, and writes archive format 5; neither tool's primary parameter changes, and archives pass through unmodified.
 
-Schema capture is a manual maintenance step. Choose a disposable meka instance with `[serve].docs = true`, confirm its version, and download its schema. For a 0.64.0 instance listening on port 8081:
+Schema capture is a manual maintenance step. Choose a disposable meka instance with `[serve].docs = true`, confirm its version, and download its schema. For a 0.65.0 instance listening on port 8081:
 
 ```sh
-curl --fail --silent --show-error http://127.0.0.1:8081/v1/openapi.json --output docs/api/meka-0.64.0.json
-npx prettier --write docs/api/meka-0.64.0.json
+curl --fail --silent --show-error http://127.0.0.1:8081/v1/openapi.json --output docs/api/meka-0.65.0.json
+npx prettier --write docs/api/meka-0.65.0.json
 npm run api:generate
 ```
 

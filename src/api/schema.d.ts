@@ -792,9 +792,9 @@ export interface components {
       /** Format: uuid */
       session_id: string;
       /**
-       * @description Which strategy produced the summary: `checkpoint`, `checkpoint_text`, or `summarizer`.
-       *     Reported because they differ in fidelity, not just in mechanism: `summarizer` means the
-       *     checkpoint turn was disabled, failed, or produced nothing usable.
+       * @description Which strategy produced the summary: `checkpoint` or `summarizer`. Reported because they
+       *     differ in fidelity, not just in mechanism: `summarizer` means the checkpoint turn was
+       *     disabled, failed, or ended without submitting a summary.
        */
       source: string;
     };

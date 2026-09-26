@@ -4,7 +4,7 @@
     "title": "meka HTTP API",
     "description": "Service-to-service API for driving meka agent turns programmatically. Mirrors the wire format described in the HTTP API docs. A field that has no value is omitted from every response and event, never sent as `null`.",
     "license": { "name": "AGPL-3.0-or-later" },
-    "version": "0.64.0"
+    "version": "0.65.0"
   },
   "paths": {
     "/v1/health/live": {
@@ -2530,7 +2530,7 @@
           "session_id": { "type": "string", "format": "uuid" },
           "source": {
             "type": "string",
-            "description": "Which strategy produced the summary: `checkpoint`, `checkpoint_text`, or `summarizer`.\nReported because they differ in fidelity, not just in mechanism: `summarizer` means the\ncheckpoint turn was disabled, failed, or produced nothing usable."
+            "description": "Which strategy produced the summary: `checkpoint` or `summarizer`. Reported because they\ndiffer in fidelity, not just in mechanism: `summarizer` means the checkpoint turn was\ndisabled, failed, or ended without submitting a summary."
           }
         }
       },

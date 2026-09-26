@@ -14,4 +14,5 @@ export const supportedVersions = [
   '0.63.0',
   '0.64.0',
   '0.64.1',
+  '0.65.0',
 ];

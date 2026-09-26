@@ -2,7 +2,7 @@
 
 A web interface for [meka](https://github.com/k4yt3x/meka). Chat with your agent, answer tool approvals, and manage sessions, memory, skills, schedules, and MCP servers from your browser.
 
-mekaweb is a static application that connects directly to your meka server. It does not require a separate application server or user account. The supported API versions are **meka 0.59.0–0.64.1**. See the [changelog](CHANGELOG.md) for release history.
+mekaweb is a static application that connects directly to your meka server. It does not require a separate application server or user account. The supported API versions are **meka 0.59.0–0.65.0**. See the [changelog](CHANGELOG.md) for release history.
 
 ## Getting started
 
@@ -31,7 +31,7 @@ scopes = [
 ]
 ```
 
-Set `MEKA_WEB_TOKEN` to your API token in the server's environment, then start or restart `meka serve`. You can keep an existing token entry instead; see meka's [token configuration](https://github.com/k4yt3x/meka/blob/0.64.1/docs/book/src/usage/http-api.md#token-configuration) for file-based tokens and scope options.
+Set `MEKA_WEB_TOKEN` to your API token in the server's environment, then start or restart `meka serve`. You can keep an existing token entry instead; see meka's [token configuration](https://github.com/k4yt3x/meka/blob/0.65.0/docs/book/src/usage/http-api.md#token-configuration) for file-based tokens and scope options.
 
 Enter that token and the appropriate **Meka base URL** in the web UI:
 
