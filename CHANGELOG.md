@@ -7,9 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-09-27
+
 ### Changed
 
 - The completion sound is a lower, softer two-note kalimba phrase with a light stereo echo.
+
+### Fixed
+
+- A long conversation no longer makes the whole page scrollable while the agent is working.
 
 ## [0.10.0] - 2026-09-27
 
@@ -183,7 +189,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Light and dark themes, narrow layouts, and collapsible, resizable session panels.
 - Hosting at the root or a subpath, with GitHub Pages deployment on version tags.
 
-[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.10.0...HEAD
+[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.11.0...HEAD
+[0.11.0]: https://github.com/k4yt3x/mekaweb/compare/0.10.0...0.11.0
 [0.10.0]: https://github.com/k4yt3x/mekaweb/compare/0.9.0...0.10.0
 [0.9.0]: https://github.com/k4yt3x/mekaweb/compare/0.8.0...0.9.0
 [0.8.0]: https://github.com/k4yt3x/mekaweb/compare/0.7.1...0.8.0

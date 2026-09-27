@@ -2171,6 +2171,9 @@ progress::-moz-progress-bar {
   outline: none;
 }
 .conversation-history {
+  /* Contain absolute descendants, such as `sr-only` status text, within the scroller; otherwise
+     they sit at their place in the full history and make the whole page scrollable. */
+  position: relative;
   flex: 1 0 auto;
   font-size: var(--conversation-font-size);
   padding-right: var(--composer-scrollbar, 0px);
