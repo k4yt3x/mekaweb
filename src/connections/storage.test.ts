@@ -1,5 +1,10 @@
 import { expect, it } from 'vitest';
-import { BrowserStorage, CONVERSATION_FONT, CONVERSATION_WIDTH } from './storage';
+import {
+  BrowserStorage,
+  CONVERSATION_FONT,
+  CONVERSATION_OFFSET,
+  CONVERSATION_WIDTH,
+} from './storage';
 function storage(): Storage {
   const map = new Map<string, string>();
   return {
@@ -342,7 +347,59 @@ it('merges width changes across tabs without replacing fonts, layout, credential
   expect(first.getSnapshot().conversationMaxWidth).toBe('full');
 });
 
-it('saves both reading defaults together while preserving newer settings from another tab', () => {
+it('stores whole-pixel offsets within bounds and defaults invalid anchors and offsets', () => {
+  const local = storage();
+  for (const [anchor, offset, expected] of [
+    ['area', -125, { conversationAnchor: 'area', conversationOffset: -125 }],
+    ['page', 40.6, { conversationAnchor: 'page', conversationOffset: 41 }],
+    ['left', -0.2, { conversationAnchor: 'page', conversationOffset: 0 }],
+    [undefined, 1e9, { conversationAnchor: 'page', conversationOffset: 10_000 }],
+    [null, -1e9, { conversationAnchor: 'page', conversationOffset: -10_000 }],
+    [{}, '-125', { conversationAnchor: 'page', conversationOffset: 0 }],
+    ['area', null, { conversationAnchor: 'area', conversationOffset: 0 }],
+  ] as const) {
+    local.setItem(
+      'mekaweb:v1:settings',
+      JSON.stringify({
+        version: 1,
+        connections: [],
+        conversationAnchor: anchor,
+        conversationOffset: offset,
+      }),
+    );
+    expect(new BrowserStorage(local, storage()).getSnapshot()).toMatchObject(expected);
+  }
+  const adapter = new BrowserStorage(local, storage());
+  adapter.conversationAnchor('area');
+  adapter.conversationOffset(-250);
+  expect(new BrowserStorage(local, storage()).getSnapshot()).toMatchObject({
+    conversationAnchor: 'area',
+    conversationOffset: -250,
+  });
+  for (const invalid of [NaN, Infinity, -Infinity]) {
+    adapter.conversationOffset(invalid);
+    expect(adapter.getSnapshot().conversationOffset).toBe(CONVERSATION_OFFSET.default);
+  }
+});
+
+it('restores the default reading appearance without touching the theme or connections', () => {
+  const local = storage();
+  const adapter = new BrowserStorage(local, storage());
+  const connection = adapter.saveConnection('test', 'https://example.org', 'dummy', true);
+  adapter.theme('dark');
+  adapter.conversationAppearance({ fontSize: 18, maxWidth: 'full', anchor: 'area', offset: -90 });
+  adapter.resetConversationAppearance();
+  expect(new BrowserStorage(local, storage()).getSnapshot()).toMatchObject({
+    theme: 'dark',
+    connections: [connection],
+    conversationFontSize: CONVERSATION_FONT.default,
+    conversationMaxWidth: CONVERSATION_WIDTH.default,
+    conversationAnchor: 'page',
+    conversationOffset: CONVERSATION_OFFSET.default,
+  });
+});
+
+it('saves all reading defaults together while preserving newer settings from another tab', () => {
   const local = storage();
   const first = new BrowserStorage(local, storage());
   const connection = first.saveConnection('test', 'https://example.org', 'dummy', true);
@@ -354,12 +411,14 @@ it('saves both reading defaults together while preserving newer settings from an
   const updates: unknown[] = [];
   first.subscribe(() => updates.push(first.getSnapshot()));
 
-  first.conversationAppearance(18.6, 'full');
+  first.conversationAppearance({ fontSize: 18.6, maxWidth: 'full', anchor: 'area', offset: -120 });
 
   const expected = {
     ...previous,
     conversationFontSize: 18.6,
     conversationMaxWidth: 'full',
+    conversationAnchor: 'area',
+    conversationOffset: -120,
   };
   expect(updates).toEqual([expected]);
   const restored = new BrowserStorage(local, storage());

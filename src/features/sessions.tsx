@@ -257,6 +257,11 @@ export function SessionsPage({ id }: { id?: string | undefined }) {
               </p>
             </div>
           )}
+          {!id && (
+            <div className="toolbar-actions">
+              <ReadingOptionsControl />
+            </div>
+          )}
           {selected?.session && (
             <div className="toolbar-actions">
               <ReadingOptionsControl />
@@ -771,6 +776,7 @@ function SessionDetails({ session }: { session: Schema['SessionResponse'] }) {
               </details>
               <Button
                 variant="secondary"
+                tone="danger"
                 disabled={!canWrite || task.status !== 'running' || action.busy}
                 onClick={() =>
                   void action.run(async () => {

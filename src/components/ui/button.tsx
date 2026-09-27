@@ -13,13 +13,16 @@ const variants = cva('button', {
       destructive: 'button-danger',
     },
     size: { default: '', sm: 'button-small', icon: 'button-icon' },
+    /** `danger` keeps the variant's look but turns red on hover or focus, for destructive actions. */
+    tone: { default: '', danger: 'button-caution' },
   },
-  defaultVariants: { variant: 'default', size: 'default' },
+  defaultVariants: { variant: 'default', size: 'default', tone: 'default' },
 });
 export function Button({
   className,
   variant,
   size,
+  tone,
   asChild = false,
   type = 'button',
   ...props
@@ -27,7 +30,7 @@ export function Button({
   const Component = asChild ? Slot : 'button';
   return (
     <Component
-      className={twMerge(clsx(variants({ variant, size }), className))}
+      className={twMerge(clsx(variants({ variant, size, tone }), className))}
       type={type}
       {...props}
     />

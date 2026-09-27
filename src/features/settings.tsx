@@ -1,9 +1,9 @@
 import { useAction } from '../components/actions';
 import { useRef, useState, type FormEvent } from 'react';
-import { ArrowRight, Plus, Unplug, KeyRound } from 'lucide-react';
+import { ArrowRight, Plus, Unplug, KeyRound, RotateCcw } from 'lucide-react';
 import { useConnection, useResource, useRuntime, useSettings } from '../connections/context';
 import type { Connection } from '../connections/storage';
-import { CONVERSATION_FONT, CONVERSATION_WIDTH } from '../connections/storage';
+import { CONVERSATION_FONT, CONVERSATION_OFFSET, CONVERSATION_WIDTH } from '../connections/storage';
 import { download, normalizeEndpoint, type Schema } from '../api/client';
 import { Button } from '../components/ui/button';
 import { SwitchField } from '../components/ui/switch';
@@ -206,7 +206,12 @@ export function SettingsPage() {
                 <KeyRound size={14} />
                 Edit
               </Button>
-              <Button variant="ghost" onClick={() => runtime.storage.forget(c.id)}>
+              <Button
+                variant="ghost"
+                tone="danger"
+                title="Delete this connection's saved token from this browser"
+                onClick={() => runtime.storage.forget(c.id)}
+              >
                 Forget token
               </Button>
               <ConfirmButton
@@ -223,7 +228,7 @@ export function SettingsPage() {
           </div>
         ))}
         <div className="panel-footer">
-          <Button variant="secondary" onClick={() => runtime.disconnect()}>
+          <Button variant="secondary" tone="danger" onClick={() => runtime.disconnect()}>
             <Unplug size={16} />
             Disconnect
           </Button>
@@ -263,6 +268,45 @@ export function SettingsPage() {
               onCommit={(width) => runtime.storage.conversationMaxWidth(width)}
             />
           </Field>
+          <Field label="Center conversation on">
+            <select
+              value={settings.conversationAnchor}
+              onChange={(event) =>
+                runtime.storage.conversationAnchor(event.target.value === 'area' ? 'area' : 'page')
+              }
+            >
+              <option value="page">Page</option>
+              <option value="area">Conversation area</option>
+            </select>
+          </Field>
+          <Field label="Conversation offset">
+            <PixelInput
+              label="Conversation offset"
+              value={settings.conversationOffset}
+              step={CONVERSATION_OFFSET.step}
+              min={-CONVERSATION_OFFSET.limit}
+              hint="Pixels to move the conversation; negative moves it left. It stays between the panels. Press Enter to apply."
+              onCommit={(offset) => {
+                if (typeof offset === 'number') runtime.storage.conversationOffset(offset);
+              }}
+            />
+          </Field>
+        </div>
+        <div className="panel-footer">
+          <Button
+            variant="secondary"
+            disabled={
+              settings.conversationFontSize === CONVERSATION_FONT.default &&
+              settings.conversationMaxWidth === CONVERSATION_WIDTH.default &&
+              settings.conversationAnchor === 'page' &&
+              settings.conversationOffset === CONVERSATION_OFFSET.default
+            }
+            title="Reset the conversation font size, width, and position; the color theme is kept"
+            onClick={() => runtime.storage.resetConversationAppearance()}
+          >
+            <RotateCcw size={16} />
+            Restore defaults
+          </Button>
         </div>
       </section>
       <NotificationSettings />

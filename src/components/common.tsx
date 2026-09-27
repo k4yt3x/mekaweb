@@ -121,7 +121,7 @@ export function ConfirmButton({
   const [error, setError] = useState<unknown>();
   return (
     <>
-      <Button variant="ghost" disabled={disabled} onClick={() => setOpen(true)}>
+      <Button variant="ghost" tone="danger" disabled={disabled} onClick={() => setOpen(true)}>
         {children}
       </Button>
       <Dialog

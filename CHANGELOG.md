@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-09-27
+
+### Added
+
+- Offset the conversation horizontally, such as for vertical tabs, within the conversation area.
+- Center the conversation on the page or on the conversation area.
+- Show a center line while dragging the offset slider and briefly after changing the position.
+- Restore the default conversation font size, width, and position from Settings → Appearance.
+
+### Changed
+
+- The conversation font size also applies to the message input.
+- Reading options are available on the new conversation screen.
+- Destructive buttons, such as Remove, Forget token, and Disconnect, turn red on hover or focus.
+
 ## [0.8.0] - 2026-09-27
 
 ### Added
@@ -154,7 +169,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Light and dark themes, narrow layouts, and collapsible, resizable session panels.
 - Hosting at the root or a subpath, with GitHub Pages deployment on version tags.
 
-[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.8.0...HEAD
+[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.9.0...HEAD
+[0.9.0]: https://github.com/k4yt3x/mekaweb/compare/0.8.0...0.9.0
 [0.8.0]: https://github.com/k4yt3x/mekaweb/compare/0.7.1...0.8.0
 [0.7.1]: https://github.com/k4yt3x/mekaweb/compare/0.7.0...0.7.1
 [0.7.0]: https://github.com/k4yt3x/mekaweb/compare/0.6.0...0.7.0

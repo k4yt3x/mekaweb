@@ -640,6 +640,7 @@ function WithdrawMessage({
       className="message-withdraw"
       size="sm"
       variant="ghost"
+      tone="danger"
       disabled={disabled || action.busy}
       onClick={() => void action.run(async () => controller?.withdrawInbox(sessionId, itemId))}
     >

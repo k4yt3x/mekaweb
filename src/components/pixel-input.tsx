@@ -9,6 +9,8 @@ export function PixelInput({
   label,
   value,
   step,
+  min = 1,
+  hint,
   fullWidthFallback,
   onCommit,
 }: {
@@ -17,6 +19,10 @@ export function PixelInput({
   label: string;
   value: number | 'full';
   step: number;
+  /** The lowest value; the default allows only sizes. */
+  min?: number;
+  /** Replaces the field's default tooltip. */
+  hint?: string;
   fullWidthFallback?: number;
   onCommit: (value: number | 'full') => void;
 }) {
@@ -39,9 +45,11 @@ export function PixelInput({
     let next: number | 'full' = node.value === '' ? 'full' : node.valueAsNumber;
     if (delta) {
       next =
-        next === 'full' ? (fullWidthFallback ?? 1) : Math.max(1, Number((next + delta).toFixed(6)));
+        next === 'full'
+          ? (fullWidthFallback ?? min)
+          : Math.max(min, Number((next + delta).toFixed(6)));
     }
-    if (typeof next === 'number' && (!Number.isFinite(next) || next < 1)) return;
+    if (typeof next === 'number' && (!Number.isFinite(next) || next < min)) return;
     onCommit(next);
     setDraft({ source: value });
   }
@@ -52,7 +60,7 @@ export function PixelInput({
         variant="ghost"
         size="icon"
         aria-label={`Decrease ${label.toLowerCase()}`}
-        disabled={!full && text !== '' && numeric <= 1}
+        disabled={!full && text !== '' && numeric <= min}
         onClick={() => commit(-step)}
       >
         <Minus size={16} aria-hidden="true" />
@@ -65,14 +73,15 @@ export function PixelInput({
           type="number"
           inputMode="decimal"
           enterKeyHint="done"
-          min={1}
+          min={min}
           step="any"
           required={fullWidthFallback === undefined}
           aria-label={label}
           title={
-            fullWidthFallback === undefined
+            hint ??
+            (fullWidthFallback === undefined
               ? 'Size in pixels. Press Enter to apply.'
-              : 'Width in pixels. Leave blank for full width. Press Enter to apply.'
+              : 'Width in pixels. Leave blank for full width. Press Enter to apply.')
           }
           placeholder={fullWidthFallback === undefined ? undefined : 'Full'}
           value={text}

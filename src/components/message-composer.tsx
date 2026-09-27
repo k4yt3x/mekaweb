@@ -22,6 +22,7 @@ import type { ComposerOptions } from '../session/controller';
 import { DEFAULT_INPUT_HEIGHT } from '../session/composer-options';
 import { useSessionNavigation } from '../features/session-navigation';
 import { useAction } from './actions';
+import { useReadingFontSize } from './reading-context';
 import { ComposerResizeHandle } from './composer-resize-handle';
 import { PermissionSelect } from './ui/permission-select';
 import { ProfileSelect } from './ui/profile-select';
@@ -101,6 +102,7 @@ export function MessageComposer({
   // until a send starts the next resize generation.
   const [manualGeneration, setManualGeneration] = useState<number>();
   const fitsText = manualGeneration !== resizeGeneration;
+  const fontSize = useReadingFontSize();
   function resizeManually(height: number) {
     setManualGeneration(resizeGeneration);
     onResize(height);
@@ -130,7 +132,8 @@ export function MessageComposer({
     textarea.scrollTop = scrollTop;
     const height = Math.max(DEFAULT_INPUT_HEIGHT, Math.min(maxHeight, needed));
     if (height !== inputHeight) onResize(height);
-  }, [fitsText, text, width, maxHeight, inputHeight, onResize]);
+    // The font size is not read here, but a new one rewraps the text.
+  }, [fitsText, text, width, maxHeight, inputHeight, onResize, fontSize]);
   useEffect(() => {
     const inputBox = editor.current,
       container = area.current,

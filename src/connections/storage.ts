@@ -5,7 +5,9 @@ const PREFIX = 'mekaweb:v1:';
 const SETTINGS = PREFIX + 'settings';
 export const CONVERSATION_FONT = { default: 14, step: 1 } as const;
 export const CONVERSATION_WIDTH = { default: 850, step: 100 } as const;
+export const CONVERSATION_OFFSET = { default: 0, step: 10, limit: 10_000 } as const;
 type ConversationMaxWidth = number | 'full';
+export type ConversationAnchor = 'page' | 'area';
 
 function positivePixels(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 1 ? value : fallback;
@@ -17,6 +19,17 @@ function normalizeConversationMaxWidth(value: unknown): ConversationMaxWidth {
 
 function normalizeConversationFontSize(value: unknown): number {
   return positivePixels(value, CONVERSATION_FONT.default);
+}
+
+export function normalizeConversationOffset(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return CONVERSATION_OFFSET.default;
+  const limit = CONVERSATION_OFFSET.limit;
+  // `+ 0` turns a rounded -0 into 0.
+  return Math.round(Math.max(-limit, Math.min(limit, value))) + 0;
+}
+
+function normalizeConversationAnchor(value: unknown): ConversationAnchor {
+  return value === 'area' ? 'area' : 'page';
 }
 export interface Connection {
   id: string;
@@ -32,11 +45,21 @@ export interface Settings {
   theme: 'system' | 'light' | 'dark';
   conversationFontSize: number;
   conversationMaxWidth: ConversationMaxWidth;
+  /** Where the reading column is centered: the page's middle or the conversation area's. */
+  conversationAnchor: ConversationAnchor;
+  /** Pixels the reading column moves right of its center; negative moves it left. */
+  conversationOffset: number;
   showTurnContext: boolean;
   turnNotifications: boolean;
   inAppNotifications: boolean;
   completionSound: boolean;
   layout: LayoutPreferences;
+}
+export interface ConversationAppearance {
+  fontSize: number;
+  maxWidth: ConversationMaxWidth;
+  anchor: ConversationAnchor;
+  offset: number;
 }
 export interface LayoutPreferences {
   navigationCollapsed: boolean;
@@ -71,6 +94,8 @@ const defaults = (): Settings => ({
   theme: 'system',
   conversationFontSize: CONVERSATION_FONT.default,
   conversationMaxWidth: CONVERSATION_WIDTH.default,
+  conversationAnchor: 'page',
+  conversationOffset: CONVERSATION_OFFSET.default,
   showTurnContext: false,
   turnNotifications: false,
   inAppNotifications: true,
@@ -159,6 +184,8 @@ export class BrowserStorage {
       theme: value.theme === 'light' || value.theme === 'dark' ? value.theme : 'system',
       conversationFontSize: normalizeConversationFontSize(value.conversationFontSize),
       conversationMaxWidth: normalizeConversationMaxWidth(value.conversationMaxWidth),
+      conversationAnchor: normalizeConversationAnchor(value.conversationAnchor),
+      conversationOffset: normalizeConversationOffset(value.conversationOffset),
       showTurnContext: value.showTurnContext === true,
       turnNotifications: value.turnNotifications === true,
       inAppNotifications: value.inAppNotifications !== false,
@@ -334,11 +361,30 @@ export class BrowserStorage {
       conversationMaxWidth: normalizeConversationMaxWidth(value),
     });
   }
-  conversationAppearance(fontSize: number, maxWidth: number | 'full') {
+  conversationAnchor(value: ConversationAnchor) {
+    this.save({ ...this.readSettings(), conversationAnchor: normalizeConversationAnchor(value) });
+  }
+  conversationOffset(value: number) {
+    this.save({ ...this.readSettings(), conversationOffset: normalizeConversationOffset(value) });
+  }
+  resetConversationAppearance() {
+    const { conversationFontSize, conversationMaxWidth, conversationAnchor, conversationOffset } =
+      defaults();
     this.save({
       ...this.readSettings(),
-      conversationFontSize: normalizeConversationFontSize(fontSize),
-      conversationMaxWidth: normalizeConversationMaxWidth(maxWidth),
+      conversationFontSize,
+      conversationMaxWidth,
+      conversationAnchor,
+      conversationOffset,
+    });
+  }
+  conversationAppearance(appearance: ConversationAppearance) {
+    this.save({
+      ...this.readSettings(),
+      conversationFontSize: normalizeConversationFontSize(appearance.fontSize),
+      conversationMaxWidth: normalizeConversationMaxWidth(appearance.maxWidth),
+      conversationAnchor: normalizeConversationAnchor(appearance.anchor),
+      conversationOffset: normalizeConversationOffset(appearance.offset),
     });
   }
   showTurnContext(showTurnContext: boolean) {
