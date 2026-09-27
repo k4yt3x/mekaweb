@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-09-27
+
+### Added
+
+- Toggle line wrapping for each code block and diagram source; wrapping is off by default.
+
+### Changed
+
+- Code blocks highlight every language Shiki bundles, such as Solidity and Kotlin.
+
 ## [0.9.0] - 2026-09-27
 
 ### Added
@@ -169,7 +179,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Light and dark themes, narrow layouts, and collapsible, resizable session panels.
 - Hosting at the root or a subpath, with GitHub Pages deployment on version tags.
 
-[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.9.0...HEAD
+[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.10.0...HEAD
+[0.10.0]: https://github.com/k4yt3x/mekaweb/compare/0.9.0...0.10.0
 [0.9.0]: https://github.com/k4yt3x/mekaweb/compare/0.8.0...0.9.0
 [0.8.0]: https://github.com/k4yt3x/mekaweb/compare/0.7.1...0.8.0
 [0.7.1]: https://github.com/k4yt3x/mekaweb/compare/0.7.0...0.7.1

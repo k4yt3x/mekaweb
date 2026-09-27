@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { CopyButton } from './common';
+import { CopyButton, WrapButton } from './common';
 import { Maximize2 } from 'lucide-react';
 import { scrollRegion } from './scrolling';
 import { MediaDialog } from './media-viewer';
@@ -13,6 +13,7 @@ function subscribeTheme(listener: () => void) {
 export function Diagram({ source }: { source: string }) {
   const preview = useRef<HTMLButtonElement>(null);
   const [expanded, setExpanded] = useState(false);
+  const [wrap, setWrap] = useState(false);
   const dark = useSyncExternalStore(subscribeTheme, () =>
     document.documentElement.classList.contains('dark'),
   );
@@ -75,10 +76,13 @@ export function Diagram({ source }: { source: string }) {
       )}
       <details className="diagram-source">
         <summary>Diagram source</summary>
-        <div className="code-block">
+        <div className="code-block" data-wrap={wrap || undefined}>
           <div className="code-toolbar">
             <span>mermaid</span>
-            <CopyButton text={source} label="Copy diagram source" />
+            <div className="code-actions">
+              <WrapButton wrap={wrap} onWrapChange={setWrap} />
+              <CopyButton text={source} label="Copy diagram source" />
+            </div>
           </div>
           <pre>
             <code

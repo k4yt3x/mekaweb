@@ -13,7 +13,7 @@ import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import { CircleAlert, Info, Lightbulb, OctagonAlert } from 'lucide-react';
 import type { ThemedToken } from 'shiki';
-import { CopyButton } from './common';
+import { CopyButton, WrapButton } from './common';
 import { Diagram } from './diagram';
 import { MarkdownTable } from './markdown-table';
 import { Checkbox } from './ui/checkbox';
@@ -53,6 +53,7 @@ function CodeBlock({ text, language }: { text: string; language: string | undefi
     highlighted?.source === text && highlighted.language === language
       ? highlighted.tokens
       : undefined;
+  const [wrap, setWrap] = useState(false);
   useEffect(() => {
     let active = true;
     if (language)
@@ -69,10 +70,13 @@ function CodeBlock({ text, language }: { text: string; language: string | undefi
     };
   }, [language, text]);
   return (
-    <div className="code-block">
+    <div className="code-block" data-wrap={wrap || undefined}>
       <div className="code-toolbar">
         <span>{language ?? 'text'}</span>
-        <CopyButton text={text} />
+        <div className="code-actions">
+          <WrapButton wrap={wrap} onWrapChange={setWrap} />
+          <CopyButton text={text} />
+        </div>
       </div>
       <pre>
         <code

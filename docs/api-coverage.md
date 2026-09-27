@@ -67,6 +67,6 @@ See the [captured schema and generation instructions](api/README.md) for the wir
 - **Profiles and instructions:** These are read-only through the HTTP API. Configure them in meka. `/instructions` returns standing instructions, excluding the per-session files named in `[instructions]`.
 - **Documentation:** OpenAPI and Swagger endpoints are optional and require `[serve].docs` on the server.
 
-See the [README](../README.md) for connection setup, recovery guidance, and browser compatibility, and the [architecture](architecture.md) for credential and state-handling invariants.
+See [using mekaweb](usage.md) for connection setup, recovery guidance, and browser compatibility, and the [architecture](architecture.md) for credential and state-handling invariants.
 
 Built-in tool names changed in meka 0.60.0, and `tool_search` was added. The interface displays tool names from the server without translating them. Update old names in custom skill bodies, standing instructions, and new tool-gate definitions using the [meka upgrade guide](https://github.com/k4yt3x/meka/blob/0.60.0/docs/book/src/getting-started/upgrading.md#059-to-060). Existing stored sessions, tasks, and gates are migrated by meka.

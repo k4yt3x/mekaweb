@@ -3296,6 +3296,19 @@ select option {
   white-space: normal;
   gap: 12px;
 }
+.code-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.wrap-toggle[aria-pressed='true'] {
+  color: var(--accent);
+}
+.code-block[data-wrap] > pre > code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .copy-control {
   position: relative;
   flex-shrink: 0;

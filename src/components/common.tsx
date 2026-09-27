@@ -7,7 +7,7 @@ import {
   type ReactElement,
   type ReactNode,
 } from 'react';
-import { AlertCircle, Check, Copy, LoaderCircle } from 'lucide-react';
+import { AlertCircle, Check, Copy, LoaderCircle, WrapText } from 'lucide-react';
 import { ConnectionError, errorMessage } from '../api/client';
 import { Button } from './ui/button';
 import { Dialog } from './ui/dialog';
@@ -67,6 +67,27 @@ export function Json({ value }: { value: unknown }) {
     >
       {JSON.stringify(value, null, 2)}
     </pre>
+  );
+}
+export function WrapButton({
+  wrap,
+  onWrapChange,
+}: {
+  wrap: boolean;
+  onWrapChange: (wrap: boolean) => void;
+}) {
+  return (
+    <Button
+      size="sm"
+      variant="ghost"
+      className="wrap-toggle"
+      aria-pressed={wrap}
+      title={wrap ? 'Stop wrapping long lines' : 'Wrap long lines'}
+      onClick={() => onWrapChange(!wrap)}
+    >
+      <WrapText size={14} />
+      Wrap
+    </Button>
   );
 }
 export function CopyButton({ text, label = 'Copy code' }: { text: string; label?: string }) {
