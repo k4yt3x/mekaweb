@@ -4,6 +4,11 @@ export interface SseFrame {
   data: string;
   id?: string;
 }
+// Past this a frame's data is not held: meka 0.66 sends a shell command's whole output, up to
+// 64 MiB, in `tool_call.completed`, while its saved result is a bounded preview.
+const MAX_FRAME = 2_000_000;
+const KEPT_HEAD = 4096;
+const KEPT_TAIL = 2048;
 export class SseParser {
   private line = '';
   private event = '';
@@ -11,6 +16,9 @@ export class SseParser {
   private id: string | undefined;
   private cr = false;
   private size = 0;
+  /** The oversized line being skipped, keeping its ends for `recoverOversized`. */
+  private skipping: { head: string; tail: string } | undefined;
+  private overflow: { head: string; tail: string; size: number } | undefined;
   constructor(
     private emit: (frame: SseFrame) => void,
     private retry: (milliseconds: number) => void = () => {},
@@ -25,30 +33,48 @@ export class SseParser {
       if (char === '\n' || char === '\r') {
         this.consumeLine();
         this.cr = char === '\r';
+      } else if (this.skipping) {
+        this.size++;
+        this.skipping.tail += char;
+        if (this.skipping.tail.length > KEPT_TAIL * 4)
+          this.skipping.tail = this.skipping.tail.slice(-KEPT_TAIL);
       } else {
         this.line += char;
         this.size++;
-        if (this.size > 2_000_000)
-          throw new Error(
-            'The server sent an oversized stream event. Reconnect to recover saved messages.',
-          );
+        if (this.size > MAX_FRAME) {
+          this.skipping = { head: this.line.slice(0, KEPT_HEAD), tail: '' };
+          this.line = '';
+        }
       }
     }
   }
   private consumeLine() {
+    if (this.skipping) {
+      const { head, tail } = this.skipping;
+      this.skipping = undefined;
+      this.line = '';
+      this.overflow = { head, tail: tail.slice(-KEPT_TAIL), size: this.size };
+      // Fields may follow the data, such as an `id:`; they are small and parse as usual.
+      this.size = 0;
+      return;
+    }
     const line = this.line;
     this.line = '';
     if (!line) {
-      if (this.data.length || this.id !== undefined)
-        this.emit({
-          event: this.event || 'message',
-          data: this.data.join('\n'),
-          ...(this.id !== undefined ? { id: this.id } : {}),
-        });
+      if (this.data.length || this.id !== undefined || this.overflow) {
+        const event = this.event || 'message';
+        // A skipped frame is still delivered with its id, so the cursor moves past it and a
+        // reconnect does not replay it.
+        const data = this.overflow
+          ? recoverOversized(event, this.overflow.head, this.overflow.tail, this.overflow.size)
+          : { event, data: this.data.join('\n') };
+        this.emit({ ...data, ...(this.id !== undefined ? { id: this.id } : {}) });
+      }
       this.event = '';
       this.data = [];
       this.id = undefined;
       this.size = 0;
+      this.overflow = undefined;
       return;
     }
     if (line.startsWith(':')) return;
@@ -67,6 +93,61 @@ export class SseParser {
     )
       this.retry(Number(value));
   }
+}
+/**
+ * Stands in for a frame too large to hold. A tool completion keeps its call, outcome and
+ * correlation, which meka writes before and after `content`; anything else becomes a notice, whose
+ * handling refreshes the saved conversation.
+ */
+export function recoverOversized(
+  event: string,
+  head: string,
+  tail: string,
+  size: number,
+): Omit<SseFrame, 'id'> {
+  const megabytes = `${(size / 1_000_000).toFixed(1)} MB`;
+  const json = (text: string | undefined) => {
+    try {
+      return text === undefined ? undefined : (JSON.parse(`"${text}"`) as string);
+    } catch {
+      return undefined;
+    }
+  };
+  const quoted = '"((?:[^"\\\\]|\\\\.)*)"';
+  // Inside a JSON string every quote is escaped, so `"turn_id":"` only matches a real key.
+  const correlation = Object.fromEntries(
+    ['turn_id', 'session_id'].flatMap((key) => {
+      const value = json([...tail.matchAll(new RegExp(`"${key}":${quoted}`, 'g'))].at(-1)?.[1]);
+      return value ? [[key, value]] : [];
+    }),
+  );
+  const call = new RegExp(`^data: ?\\{"id":${quoted},"is_error":(true|false),"content":`).exec(
+    head,
+  );
+  const id = json(call?.[1]);
+  if (event === 'tool_call.completed' && id)
+    return {
+      event,
+      data: JSON.stringify({
+        id,
+        is_error: call?.[2] === 'true',
+        content: [
+          {
+            type: 'text',
+            text: `This result is too large to show while the turn runs (${megabytes}). Once the turn ends, the conversation shows meka's saved preview.`,
+          },
+        ],
+        ...correlation,
+      }),
+    };
+  return {
+    event: 'notice',
+    data: JSON.stringify({
+      level: 'warning',
+      text: `A ${megabytes} ${event} event was too large to show; the conversation will refresh from saved history.`,
+      ...correlation,
+    }),
+  };
 }
 export type EventData = Record<string, unknown>;
 export function record(value: unknown): value is EventData {

@@ -7,6 +7,16 @@ import { useAction } from '../components/actions';
 import { ErrorNotice } from '../components/common';
 import { Button } from '../components/ui/button';
 import { SessionDeleteDialog, SessionRenameDialog } from './session-metadata';
+import type { SessionStatus } from '../session/unread';
+
+const statusLabels: Record<SessionStatus, string | undefined> = {
+  approval: 'Waiting for approval',
+  running: 'Running',
+  failed: 'Unread, failed',
+  completed: 'Unread, finished',
+  unread: 'Unread',
+  read: undefined,
+};
 
 export function SessionListItem({
   session,
@@ -14,6 +24,7 @@ export function SessionListItem({
   branches,
   selected,
   running,
+  status,
   excerpt,
   onOpen,
 }: {
@@ -22,6 +33,7 @@ export function SessionListItem({
   branches: boolean[];
   selected: boolean;
   running: boolean;
+  status: SessionStatus;
   excerpt?: string | undefined;
   onOpen: () => void;
 }) {
@@ -115,8 +127,20 @@ export function SessionListItem({
           }}
         >
           <div className="session-item-title">
-            <span className={`status-dot ${running ? 'busy' : ''}`} />
-            <strong>{title}</strong>
+            <span
+              className="status-dot"
+              data-status={status}
+              role={statusLabels[status] ? 'img' : undefined}
+              aria-label={statusLabels[status]}
+              title={statusLabels[status]}
+            />
+            <strong
+              className={
+                ['failed', 'completed', 'unread'].includes(status) ? 'session-unread' : undefined
+              }
+            >
+              {title}
+            </strong>
           </div>
           {excerpt && <p className="session-excerpt">{excerpt}</p>}
           <div className="session-item-meta">

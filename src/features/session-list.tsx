@@ -5,7 +5,8 @@ import type { Schema } from '../api/client';
 import { supportsSessionOrganization } from '../api/version';
 import { useCan, useConnection, useResource, useRuntime } from '../connections/context';
 import { useSessionStates } from '../session/hooks';
-import { isSessionRunning } from '../session/controller';
+import { isSessionRunning, type SessionState } from '../session/controller';
+import { sessionStatus, useMarkSeen, useSeenSessions } from '../session/unread';
 import { useAction } from '../components/actions';
 import { ErrorNotice, Loading } from '../components/common';
 import { Button } from '../components/ui/button';
@@ -73,6 +74,28 @@ export function SessionList({
   const entries = searching
     ? items.map((session) => ({ session, depth: 0, branches: [] }))
     : sessionTree(items);
+  const seen = useSeenSessions();
+  const firstPage = list.data?.pages[0]?.sessions;
+  useEffect(() => {
+    if (!connection || !firstPage) return;
+    // Everything listed when tracking starts counts as read; only later activity is unread.
+    const newest = firstPage.reduce<string | undefined>(
+      (latest, session) =>
+        latest === undefined || Date.parse(session.updated_at) > Date.parse(latest)
+          ? session.updated_at
+          : latest,
+      undefined,
+    );
+    runtime.storage.seenBaseline(connection.id, newest ?? new Date(0).toISOString());
+  }, [runtime.storage, connection, firstPage]);
+  // Attended sessions report activity before the next list poll does.
+  const state = (id: string) => sessions.find((s) => s.id === id);
+  const updatedAt = (item: Schema['SessionResponse'], live: SessionState | undefined) =>
+    live?.session && Date.parse(live.session.updated_at) > Date.parse(item.updated_at)
+      ? live.session.updated_at
+      : item.updated_at;
+  const selected = items.find((item) => item.id === selectedId);
+  useMarkSeen(selected?.id, selected && updatedAt(selected, state(selected.id)));
   const pending = waiting || (searching ? matches.isPending : list.isPending);
   const error = waiting ? undefined : searching ? matches.error : list.error;
   function moveSession(direction: -1 | 1) {
@@ -156,22 +179,31 @@ export function SessionList({
         <ErrorNotice error={error} />
         {pending && <Loading label={searching ? 'Searching…' : 'Loading…'} />}
         {!waiting &&
-          entries.map(({ session: item, depth, branches }) => (
-            <SessionListItem
-              key={item.id}
-              session={item}
-              depth={depth}
-              branches={branches}
-              selected={item.id === selectedId}
-              onOpen={onOpen}
-              excerpt={
-                'excerpt' in item && typeof item.excerpt === 'string' ? item.excerpt : undefined
-              }
-              running={
-                item.turn_in_flight || sessions.some((s) => s.id === item.id && isSessionRunning(s))
-              }
-            />
-          ))}
+          entries.map(({ session: item, depth, branches }) => {
+            const live = state(item.id);
+            const running = item.turn_in_flight || Boolean(live && isSessionRunning(live));
+            return (
+              <SessionListItem
+                key={item.id}
+                session={item}
+                depth={depth}
+                branches={branches}
+                selected={item.id === selectedId}
+                onOpen={onOpen}
+                excerpt={
+                  'excerpt' in item && typeof item.excerpt === 'string' ? item.excerpt : undefined
+                }
+                running={running}
+                status={sessionStatus({
+                  session: { ...item, updated_at: updatedAt(item, live) },
+                  live,
+                  running,
+                  seen,
+                  selected: item.id === selectedId,
+                })}
+              />
+            );
+          })}
         {!pending && !error && items.length === 0 && (
           <p className="muted list-empty" role="status">
             {searching ? 'No matching sessions.' : 'No sessions yet.'}

@@ -45,6 +45,20 @@ export interface LayoutPreferences {
   sessionsWidth?: number;
   detailsWidth?: number;
 }
+/** The server's `updated_at` for each session as last viewed here; see `src/session/unread.ts`. */
+export interface SeenSessions {
+  /** Sessions without an entry count as seen up to this time. Absent until the list first loads. */
+  baseline?: string;
+  sessions: Readonly<Record<string, string>>;
+}
+const SEEN_LIMIT = 500;
+const noneSeen: SeenSessions = { sessions: {} };
+function timestamp(value: unknown): value is string {
+  return typeof value === 'string' && Number.isFinite(Date.parse(value));
+}
+function later(a: string | undefined, b: string): boolean {
+  return a === undefined || Date.parse(b) > Date.parse(a);
+}
 export interface Draft {
   text: string;
   revision: string;
@@ -92,6 +106,7 @@ function connection(value: unknown): value is Connection {
 export class BrowserStorage {
   private memory = new Map<string, string>();
   private listeners = new Set<() => void>();
+  private seenCache = new Map<string, { raw: string | null; value: SeenSessions }>();
   private invalidations = new Set<(id: string) => void>();
   private channel: BroadcastChannel | undefined;
   private state: Settings = defaults();
@@ -292,6 +307,7 @@ export class BrowserStorage {
       connections: settings.connections.filter((c) => c.id !== id),
       ...(lastConnection && lastConnection !== id ? { lastConnection } : {}),
     });
+    this.write(PREFIX + 'seen:' + id, null);
     const index = this.draftIndex();
     for (const key of index.filter((k) => k.startsWith(PREFIX + 'draft:' + id + ':')))
       this.write(key, null);
@@ -399,6 +415,52 @@ export class BrowserStorage {
     this.write(PREFIX + 'draft-index', JSON.stringify(index.slice(0, 20)));
     this.emit();
     return draft;
+  }
+  /** Stable between changes, for `useSyncExternalStore`. */
+  seen(connectionId: string): SeenSessions {
+    const raw = this.read(PREFIX + 'seen:' + connectionId);
+    const cached = this.seenCache.get(connectionId);
+    if (cached?.raw === raw) return cached.value;
+    const value = parse(raw);
+    const sessions: Record<string, string> = {};
+    if (object(value) && object(value.sessions))
+      for (const [id, updated] of Object.entries(value.sessions))
+        if (timestamp(updated)) sessions[id] = updated;
+    const seen: SeenSessions = object(value)
+      ? { ...(timestamp(value.baseline) ? { baseline: value.baseline } : {}), sessions }
+      : noneSeen;
+    this.seenCache.set(connectionId, { raw, value: seen });
+    return seen;
+  }
+  /** Records a session as viewed at `updatedAt`; never moves an entry backward. */
+  markSeen(connectionId: string, sessionId: string, updatedAt: string) {
+    const current = this.seen(connectionId);
+    if (!timestamp(updatedAt) || !later(current.sessions[sessionId], updatedAt)) return;
+    let baseline = current.baseline;
+    let entries = Object.entries({ ...current.sessions, [sessionId]: updatedAt });
+    if (entries.length > SEEN_LIMIT) {
+      entries.sort(([, a], [, b]) => Date.parse(b) - Date.parse(a));
+      // A dropped entry falls back to the baseline, which rises past it so the session stays read.
+      for (const [, updated] of entries.slice(SEEN_LIMIT))
+        if (later(baseline, updated)) baseline = updated;
+      entries = entries.slice(0, SEEN_LIMIT);
+    }
+    this.saveSeen(connectionId, {
+      ...(baseline ? { baseline } : {}),
+      sessions: Object.fromEntries(entries),
+    });
+  }
+  /** Sets the baseline once, so sessions from before unread tracking start out read. */
+  seenBaseline(connectionId: string, updatedAt: string) {
+    const current = this.seen(connectionId);
+    if (current.baseline !== undefined || !timestamp(updatedAt)) return;
+    this.saveSeen(connectionId, { ...current, baseline: updatedAt });
+  }
+  private saveSeen(connectionId: string, seen: SeenSessions) {
+    if (!this.readSettings().connections.some((connection) => connection.id === connectionId))
+      return;
+    this.write(PREFIX + 'seen:' + connectionId, JSON.stringify(seen));
+    this.emit();
   }
   clearSubmittedDraft(connectionId: string, sessionId: string, submitted: string) {
     const current = this.draft(connectionId, sessionId);

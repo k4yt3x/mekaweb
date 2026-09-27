@@ -96,6 +96,41 @@ export function MessageComposer({
     input.current.focus({ preventScroll: true });
   });
   const [maxHeight, setMaxHeight] = useState(DEFAULT_INPUT_HEIGHT);
+  const [width, setWidth] = useState(0);
+  // The input grows and shrinks with its text until the handle sets a height, which then holds
+  // until a send starts the next resize generation.
+  const [manualGeneration, setManualGeneration] = useState<number>();
+  const fitsText = manualGeneration !== resizeGeneration;
+  function resizeManually(height: number) {
+    setManualGeneration(resizeGeneration);
+    onResize(height);
+  }
+  useLayoutEffect(() => {
+    const textarea = input.current,
+      inputBox = editor.current;
+    if (!fitsText || !textarea || !inputBox || !width) return;
+    const frame = getComputedStyle(inputBox);
+    const padding = [
+      frame.paddingTop,
+      frame.paddingBottom,
+      frame.borderTopWidth,
+      frame.borderBottomWidth,
+    ]
+      .map(parseFloat)
+      .reduce((sum, value) => sum + value, 0);
+    // Collapse to measure, so deleted lines can shrink the input as well. Overflow stays hidden
+    // meanwhile: a classic scrollbar would narrow the text and measure it wrapped more.
+    const { scrollTop } = textarea;
+    const { height: styleHeight, overflowY } = textarea.style;
+    textarea.style.overflowY = 'hidden';
+    textarea.style.height = '0px';
+    const needed = Math.ceil(textarea.scrollHeight + padding);
+    textarea.style.height = styleHeight;
+    textarea.style.overflowY = overflowY;
+    textarea.scrollTop = scrollTop;
+    const height = Math.max(DEFAULT_INPUT_HEIGHT, Math.min(maxHeight, needed));
+    if (height !== inputHeight) onResize(height);
+  }, [fitsText, text, width, maxHeight, inputHeight, onResize]);
   useEffect(() => {
     const inputBox = editor.current,
       container = area.current,
@@ -109,6 +144,7 @@ export function MessageComposer({
         Math.floor(scroller.clientHeight * 0.75 - overhead),
       );
       setMaxHeight(maximum);
+      setWidth(inputBox.clientWidth);
       if (inputBox.offsetHeight > maximum) onResize(maximum);
     });
     observer.observe(scroller);
@@ -171,7 +207,7 @@ export function MessageComposer({
             height={inputHeight}
             min={DEFAULT_INPUT_HEIGHT}
             max={maxHeight}
-            onResize={onResize}
+            onResize={resizeManually}
           />
           <div className="composer-editor" ref={editor} style={{ height: inputHeight }}>
             <textarea
@@ -184,6 +220,8 @@ export function MessageComposer({
               onChange={(event) => onTextChange(event.target.value)}
               onKeyDown={keydown}
               rows={2}
+              // Sized to its text below the maximum, so a sub-pixel remainder never shows a scrollbar.
+              style={fitsText && inputHeight < maxHeight ? { overflowY: 'hidden' } : undefined}
               disabled={readOnly}
               readOnly={pending}
               aria-busy={pending || undefined}

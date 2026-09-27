@@ -4,6 +4,8 @@
 
 Compared with 0.64.0, the 0.65.0 schema changes only the description of the compaction response's `source`: `checkpoint_text` is gone, leaving `checkpoint` and `summarizer`, on the response and the `context.compacted` event alike. The client treats `source` as an opaque string. 0.64.1 changed no REST shapes, SSE events, or tool parameters. 0.65.0 also replaces `offset` and `limit` with `start` and `end` in `file_read` and `scratchpad_read`, and writes archive format 5; neither tool's primary parameter changes, and archives pass through unmodified.
 
+Meka 0.66.0, commit `2e44f7ca69149236a2ba3703d8a44383ac573150`, was reviewed against that baseline; its schema differs only in version. A shell command may now print 64 MiB, all of which `tool_call.completed` carries, while the saved result stays a bounded preview. The SSE parser therefore skips data past 2,000,000 characters and keeps the frame's id, so a reconnect cannot replay it. A skipped tool completion keeps its call, outcome, and correlation from the ends of its JSON, and other skipped events become a notice. The 0.65.0 schema remains the generation source.
+
 Schema capture is a manual maintenance step. Choose a disposable meka instance with `[serve].docs = true`, confirm its version, and download its schema. For a 0.65.0 instance listening on port 8081:
 
 ```sh

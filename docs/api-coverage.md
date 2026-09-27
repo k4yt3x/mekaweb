@@ -1,8 +1,8 @@
 # API support
 
-mekaweb targets **meka 0.65.0**, commit `61de2537fcfd3bb16ee1b46748254f40a399ac48`. Meka 0.59.0–0.64.1 retain their existing features; titles, pins, and conversation search require 0.64.0. The table maps supported HTTP operations to the interface. Available actions depend on the token's scopes and the server's configuration.
+mekaweb targets **meka 0.66.0**, commit `2e44f7ca69149236a2ba3703d8a44383ac573150`. Meka 0.59.0–0.65.0 retain their existing features; titles, pins, and conversation search require 0.64.0. The table maps supported HTTP operations to the interface. Available actions depend on the token's scopes and the server's configuration.
 
-See the [captured schema and generation instructions](api/README.md) for the wire contract and the [meka HTTP API reference](https://github.com/k4yt3x/meka/blob/0.65.0/docs/book/src/usage/http-api.md) for server behavior.
+See the [captured schema and generation instructions](api/README.md) for the wire contract and the [meka HTTP API reference](https://github.com/k4yt3x/meka/blob/0.66.0/docs/book/src/usage/http-api.md) for server behavior.
 
 | Method | Endpoint                                   | Interface support                                                               |
 | ------ | ------------------------------------------ | ------------------------------------------------------------------------------- |

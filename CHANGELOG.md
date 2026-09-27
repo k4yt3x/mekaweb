@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-09-27
+
+### Added
+
+- Mark sessions with activity since you last viewed them as unread in the session list.
+- Colour session dots for running, awaiting approval, and unread finished or failed turns.
+
+### Changed
+
+- Recognize meka 0.66.0 as a supported server version.
+- The message input grows with its text until resized by hand, which holds until the next send.
+- Running shell output gives way to the tool result when the command finishes, without repeating it.
+
+### Fixed
+
+- Show a note for tool results too large to stream instead of reconnecting the session feed.
+
 ## [0.7.1] - 2026-09-26
 
 ### Changed
@@ -137,7 +154,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Light and dark themes, narrow layouts, and collapsible, resizable session panels.
 - Hosting at the root or a subpath, with GitHub Pages deployment on version tags.
 
-[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.7.1...HEAD
+[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.8.0...HEAD
+[0.8.0]: https://github.com/k4yt3x/mekaweb/compare/0.7.1...0.8.0
 [0.7.1]: https://github.com/k4yt3x/mekaweb/compare/0.7.0...0.7.1
 [0.7.0]: https://github.com/k4yt3x/mekaweb/compare/0.6.0...0.7.0
 [0.6.0]: https://github.com/k4yt3x/mekaweb/compare/0.5.0...0.6.0

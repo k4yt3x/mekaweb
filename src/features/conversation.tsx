@@ -21,6 +21,7 @@ import {
 import type { SessionState, LiveTool, Submission, ComposerOptions } from '../session/controller';
 import { isSessionRunning } from '../session/controller';
 import { useTextDraft } from '../session/drafts';
+import { useMarkSeen } from '../session/unread';
 import { Button } from '../components/ui/button';
 import { Empty, ErrorNotice, Loading } from '../components/common';
 import { NoticeMessage } from '../components/notice-message';
@@ -55,6 +56,8 @@ export function Conversation({ state }: { state: SessionState }) {
   const inbox = useResource<Schema['InboxListResponse']>(sessionPath(state.id) + '/inbox');
   const canWithdraw = useCan('sessions:w') && !state.session?.parent_id && !state.deleting;
   const [feedbackError, setFeedbackError] = useState<unknown>();
+  // Also marked from the session list, which can be collapsed or hidden.
+  useMarkSeen(state.id, state.session?.updated_at);
   const [inputHeight, setInputHeight] = useState(DEFAULT_INPUT_HEIGHT);
   const [resizeGeneration, setResizeGeneration] = useState(0);
   function acceptDraft(submitted: string) {
@@ -749,7 +752,9 @@ function Tool({ tool }: { tool: LiveTool | undefined }) {
       }
       isError={tool.state === 'error'}
     >
-      {tool.output && (
+      {/* The completion carries the whole output, so the stream gives way to the Result; a call
+          that ended without one keeps what streamed. */}
+      {tool.output && !['completed', 'error'].includes(tool.state) && (
         <div className="tool-section">
           <h4>Output</h4>
           <ToolOutput label="Tool output">

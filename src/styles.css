@@ -34,6 +34,7 @@
   --app-width: calc(100vw - var(--safe-left) - var(--safe-right));
   --danger: #b42332;
   --warning: #97620c;
+  --success: #2f855a;
   --shadow: 0 12px 48px #19264412;
   background: var(--bg);
   color: var(--text);
@@ -55,6 +56,7 @@
   --message-border: #262626;
   --danger: #ff9ca7;
   --warning: #e5b65e;
+  --success: #6cc995;
   --shadow: 0 12px 48px #0005;
 }
 * {
@@ -329,10 +331,6 @@ progress {
   display: inline-block;
   background: #48a17e;
   flex-shrink: 0;
-}
-.status-dot.busy {
-  background: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 .app-frame {
   height: var(--viewport-height);
@@ -1550,9 +1548,34 @@ progress::-moz-progress-bar {
   background: var(--muted);
   opacity: 0.6;
 }
-.session-item-title > .status-dot.busy {
-  background: var(--accent);
+.session-item-title > .status-dot:not([data-status='read']) {
   opacity: 1;
+}
+.session-item-title > .status-dot[data-status='running'] {
+  background: var(--success);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 22%, transparent);
+}
+.session-item-title > .status-dot[data-status='approval'] {
+  background: var(--warning);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--warning) 25%, transparent);
+}
+/* Unread marks are larger and haloless; scaled rather than resized, so titles stay aligned. */
+.session-item-title
+  > .status-dot:is([data-status='completed'], [data-status='failed'], [data-status='unread']) {
+  transform: scale(1.4);
+}
+.session-item-title > .status-dot[data-status='completed'] {
+  background: var(--accent);
+}
+.session-item-title > .status-dot[data-status='failed'] {
+  background: var(--danger);
+}
+/* A change whose outcome this tab did not see. */
+.session-item-title > .status-dot[data-status='unread'] {
+  background: var(--text);
+}
+.session-item-title .session-unread {
+  font-weight: 700;
 }
 .session-item-meta {
   grid-column: 1;

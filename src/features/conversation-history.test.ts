@@ -313,6 +313,7 @@ function waitingState(patch: Partial<SessionState> = {}): SessionState {
     approvals: [],
     notices: [],
     revision: 0,
+    lastTurn: undefined,
     blocks: [{ kind: 'submission', key: 'direct' }],
     submissions: [
       {

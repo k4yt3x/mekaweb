@@ -367,3 +367,39 @@ it('saves both reading defaults together while preserving newer settings from an
   expect(restored.draft(connection.id, 's')).toEqual(draft);
   expect(restored.token(connection)).toBe('dummy');
 });
+it('tracks seen sessions per connection, only forward, and shares them across tabs', () => {
+  const local = storage();
+  const a = new BrowserStorage(local, storage()),
+    b = new BrowserStorage(local, storage());
+  const { id } = a.saveConnection('test', 'https://example.org', 'dummy-token', true);
+  expect(a.seen(id)).toEqual({ sessions: {} });
+  a.seenBaseline(id, '2026-09-26T10:00:00Z');
+  a.seenBaseline(id, '2026-09-27T10:00:00Z');
+  a.markSeen(id, 's', '2026-09-26T12:00:00Z');
+  a.markSeen(id, 's', '2026-09-26T11:00:00Z');
+  a.markSeen(id, 't', 'not a time');
+  const seen = a.seen(id);
+  expect(seen).toEqual({
+    baseline: '2026-09-26T10:00:00Z',
+    sessions: { s: '2026-09-26T12:00:00Z' },
+  });
+  // Stable until it changes, as useSyncExternalStore requires.
+  expect(a.seen(id)).toBe(seen);
+  expect(b.seen(id)).toEqual(seen);
+  a.markSeen('unknown', 's', '2026-09-26T12:00:00Z');
+  expect(a.seen('unknown')).toEqual({ sessions: {} });
+  a.remove(id);
+  expect(a.seen(id)).toEqual({ sessions: {} });
+});
+it('bounds seen sessions and raises the baseline past dropped entries', () => {
+  const a = new BrowserStorage(storage(), storage());
+  const { id } = a.saveConnection('test', 'https://example.org', 'dummy-token', true);
+  a.seenBaseline(id, '2026-01-01T00:00:00Z');
+  const at = (minute: number) => new Date(Date.UTC(2026, 1, 1, 0, minute)).toISOString();
+  for (let index = 0; index < 502; index++) a.markSeen(id, `s${index}`, at(index));
+  const seen = a.seen(id);
+  expect(Object.keys(seen.sessions)).toHaveLength(500);
+  expect(seen.sessions.s0).toBeUndefined();
+  expect(seen.sessions.s1).toBeUndefined();
+  expect(seen.baseline).toBe(at(1));
+});

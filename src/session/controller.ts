@@ -80,6 +80,12 @@ export interface SessionState {
   notices: SessionNotice[];
   submissions: Submission[];
   revision: number;
+  /**
+   * How the latest turn this tab followed ended, with the session's `updated_at` read after it.
+   * Later activity moves `updated_at` past it, which is how the list knows the outcome is stale.
+   */
+  lastTurn:
+    { outcome: 'completed' | 'failed' | 'canceled'; updatedAt: string | undefined } | undefined;
 }
 export interface ComposerOptions {
   images: (Schema['ImageInput'] & { name: string })[];
@@ -140,6 +146,7 @@ function initial(id: string): SessionState {
     notices: [],
     submissions: [],
     revision: 0,
+    lastTurn: undefined,
   };
 }
 function needsFollowing(submission: Submission) {
@@ -460,6 +467,7 @@ export class SessionController {
             .map((submission) => ({ kind: 'submission', key: submission.key })),
           tools: {},
           approvals: [],
+          lastTurn: undefined,
         });
       } else this.publish(entry, { running: true });
       return;
@@ -664,6 +672,7 @@ export class SessionController {
             running: false,
             textStreaming: false,
             approvals: [],
+            lastTurn: { outcome, updatedAt: undefined },
             tools: Object.fromEntries(
               Object.entries(state.tools).map(([id, tool]) => [
                 id,
@@ -688,6 +697,15 @@ export class SessionController {
     });
     if (notify) this.notifyCompletion(entry, turnId, outcome);
     void this.refresh(state.id, current).then(() => {
+      const latest = this.entries.get(state.id);
+      if (
+        current &&
+        latest?.state.lastTurn?.outcome === outcome &&
+        !latest.state.lastTurn.updatedAt
+      )
+        this.publish(latest, {
+          lastTurn: { outcome, updatedAt: latest.state.session?.updated_at },
+        });
       this.invalidated(state.id);
       this.release(entry);
     });
