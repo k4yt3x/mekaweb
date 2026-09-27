@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The completion sound is a lower, softer two-note kalimba phrase with a light stereo echo.
+
 ## [0.10.0] - 2026-09-27
 
 ### Added
