@@ -1,6 +1,8 @@
 import { useMemo, type ReactNode } from 'react';
+import { Command } from 'lucide-react';
 import { toolSummary } from '../session/tool-summary';
 import { Json } from './common';
+import { toolIconKey, toolIcons } from './tool-icons';
 
 export function ToolCard({
   name,
@@ -21,12 +23,11 @@ export function ToolCard({
     () => toolSummary(name, input, displaySummary),
     [name, input, displaySummary],
   );
+  const Icon = toolIcons[toolIconKey(name)] ?? Command;
   return (
     <details className={`tool-card ${isError ? 'tool-error' : ''}`}>
       <summary>
-        <span className="tool-symbol" aria-hidden="true">
-          ⌘
-        </span>
+        <Icon className="tool-symbol" size={14} aria-hidden="true" />
         <span className="tool-call-label">
           <span className="tool-name" title={name}>
             {name}

@@ -14,6 +14,7 @@ it('shows the primary argument in the heading while retaining full arguments and
     </ToolCard>,
   );
   expect(html).toContain('<code>pwd</code>');
+  expect(html).toMatch(/<svg[^>]*lucide-square-terminal[^>]*tool-symbol/);
   expect(html).toContain('timeout_ms');
   expect(html).toContain('30000');
   expect(html).toContain('<p>Tool result</p>');

@@ -2401,7 +2401,6 @@ progress::-moz-progress-bar {
 }
 .tool-symbol {
   color: var(--muted);
-  font-size: 15px;
   flex-shrink: 0;
 }
 .live-preview {
