@@ -131,7 +131,10 @@ export function MessageComposer({
     textarea.style.overflowY = overflowY;
     textarea.scrollTop = scrollTop;
     const height = Math.max(DEFAULT_INPUT_HEIGHT, Math.min(maxHeight, needed));
-    if (height !== inputHeight) onResize(height);
+    // The measurement is rounded at the input's subpixel position, which resizing can move: a
+    // centered composer shifts by half the change. It can then alternate between adjacent heights
+    // forever, so keep the taller one rather than shrinking by a pixel.
+    if (height > inputHeight || height < inputHeight - 1) onResize(height);
     // The font size is not read here, but a new one rewraps the text.
   }, [fitsText, text, width, maxHeight, inputHeight, onResize, fontSize]);
   useEffect(() => {
