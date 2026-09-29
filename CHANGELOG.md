@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.1] - 2026-09-29
+
+### Fixed
+
+- Code blocks no longer flicker to plain text on each update while the agent writes them.
+
 ## [0.13.0] - 2026-09-29
 
 ### Changed
@@ -218,7 +224,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Light and dark themes, narrow layouts, and collapsible, resizable session panels.
 - Hosting at the root or a subpath, with GitHub Pages deployment on version tags.
 
-[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.13.0...HEAD
+[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.13.1...HEAD
+[0.13.1]: https://github.com/k4yt3x/mekaweb/compare/0.13.0...0.13.1
 [0.13.0]: https://github.com/k4yt3x/mekaweb/compare/0.12.1...0.13.0
 [0.12.1]: https://github.com/k4yt3x/mekaweb/compare/0.12.0...0.12.1
 [0.12.0]: https://github.com/k4yt3x/mekaweb/compare/0.11.1...0.12.0

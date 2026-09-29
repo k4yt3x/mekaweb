@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useMemo,
   useState,
   isValidElement,
   memo,
@@ -43,32 +44,34 @@ export function MarkdownPreview({ text }: { text: string }) {
   );
 }
 
+type Highlight = (text: string) => ThemedToken[][] | undefined;
+// Loaded grammars, so blocks that mount later highlight from their first render.
+const highlighters = new Map<string, Highlight>();
+
 function CodeBlock({ text, language }: { text: string; language: string | undefined }) {
-  const [highlighted, setHighlighted] = useState<{
-    source: string;
-    language: string;
-    tokens: ThemedToken[][] | undefined;
-  }>();
-  const tokens =
-    highlighted?.source === text && highlighted.language === language
-      ? highlighted.tokens
-      : undefined;
+  // Set when this block's grammar loads, rendering it again to highlight it.
+  const [, setLoaded] = useState<Highlight>();
+  const highlight = language ? highlighters.get(language) : undefined;
+  // Highlighting in an effect painted each streamed update plain for a frame before its colours.
+  const tokens = useMemo(() => highlight?.(text), [highlight, text]);
   const [wrap, setWrap] = useState(false);
   useEffect(() => {
+    if (!language || highlight) return;
     let active = true;
-    if (language)
-      void import('./highlighter')
-        .then(async (module) => {
-          const tokens = await module.highlight(text, language);
-          if (active) setHighlighted({ source: text, language, tokens });
-        })
-        .catch(() => {
-          /* Unknown grammars stay plain and copyable. */
-        });
+    void import('./highlighter')
+      .then((module) => module.load(language))
+      .then((loaded) => {
+        if (!loaded) return;
+        highlighters.set(language, loaded);
+        if (active) setLoaded(() => loaded);
+      })
+      .catch(() => {
+        /* Unknown grammars stay plain and copyable. */
+      });
     return () => {
       active = false;
     };
-  }, [language, text]);
+  }, [language, highlight]);
   return (
     <div className="code-block" data-wrap={wrap || undefined}>
       <div className="code-toolbar">

@@ -20,14 +20,23 @@ function languageName(language: string) {
     ? (name as keyof typeof bundledLanguages)
     : undefined;
 }
-export async function highlight(text: string, language: string) {
+// Resolves to a highlighter that works synchronously, so a block can highlight as it renders.
+export async function load(language: string) {
   const name = languageName(language);
-  if (!name || text.length > 100000) return undefined;
+  if (!name) return undefined;
   const engine = await highlighter;
   // Each grammar is its own chunk, fetched the first time a block uses it.
   await engine.loadLanguage((await bundledLanguages[name]()).default);
-  return engine.codeToTokens(text, {
-    lang: name,
-    themes: { light: 'github-light-default', dark: 'github-dark' },
-  }).tokens;
+  return (text: string) => {
+    if (text.length > 100000) return undefined;
+    try {
+      return engine.codeToTokens(text, {
+        lang: name,
+        themes: { light: 'github-light-default', dark: 'github-dark' },
+      }).tokens;
+    } catch {
+      // This runs during render, where a throw would take down the conversation.
+      return undefined;
+    }
+  };
 }
