@@ -58,6 +58,7 @@ export function SessionDeleteDialog({
   trigger: RefObject<HTMLButtonElement | null>;
 }) {
   const cancel = useRef<HTMLButtonElement>(null);
+  const confirm = useRef<HTMLButtonElement>(null);
   return (
     <Dialog
       open={open}
@@ -65,9 +66,9 @@ export function SessionDeleteDialog({
       title="Delete session"
       description={`Delete “${title || 'New conversation'}”, its conversation, and its sub-agent sessions?`}
       onOpenAutoFocus={(event) => {
-        // The shortcut works while typing; a following Enter must not confirm the deletion.
+        // Enter confirms, so the shortcut and Enter delete without reaching for the pointer.
         event.preventDefault();
-        cancel.current?.focus();
+        (confirm.current?.disabled ? cancel : confirm).current?.focus();
       }}
       onCloseAutoFocus={(event) => {
         event.preventDefault();
@@ -79,7 +80,7 @@ export function SessionDeleteDialog({
         <Button ref={cancel} variant="secondary" onClick={() => onOpenChange(false)}>
           {busy ? 'Close' : 'Cancel'}
         </Button>
-        <Button variant="destructive" disabled={disabled || busy} onClick={onDelete}>
+        <Button ref={confirm} variant="destructive" disabled={disabled || busy} onClick={onDelete}>
           {busy ? 'Deleting…' : 'Delete session'}
         </Button>
       </div>
