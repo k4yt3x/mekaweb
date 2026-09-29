@@ -4,7 +4,7 @@ import { toolIconKey, toolIcons } from './tool-icons';
 
 const icon = (name: string) => toolIcons[toolIconKey(name)];
 
-// meka 0.66.0: src/tools/registry.rs::BUILTIN_TOOL_NAMES, plus the checkpoint-only context_replace.
+// meka 0.68.0: src/tools/registry.rs::BUILTIN_TOOL_NAMES, plus the checkpoint-only context_replace.
 const builtins = [
   'agent_delete',
   'agent_followup',

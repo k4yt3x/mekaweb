@@ -22,7 +22,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 
-// meka 0.66.0: src/tools/registry.rs::BUILTIN_TOOL_NAMES. An entry ending in `_` covers every tool
+// meka 0.68.0: src/tools/registry.rs::BUILTIN_TOOL_NAMES. An entry ending in `_` covers every tool
 // named with that prefix, and matches the navigation's icon where the two overlap. MCP server tools
 // are named `mcp__{server}__{tool}`, so they share a prefix too.
 export const toolIcons: Readonly<Record<string, LucideIcon>> = {

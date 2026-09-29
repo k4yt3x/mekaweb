@@ -349,6 +349,58 @@ it('notifies for a running turn joined through resumed and isolates notification
   expect(f.state().running).toBe(false);
 });
 
+it('follows a compaction turn without notifying or recording it as the last turn', async () => {
+  const f = await fixture();
+  const completed = vi.fn();
+  f.controller.onCompletion(completed);
+  await f.event('turn.started', {
+    turn_id: 'compaction',
+    source: 'compaction',
+    started_at: new Date(Date.now() + 1000).toISOString(),
+  });
+  expect(f.state()).toMatchObject({ running: true, compacting: true });
+  await f.event('context.compacted', {
+    turn_id: 'compaction',
+    source: 'checkpoint',
+    replaced_count: 2,
+    generation: 1,
+  });
+  await f.event('turn.finished', { turn_id: 'compaction' });
+  await vi.waitFor(() => expect(f.state().partial).toBe(false));
+  expect(f.state()).toMatchObject({ running: false, compacting: false, lastTurn: undefined });
+  await f.event('turn.started', { turn_id: 'joined', source: 'compaction', resumed: true });
+  await f.event('turn.failed', { turn_id: 'joined' });
+  expect(completed).not.toHaveBeenCalled();
+});
+
+it('shows the saved conversation of a session a read-only token cannot load, then attaches', async () => {
+  const f = await fixture(false);
+  vi.useFakeTimers();
+  const unloaded = new ApiError(409, {
+    type: 'https://meka.run/errors/session-not-loaded',
+    title: 'Session not loaded',
+  });
+  vi.mocked(f.api.stream)
+    .mockRejectedValueOnce(unloaded)
+    .mockRejectedValueOnce(unloaded)
+    .mockResolvedValueOnce(
+      new Response(new ReadableStream(), { headers: { 'Content-Type': 'text/event-stream' } }),
+    );
+  const input: Schema['MessageView'] = { role: 'user', content: [{ type: 'text', text: 'Hi' }] };
+  f.saved.messages = [input];
+  f.saved.total = 1;
+  await f.controller.reconnect('s');
+  expect(f.state()).toMatchObject({ feed: 'unloaded', saved: { messages: [input] } });
+  expect(f.state().error).toBeUndefined();
+  // Retried at a steady pace rather than backing off, since nothing may load it for a while.
+  await vi.advanceTimersByTimeAsync(15000);
+  expect(f.api.stream).toHaveBeenCalledTimes(3);
+  expect(f.state().feed).toBe('unloaded');
+  await vi.advanceTimersByTimeAsync(15000);
+  expect(f.api.stream).toHaveBeenCalledTimes(4);
+  expect(f.state().feed).toBe('connected');
+});
+
 it('tracks text bursts and quiet intervals without treating a pause as turn completion', async () => {
   const f = await fixture();
   vi.useFakeTimers();
@@ -528,6 +580,50 @@ it('coalesces deletion requests and releases the deleted session and its attachm
   expect(f.controller.getSnapshot()).toHaveLength(0);
   expect(f.controller.draft('s')).toBeUndefined();
   expect(vi.mocked(f.api.stream).mock.calls[0]?.[3]?.aborted).toBe(true);
+});
+it('reconciles a followed turn when a read-only feed comes back unloaded', async () => {
+  const f = await fixture(false);
+  vi.useFakeTimers();
+  f.session.turn_in_flight = true;
+  await f.event('turn.started', { turn_id: 'remote' });
+  await f.event('assistant_text.delta', { turn_id: 'remote', text: 'Partial output' });
+  expect(f.state().running).toBe(true);
+  // The server restarts mid-turn: the feed breaks without a terminal, and nothing is loaded.
+  vi.mocked(f.api.stream).mockRejectedValue(
+    new ApiError(409, { type: 'https://meka.run/errors/session-not-loaded' }),
+  );
+  f.session.turn_in_flight = false;
+  f.closeFeed();
+  await vi.advanceTimersByTimeAsync(1000);
+  await vi.waitFor(() =>
+    expect(f.state()).toMatchObject({ feed: 'unloaded', running: false, partial: false }),
+  );
+  expect(f.state().blocks).toEqual([]);
+});
+
+it('waits quietly when deletion ends the feed, and reconnects if the deletion fails', async () => {
+  const f = await fixture();
+  vi.useFakeTimers();
+  let refuse!: (error: unknown) => void;
+  vi.spyOn(f.api, 'mutate').mockImplementation(
+    () =>
+      new Promise((_, reject) => {
+        refuse = reject;
+      }),
+  );
+  vi.mocked(f.api.stream).mockResolvedValueOnce(
+    new Response(new ReadableStream(), { headers: { 'Content-Type': 'text/event-stream' } }),
+  );
+  const deleting = f.controller.deleteSession('s');
+  // meka 0.68 closes the feed before it removes the rows and answers.
+  f.closeFeed();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(f.state()).toMatchObject({ feed: 'connected', partial: false, deleting: true });
+  refuse(new ApiError(409, { title: 'Session locked' }));
+  await expect(deleting).rejects.toMatchObject({ status: 409 });
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(f.api.stream).toHaveBeenCalledTimes(2);
+  expect(f.state()).toMatchObject({ feed: 'connected', deleting: false });
 });
 it('reconciles a lost delete response with a read without repeating DELETE', async () => {
   const f = await fixture();

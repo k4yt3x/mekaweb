@@ -303,6 +303,7 @@ function waitingState(patch: Partial<SessionState> = {}): SessionState {
     id: 'session',
     feed: 'connected',
     running: false,
+    compacting: false,
     textStreaming: false,
     offset: 0,
     loading: false,
@@ -425,4 +426,13 @@ it('shows activity for an externally started turn without requiring a local subm
     index: 0,
     status: 'working',
   });
+});
+
+it('names a running compaction, but not a turn whose compaction flag outlived it', () => {
+  const compaction = waitingState({ running: true, compacting: true, submissions: [], blocks: [] });
+  expect(activity(compaction)).toEqual({ index: 0, status: 'compacting' });
+  compaction.feed = 'reconnecting';
+  expect(activity(compaction)?.status).toBe('reconnecting');
+  // An own turn can run before the feed announces it and clears the flag.
+  expect(activity(waitingState({ compacting: true }))?.status).toBe('working');
 });

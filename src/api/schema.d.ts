@@ -2612,6 +2612,15 @@ export interface operations {
           'application/json': components['schemas']['ProblemDetail'];
         };
       };
+      /** @description The cursor is not one this server issued (`/errors/invalid-body`) */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
       /** @description Internal server error */
       500: {
         headers: {
@@ -4120,7 +4129,7 @@ export interface operations {
           'application/json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description Another meka process holds the session (`/errors/session-locked`) */
+      /** @description Another meka process holds the session (`/errors/session-locked`), or the token may only read and the session is not loaded (`/errors/session-not-loaded`) */
       409: {
         headers: {
           [name: string]: unknown;

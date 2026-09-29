@@ -4,7 +4,7 @@
     "title": "meka HTTP API",
     "description": "Service-to-service API for driving meka agent turns programmatically. Mirrors the wire format described in the HTTP API docs. A field that has no value is omitted from every response and event, never sent as `null`.",
     "license": { "name": "AGPL-3.0-or-later" },
-    "version": "0.65.0"
+    "version": "0.68.0"
   },
   "paths": {
     "/v1/health/live": {
@@ -655,6 +655,12 @@
           },
           "403": {
             "description": "Insufficient scope",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
+            }
+          },
+          "422": {
+            "description": "The cursor is not one this server issued (`/errors/invalid-body`)",
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
             }
@@ -1914,7 +1920,7 @@
             }
           },
           "409": {
-            "description": "Another meka process holds the session (`/errors/session-locked`)",
+            "description": "Another meka process holds the session (`/errors/session-locked`), or the token may only read and the session is not loaded (`/errors/session-not-loaded`)",
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
             }

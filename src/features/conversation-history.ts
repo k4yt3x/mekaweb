@@ -130,7 +130,8 @@ export function responseActivityIndicator(
 ):
   | {
       index: number;
-      status: 'working' | 'approval' | 'connecting' | 'reconnecting' | 'disconnected';
+      status:
+        'working' | 'compacting' | 'approval' | 'connecting' | 'reconnecting' | 'disconnected';
     }
   | undefined {
   if (!isSessionRunning(state)) return;
@@ -165,7 +166,9 @@ export function responseActivityIndicator(
   const status = state.approvals.length
     ? 'approval'
     : state.feed === 'connected'
-      ? 'working'
+      ? state.running && state.compacting
+        ? 'compacting'
+        : 'working'
       : state.feed === 'connecting'
         ? 'connecting'
         : state.feed === 'reconnecting'

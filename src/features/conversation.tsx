@@ -9,7 +9,7 @@ import {
   useSyncExternalStore,
   type ReactNode,
 } from 'react';
-import { ArrowDown, ShieldCheck, Unplug } from 'lucide-react';
+import { ArrowDown, FoldVertical, ShieldCheck, Unplug } from 'lucide-react';
 import { sessionPath, type Schema } from '../api/client';
 import {
   useCan,
@@ -273,6 +273,14 @@ export function Conversation({ state }: { state: SessionState }) {
               {state.notices.map((notice) => (
                 <NoticeMessage key={notice.id} notice={notice} />
               ))}
+              {state.feed === 'unloaded' && (
+                <NoticeMessage
+                  notice={{
+                    level: 'info',
+                    text: 'This session isn’t loaded on the server, and loading it takes write access. Live updates start once the server loads it.',
+                  }}
+                />
+              )}
               {draft.conflict && (
                 <div className="notice">
                   <div>
@@ -346,9 +354,17 @@ function AgentActivity({
 }: {
   status: NonNullable<ReturnType<typeof responseActivityIndicator>>['status'];
 }) {
-  const Icon = status === 'approval' ? ShieldCheck : status === 'disconnected' ? Unplug : undefined;
+  const Icon =
+    status === 'approval'
+      ? ShieldCheck
+      : status === 'compacting'
+        ? FoldVertical
+        : status === 'disconnected'
+          ? Unplug
+          : undefined;
   const label = {
     working: 'Agent is working',
+    compacting: 'Compacting context…',
     approval: 'Waiting for approval',
     connecting: 'Connecting…',
     reconnecting: 'Reconnecting…',

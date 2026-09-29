@@ -1,16 +1,18 @@
 # API schema maintenance
 
-`meka-0.65.0.json` was captured from meka tag `0.65.0`, commit `61de2537fcfd3bb16ee1b46748254f40a399ac48`, through `/v1/openapi.json` with `[serve].docs = true`. The generated REST types are committed in `src/api/schema.d.ts`; runtime connections do not require schema access.
+`meka-0.68.0.json` was captured from meka tag `0.68.0`, commit `41db1959534e21c7204a6f8dc9aea82e64fff0f5`, through `/v1/openapi.json` with `[serve].docs = true`. The generated REST types are committed in `src/api/schema.d.ts`; runtime connections do not require schema access.
 
 Compared with 0.64.0, the 0.65.0 schema changes only the description of the compaction response's `source`: `checkpoint_text` is gone, leaving `checkpoint` and `summarizer`, on the response and the `context.compacted` event alike. The client treats `source` as an opaque string. 0.64.1 changed no REST shapes, SSE events, or tool parameters. 0.65.0 also replaces `offset` and `limit` with `start` and `end` in `file_read` and `scratchpad_read`, and writes archive format 5; neither tool's primary parameter changes, and archives pass through unmodified.
 
-Meka 0.66.0, commit `2e44f7ca69149236a2ba3703d8a44383ac573150`, was reviewed against that baseline; its schema differs only in version. A shell command may now print 64 MiB, all of which `tool_call.completed` carries, while the saved result stays a bounded preview. The SSE parser therefore skips data past 2,000,000 characters and keeps the frame's id, so a reconnect cannot replay it. A skipped tool completion keeps its call, outcome, and correlation from the ends of its JSON, and other skipped events become a notice. The 0.65.0 schema remains the generation source.
+The 0.66.0 schema differs from 0.65.0 only in version. A shell command may now print 64 MiB, all of which `tool_call.completed` carries, while the saved result stays a bounded preview. The SSE parser therefore skips data past 2,000,000 characters and keeps the frame's id, so a reconnect cannot replay it. A skipped tool completion keeps its call, outcome, and correlation from the ends of its JSON, and other skipped events become a notice.
 
-Schema capture is a manual maintenance step. Choose a disposable meka instance with `[serve].docs = true`, confirm its version, and download its schema. For a 0.65.0 instance listening on port 8081:
+Compared with 0.65.0, the 0.68.0 schema adds a 422 for a session-list cursor the server did not issue, and the feed's 409 also covers `session-not-loaded`: a token with only `sessions:r` no longer loads a session by attaching. The client then shows the saved conversation and retries the feed until the server loads the session. 0.68.0 also runs `POST /compact` as a turn on the feed, with `source: "compaction"` on `turn.started`; the client shows it as compacting and does not notify when it ends. 0.67.0 changed no REST shapes or SSE events, and writes archive format 6, which passes through unmodified.
+
+Schema capture is a manual maintenance step. Choose a disposable meka instance with `[serve].docs = true`, confirm its version, and download its schema. For a 0.68.0 instance listening on port 8081:
 
 ```sh
-curl --fail --silent --show-error http://127.0.0.1:8081/v1/openapi.json --output docs/api/meka-0.65.0.json
-npx prettier --write docs/api/meka-0.65.0.json
+curl --fail --silent --show-error http://127.0.0.1:8081/v1/openapi.json --output docs/api/meka-0.68.0.json
+npx prettier --write docs/api/meka-0.68.0.json
 npm run api:generate
 ```
 

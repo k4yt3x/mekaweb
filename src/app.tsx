@@ -158,8 +158,10 @@ function Workspace() {
     if (!state.controller) return;
     const controller = state.controller;
     const refresh = () => {
+      // An unloaded session has no feed to report changes, such as another process's turns.
       for (const session of controller.getSnapshot())
-        if (session.feed === 'connected' && !session.running) void controller.refresh(session.id);
+        if (['connected', 'unloaded'].includes(session.feed) && !session.running)
+          void controller.refresh(session.id);
     };
     const timer = setInterval(refresh, 15000);
     window.addEventListener('focus', refresh);

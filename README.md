@@ -2,7 +2,7 @@
 
 A web interface for [meka](https://github.com/k4yt3x/meka), hosted at [web.meka.run](https://web.meka.run).
 
-mekaweb is a static site that connects your browser directly to your own meka server. There is no separate backend or account. It supports **meka 0.59.0–0.66.0**.
+mekaweb is a static site that connects your browser directly to your own meka server. There is no separate backend or account. It supports **meka 0.59.0–0.68.0**.
 
 ## Getting started
 
@@ -25,7 +25,7 @@ scopes = [
 ]
 ```
 
-Start `meka serve` with `MEKA_WEB_TOKEN` set, open [web.meka.run](https://web.meka.run), and enter the server's base URL, such as `http://127.0.0.1:8080`, and the token. Token scopes determine which controls are available; see meka's [token configuration](https://github.com/k4yt3x/meka/blob/0.66.0/docs/book/src/usage/http-api.md#token-configuration).
+Start `meka serve` with `MEKA_WEB_TOKEN` set, open [web.meka.run](https://web.meka.run), and enter the server's base URL, such as `http://127.0.0.1:8080`, and the token. Token scopes determine which controls are available; see meka's [token configuration](https://github.com/k4yt3x/meka/blob/0.68.0/docs/book/src/usage/http-api.md#token-configuration).
 
 An HTTPS site reaching a local server needs browser permission, such as Chrome's [Local Network Access](https://developer.chrome.com/blog/local-network-access). For access over the internet, put meka behind an HTTPS reverse proxy.
 

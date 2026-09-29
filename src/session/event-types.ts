@@ -6,7 +6,8 @@ export interface EventPayloads {
     turn_id: string;
     started_at?: string;
     resumed?: boolean;
-    source?: 'client' | 'inbox' | 'schedule' | 'background';
+    // 0.68 runs `POST /compact` as a turn with `source: "compaction"`.
+    source?: 'client' | 'inbox' | 'schedule' | 'background' | 'compaction';
     item_ids?: string[];
     job_id?: string;
   };

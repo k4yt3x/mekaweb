@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-09-29
+
+### Changed
+
+- Recognize meka 0.67.0 and 0.68.0 as supported server versions.
+- On meka 0.68.0, a running compaction shows as compacting and does not notify when it finishes.
+
+### Fixed
+
+- Read-only tokens open sessions meka 0.68.0 hasn't loaded, following them once the server does.
+
 ## [0.12.1] - 2026-09-29
 
 ### Changed
@@ -207,7 +218,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Light and dark themes, narrow layouts, and collapsible, resizable session panels.
 - Hosting at the root or a subpath, with GitHub Pages deployment on version tags.
 
-[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.12.1...HEAD
+[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.13.0...HEAD
+[0.13.0]: https://github.com/k4yt3x/mekaweb/compare/0.12.1...0.13.0
 [0.12.1]: https://github.com/k4yt3x/mekaweb/compare/0.12.0...0.12.1
 [0.12.0]: https://github.com/k4yt3x/mekaweb/compare/0.11.1...0.12.0
 [0.11.1]: https://github.com/k4yt3x/mekaweb/compare/0.11.0...0.11.1

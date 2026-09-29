@@ -77,4 +77,4 @@ If the active endpoint becomes unreachable, one banner appears above the workspa
 
 Forgetting or replacing a token disconnects open tabs that used it. Forgetting a token does not revoke it on the server. Removing a connection, or replacing its endpoint URL, also removes that connection's local drafts. Provider credentials remain on the meka server. Disconnecting does not necessarily stop accepted work; use Stop first if you want to cancel the current turn.
 
-Token scopes determine which controls are available. Tokens access the server's shared session namespace; they do not create separate user accounts.
+Token scopes determine which controls are available. Tokens access the server's shared session namespace; they do not create separate user accounts. On meka 0.68.0 or newer, a token without `sessions:w` cannot load a session into the server, so a session the server hasn't loaded shows its saved conversation. Live updates start once the server loads it, such as when a client with write access opens it.

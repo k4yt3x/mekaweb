@@ -63,7 +63,11 @@ export interface Submission {
 export interface SessionState {
   id: string;
   session?: Schema['SessionResponse'];
-  feed: 'connecting' | 'connected' | 'reconnecting' | 'closed' | 'unavailable';
+  /**
+   * `unloaded`: the server has not loaded the session, and from meka 0.68 a token that can only
+   * read cannot load it. The saved conversation is shown and the feed is retried.
+   */
+  feed: 'connecting' | 'connected' | 'reconnecting' | 'closed' | 'unavailable' | 'unloaded';
   error?: Error;
   saved?: Schema['MessagesResponse'];
   offset: number;
@@ -72,6 +76,8 @@ export interface SessionState {
   settingsPending: boolean;
   turnId?: string;
   running: boolean;
+  /** The running turn is a compaction's, which meka 0.68 runs as a turn. */
+  compacting: boolean;
   textStreaming: boolean;
   partial: boolean;
   blocks: LiveBlock[];
@@ -138,6 +144,7 @@ function initial(id: string): SessionState {
     deleting: false,
     settingsPending: false,
     running: false,
+    compacting: false,
     textStreaming: false,
     partial: false,
     blocks: [],
@@ -149,6 +156,11 @@ function initial(id: string): SessionState {
     lastTurn: undefined,
   };
 }
+// From meka 0.68, a feed loads a session only for a token that can write.
+function isUnloaded(error: unknown) {
+  return error instanceof ApiError && error.status === 409 && error.is('session-not-loaded');
+}
+const unloadedRetry = 15000;
 function needsFollowing(submission: Submission) {
   return (
     ['sending', 'uncertain', 'running'].includes(submission.state) ||
@@ -322,17 +334,26 @@ export class SessionController {
         await this.refresh(entry.state.id);
         return;
       }
-      const response = await this.api.stream(
-        sessionPath(entry.state.id) + '/stream',
-        entry.cursor,
-        this.canWrite,
-        entry.abort.signal,
-      );
       // Both this snapshot and turn.started use the server's clock. Initial replay predates
       // the snapshot's last activity; never compare it with the browser's clock. Own
       // submissions and explicit resumed-current-turn announcements need no timestamp check.
       const updatedAt = Date.parse(session.updated_at);
       entry.notificationsSince = Number.isFinite(updatedAt) ? updatedAt + 1 : Infinity;
+      let response: Response;
+      try {
+        response = await this.api.stream(
+          sessionPath(entry.state.id) + '/stream',
+          entry.cursor,
+          this.canWrite,
+          entry.abort.signal,
+        );
+      } catch (error) {
+        if (!isUnloaded(error)) throw error;
+        this.publish(entry, { feed: 'unloaded' });
+        void this.consume(entry, undefined);
+        await this.refresh(entry.state.id);
+        return;
+      }
       this.publish(entry, { feed: 'connected' });
       void this.consume(entry, response);
       await this.refresh(entry.state.id);
@@ -343,44 +364,27 @@ export class SessionController {
       }
     }
   }
-  private async consume(entry: Entry, first: Response) {
+  /** Follows the feed from `first`, or starts by retrying it when there is none. */
+  private async consume(entry: Entry, first: Response | undefined) {
     let response = first;
     while (!entry.abort.signal.aborted && !this.disposed) {
-      try {
-        if (!response.body || !response.headers.get('Content-Type')?.includes('text/event-stream'))
-          throw new Error('This endpoint did not return a session event stream.');
-        const parser = new SseParser(
-          (frame) => this.event(entry, frame),
-          (ms) => {
-            entry.retry = Math.max(500, ms);
-          },
-        );
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        try {
-          for (;;) {
-            const chunk = await reader.read().catch((error: unknown) => {
-              if (entry.abort.signal.aborted) throw error;
-              throw this.api.reportConnectionError(error, response);
-            });
-            if (chunk.done) break;
-            parser.push(decoder.decode(chunk.value, { stream: true }));
-          }
-          parser.push(decoder.decode());
-        } finally {
-          await reader.cancel().catch(() => {});
-          reader.releaseLock();
-        }
-      } catch (error) {
+      if (response) {
+        await this.read(entry, response);
         if (entry.abort.signal.aborted) return;
-        this.publish(entry, { error: asError(error), partial: true });
+        // From meka 0.68, deleting a session ends its feed before the response arrives. The
+        // deletion releases the entry; if it fails, the retry below reconnects as usual.
+        if (!entry.state.deleting)
+          this.publish(entry, { feed: 'reconnecting', partial: true, approvals: [] });
       }
-      if (entry.abort.signal.aborted) return;
-      this.publish(entry, { feed: 'reconnecting', partial: true, approvals: [] });
       // Retry opening the connection without consuming the previous, already closed response.
       while (!entry.abort.signal.aborted && !this.disposed) {
         try {
-          await pause(entry.retry, entry.abort.signal);
+          // A session nobody has loaded may stay that way, so it is retried at the pace the
+          // saved conversation is refreshed rather than backing off.
+          await pause(
+            entry.state.feed === 'unloaded' ? unloadedRetry : entry.retry,
+            entry.abort.signal,
+          );
           response = await this.api.stream(
             sessionPath(entry.state.id) + '/stream',
             entry.cursor,
@@ -392,6 +396,13 @@ export class SessionController {
           break;
         } catch (error) {
           if (entry.abort.signal.aborted) return;
+          if (isUnloaded(error)) {
+            // A turn this feed followed may have ended unseen, as when the server restarts.
+            // meka reports no turn in flight for a session it has not loaded, so reconcile.
+            if (entry.state.feed !== 'unloaded') void this.refresh(entry.state.id, true);
+            this.publish(entry, { feed: 'unloaded' });
+            continue;
+          }
           if (error instanceof ApiError && [401, 403, 404, 422].includes(error.status)) {
             this.publish(entry, { feed: 'unavailable', error: asError(error) });
             return;
@@ -404,6 +415,38 @@ export class SessionController {
           );
         }
       }
+    }
+  }
+  /** Reads one feed connection until it ends. */
+  private async read(entry: Entry, response: Response) {
+    try {
+      if (!response.body || !response.headers.get('Content-Type')?.includes('text/event-stream'))
+        throw new Error('This endpoint did not return a session event stream.');
+      const parser = new SseParser(
+        (frame) => this.event(entry, frame),
+        (ms) => {
+          entry.retry = Math.max(500, ms);
+        },
+      );
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      try {
+        for (;;) {
+          const chunk = await reader.read().catch((error: unknown) => {
+            if (entry.abort.signal.aborted) throw error;
+            throw this.api.reportConnectionError(error, response);
+          });
+          if (chunk.done) break;
+          parser.push(decoder.decode(chunk.value, { stream: true }));
+        }
+        parser.push(decoder.decode());
+      } finally {
+        await reader.cancel().catch(() => {});
+        reader.releaseLock();
+      }
+    } catch (error) {
+      if (!entry.abort.signal.aborted)
+        this.publish(entry, { error: asError(error), partial: true });
     }
   }
   private event(entry: Entry, frame: SseFrame) {
@@ -436,9 +479,12 @@ export class SessionController {
     if (entry.outcomes.has(turnId) && !frame.event.startsWith('inbox.') && frame.event !== 'notice')
       return;
     if (frame.event === 'turn.started') {
+      // Finishing a compaction is not the agent finishing work, so it does not notify.
+      const compacting = string(data, 'source') === 'compaction';
       if (
-        data.resumed === true ||
-        Date.parse(string(data, 'started_at')) >= entry.notificationsSince
+        !compacting &&
+        (data.resumed === true ||
+          Date.parse(string(data, 'started_at')) >= entry.notificationsSince)
       ) {
         this.followCompletion(entry, turnId);
       }
@@ -460,6 +506,7 @@ export class SessionController {
         this.publish(entry, {
           turnId,
           running: true,
+          compacting,
           textStreaming: false,
           partial: data.resumed === true || !entry.state.saved || entry.state.loading,
           blocks: entry.state.submissions
@@ -469,7 +516,7 @@ export class SessionController {
           approvals: [],
           lastTurn: undefined,
         });
-      } else this.publish(entry, { running: true });
+      } else this.publish(entry, { running: true, compacting });
       return;
     }
     if (
@@ -490,6 +537,7 @@ export class SessionController {
       this.publish(entry, {
         turnId,
         running: true,
+        compacting: false,
         partial: true,
         blocks: entry.state.blocks.filter((block) => block.kind === 'submission'),
         tools: {},
@@ -670,9 +718,11 @@ export class SessionController {
       ...(current
         ? {
             running: false,
+            compacting: false,
             textStreaming: false,
             approvals: [],
-            lastTurn: { outcome, updatedAt: undefined },
+            // The session list shows how the agent's work ended, which a compaction is not.
+            ...(!state.compacting ? { lastTurn: { outcome, updatedAt: undefined } } : {}),
             tools: Object.fromEntries(
               Object.entries(state.tools).map(([id, tool]) => [
                 id,
