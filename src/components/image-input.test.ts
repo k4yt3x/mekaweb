@@ -1,5 +1,12 @@
 import { expect, it } from 'vitest';
-import { imageFilename, inputImageBlob } from './image-input';
+import {
+  imageAccept,
+  imageFilename,
+  imageFiles,
+  inputImageBlob,
+  isAcceptedImage,
+  pastedFiles,
+} from './image-input';
 
 it.each([
   ['\x89PNG\r\n\x1a\n', 'image/png'],
@@ -39,4 +46,35 @@ it('uses safe download extensions for decoded images and unsupported formats', (
   expect(imageFilename('image/jpeg')).toBe('attachment.jpg');
   expect(imageFilename('image/png')).toBe('attachment.png');
   expect(imageFilename('application/octet-stream')).toBe('attachment.bin');
+});
+
+it('accepts the formats meka passes through or converts, by type or extension', () => {
+  expect(isAcceptedImage({ name: 'image.png', type: 'image/png' })).toBe(true);
+  expect(isAcceptedImage({ name: 'photo', type: 'image/jpeg' })).toBe(true);
+  expect(isAcceptedImage({ name: 'scan.QOI', type: '' })).toBe(true);
+  expect(isAcceptedImage({ name: 'page.tiff', type: 'image/tiff' })).toBe(true);
+  expect(isAcceptedImage({ name: 'logo.svg', type: 'image/svg+xml' })).toBe(false);
+  expect(isAcceptedImage({ name: 'photo.heic', type: 'image/heic' })).toBe(false);
+  expect(isAcceptedImage({ name: 'notes.pdf', type: 'application/pdf' })).toBe(false);
+  expect(isAcceptedImage({ name: 'ff', type: '' })).toBe(false);
+  expect(imageAccept).toMatch(/^image\/\*,\.png,.*,\.ff$/);
+});
+
+it('refuses a whole batch that holds anything meka would not take', () => {
+  const images = [{ name: 'one.png', type: 'image/png' }];
+  expect(imageFiles(images)).toBe(images);
+  expect(() => imageFiles([...images, { name: 'notes.pdf', type: 'application/pdf' }])).toThrow(
+    'notes.pdf is not an image format meka accepts.',
+  );
+});
+
+it('attaches pasted files unless the paste also holds text for the input', () => {
+  const image = { name: 'image.png', type: 'image/png' };
+  expect(pastedFiles({ files: [image], types: ['Files'] })).toEqual([image]);
+  // Spreadsheets copy a picture of the selection beside its text; a browser's Copy Image does not.
+  expect(pastedFiles({ files: [image], types: ['text/plain', 'text/html', 'Files'] })).toBe(
+    undefined,
+  );
+  expect(pastedFiles({ files: [image], types: ['text/html', 'Files'] })).toEqual([image]);
+  expect(pastedFiles({ files: [], types: ['text/plain'] })).toBe(undefined);
 });

@@ -2686,6 +2686,12 @@ progress::-moz-progress-bar {
 .composer:has(textarea:focus) {
   border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
 }
+.composer[data-dropping] {
+  border-color: var(--accent);
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent),
+    0 3px 14px #0001;
+}
 .composer-editor {
   padding: 15px var(--user-message-padding) 7px;
 }

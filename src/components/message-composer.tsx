@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useEffectEvent,
   useId,
   useLayoutEffect,
   useRef,
@@ -24,6 +25,7 @@ import { useSessionNavigation } from '../features/session-navigation';
 import { useAction } from './actions';
 import { useReadingFontSize } from './reading-context';
 import { ComposerResizeHandle } from './composer-resize-handle';
+import { imageAccept, imageFiles, pastedFiles } from './image-input';
 import { PermissionSelect } from './ui/permission-select';
 import { ProfileSelect } from './ui/profile-select';
 import { Button } from './ui/button';
@@ -157,6 +159,56 @@ export function MessageComposer({
     observer.observe(composer);
     return () => observer.disconnect();
   }, [onResize]);
+  const canAttach = !attachments.disabled && !fileAction.busy;
+  function attach(files: File[]) {
+    // A drag can offer files and deliver none, and starting a run would clear the error shown.
+    if (!files.length) return;
+    void fileAction.run(async () => {
+      const added = await Promise.all(imageFiles(files).map(fileImage));
+      attachments.onChange((images) => [...images, ...added]);
+    });
+  }
+  const [dropping, setDropping] = useState(false);
+  const dragFiles = useEffectEvent((event: DragEvent) => {
+    if (!event.dataTransfer?.types.includes('Files')) return;
+    event.preventDefault();
+    if (event.type === 'drop') {
+      setDropping(false);
+      if (canAttach) attach(Array.from(event.dataTransfer.files));
+    } else {
+      event.dataTransfer.dropEffect = canAttach ? 'copy' : 'none';
+      setDropping(canAttach);
+    }
+  });
+  useEffect(() => {
+    // Files dropped anywhere on the conversation attach, not only on the composer.
+    const pane = area.current?.closest<HTMLElement>('.conversation-scroll');
+    if (!pane) return;
+    function leave(event: DragEvent) {
+      // Leaving the window or pressing Escape leaves no element entered.
+      if (!(event.relatedTarget instanceof Node && pane?.contains(event.relatedTarget)))
+        setDropping(false);
+    }
+    function guard(event: DragEvent) {
+      // A file dropped where nothing takes it would open in place of the app.
+      if (event.defaultPrevented || !event.dataTransfer?.types.includes('Files')) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'none';
+    }
+    const types = ['dragenter', 'dragover', 'drop'] as const;
+    for (const type of types) {
+      pane.addEventListener(type, dragFiles);
+      window.addEventListener(type, guard);
+    }
+    pane.addEventListener('dragleave', leave);
+    return () => {
+      for (const type of types) {
+        pane.removeEventListener(type, dragFiles);
+        window.removeEventListener(type, guard);
+      }
+      pane.removeEventListener('dragleave', leave);
+    };
+  }, []);
   const stop = action.kind === 'stop';
   const { Icon, label } = actions[action.kind];
   const blocked = action.disabled || (!stop && fileAction.busy);
@@ -206,7 +258,7 @@ export function MessageComposer({
             Profile: {profile.value}
           </span>
         )}
-        <div className="composer" ref={box}>
+        <div className="composer" ref={box} data-dropping={dropping || undefined}>
           <ComposerResizeHandle
             key={resizeGeneration}
             inputId={inputId}
@@ -225,6 +277,12 @@ export function MessageComposer({
               value={text}
               onChange={(event) => onTextChange(event.target.value)}
               onKeyDown={keydown}
+              onPaste={(event) => {
+                const files = pastedFiles(event.clipboardData);
+                if (!files || !canAttach) return;
+                event.preventDefault();
+                attach(files);
+              }}
               rows={2}
               // Sized to its text below the maximum, so a sub-pixel remainder never shows a scrollbar.
               style={fitsText && inputHeight < maxHeight ? { overflowY: 'hidden' } : undefined}
@@ -273,18 +331,14 @@ export function MessageComposer({
             <input
               className="sr-only"
               type="file"
-              accept="image/*,.png,.jpg,.jpeg,.gif,.webp,.bmp,.tif,.tiff,.ico,.hdr,.exr,.tga,.pnm,.ppm,.pgm,.pbm,.qoi,.dds,.ff"
+              accept={imageAccept}
               aria-label="Image files"
               tabIndex={-1}
               multiple
               ref={fileInput}
-              disabled={attachments.disabled || fileAction.busy}
+              disabled={!canAttach}
               onChange={(event) => {
-                const files = Array.from(event.target.files ?? []);
-                void fileAction.run(async () => {
-                  const added = await Promise.all(files.map(fileImage));
-                  attachments.onChange((images) => [...images, ...added]);
-                });
+                attach(Array.from(event.target.files ?? []));
                 event.target.value = '';
               }}
             />
@@ -293,7 +347,7 @@ export function MessageComposer({
               size="icon"
               aria-label="Attach images"
               title="Attach images (idle sessions only)"
-              disabled={attachments.disabled || fileAction.busy}
+              disabled={!canAttach}
               onClick={() => fileInput.current?.click()}
             >
               <ImagePlus size={18} />
