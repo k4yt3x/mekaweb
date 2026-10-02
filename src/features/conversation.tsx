@@ -60,18 +60,27 @@ export function Conversation({ state }: { state: SessionState }) {
   useMarkSeen(state.id, state.session?.updated_at);
   const [inputHeight, setInputHeight] = useState(DEFAULT_INPUT_HEIGHT);
   const [resizeGeneration, setResizeGeneration] = useState(0);
-  function acceptDraft(submitted: string) {
-    draft.accepted(submitted);
-    setInputHeight(DEFAULT_INPUT_HEIGHT);
-    setResizeGeneration((value) => value + 1);
-  }
   const { showTurnContext } = useSettings();
   const scroller = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
   const dock = useRef<HTMLDivElement>(null);
   const following = useRef(true);
+  const lastScroll = useRef({ top: 0, height: 0 });
   const [showLatest, setShowLatest] = useState(false);
   const [contentBelow, setContentBelow] = useState(false);
+  function jumpToLatest() {
+    const node = scroller.current;
+    if (!node) return;
+    following.current = true;
+    node.scrollTop = node.scrollHeight;
+    setShowLatest(false);
+  }
+  function acceptDraft(submitted: string) {
+    draft.accepted(submitted);
+    setInputHeight(DEFAULT_INPUT_HEIGHT);
+    setResizeGeneration((value) => value + 1);
+    jumpToLatest();
+  }
   const history = useMemo(() => groupToolResults(state.saved?.messages ?? []), [state.saved]);
   const messages = useMemo(() => groupAgentMessages(history.messages), [history.messages]);
   const live = useMemo(
@@ -129,10 +138,6 @@ export function Conversation({ state }: { state: SessionState }) {
   }, [key]);
   useEffect(() => {
     const node = scroller.current;
-    if (node && following.current) node.scrollTop = node.scrollHeight;
-  }, [state.saved, state.blocks, state.tools, state.submissions]);
-  useEffect(() => {
-    const node = scroller.current;
     const body = content.current;
     const footer = dock.current;
     const composer = footer?.querySelector<HTMLElement>('.composer-area');
@@ -144,7 +149,9 @@ export function Conversation({ state }: { state: SessionState }) {
         '--composer-scrollbar',
         `${composer.offsetWidth - composer.clientWidth}px`,
       );
+      // Jump only here, after the frame's scroll events, so a reader's scroll lands first.
       if (following.current) node.scrollTop = node.scrollHeight;
+      setShowLatest(!following.current);
       setContentBelow(node.scrollHeight - node.scrollTop - node.clientHeight > 1);
     });
     observer.observe(body);
@@ -165,15 +172,27 @@ export function Conversation({ state }: { state: SessionState }) {
           onScroll={() => {
             const node = scroller.current;
             if (node) {
-              const remaining = node.scrollHeight - node.scrollTop - node.clientHeight;
-              following.current = remaining < 120;
+              const { scrollTop: top, scrollHeight: height } = node;
+              const remaining = height - top - node.clientHeight;
+              // Resizes move the position too, so only a move up at a steady height counts.
+              if (remaining <= 1) following.current = true;
+              else if (top < lastScroll.current.top && height === lastScroll.current.height)
+                following.current = false;
+              lastScroll.current = { top, height };
               setShowLatest(!following.current);
               setContentBelow(remaining > 1);
-              positions.set(key, { top: node.scrollTop, following: following.current });
+              positions.set(key, { top, following: following.current });
             }
           }}
         >
-          <div className="conversation-history" ref={content}>
+          <div
+            className="conversation-history"
+            ref={content}
+            onWheel={(event) => {
+              // Stop before the scroll lands; a jump in between can make the browser drop it.
+              if (event.deltaY < 0 && scroller.current?.scrollTop) following.current = false;
+            }}
+          >
             <div
               className="conversation-width"
               onClick={(event) => {
@@ -303,19 +322,7 @@ export function Conversation({ state }: { state: SessionState }) {
           </div>
           <div className="composer-dock" ref={dock} data-content-below={contentBelow}>
             {showLatest && (
-              <Button
-                className="jump-latest"
-                variant="secondary"
-                size="sm"
-                onClick={() => {
-                  const node = scroller.current;
-                  if (node) {
-                    following.current = true;
-                    node.scrollTop = node.scrollHeight;
-                    setShowLatest(false);
-                  }
-                }}
-              >
+              <Button className="jump-latest" variant="secondary" size="sm" onClick={jumpToLatest}>
                 <ArrowDown size={14} />
                 Latest
               </Button>
