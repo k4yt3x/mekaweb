@@ -2793,6 +2793,8 @@ fieldset.form-stack {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  /* The clip box needs the font's full height, or descenders such as g and y are cut off. */
+  line-height: normal;
 }
 .permission-trigger svg,
 .profile-trigger svg,

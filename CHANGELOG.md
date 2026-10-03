@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.2] - 2026-10-03
+
+### Fixed
+
+- The composer's profile and permission names no longer cut off the bottoms of letters like g and y.
+
 ## [0.14.1] - 2026-10-02
 
 ### Changed
@@ -240,7 +246,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Light and dark themes, narrow layouts, and collapsible, resizable session panels.
 - Hosting at the root or a subpath, with GitHub Pages deployment on version tags.
 
-[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.14.1...HEAD
+[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.14.2...HEAD
+[0.14.2]: https://github.com/k4yt3x/mekaweb/compare/0.14.1...0.14.2
 [0.14.1]: https://github.com/k4yt3x/mekaweb/compare/0.14.0...0.14.1
 [0.14.0]: https://github.com/k4yt3x/mekaweb/compare/0.13.1...0.14.0
 [0.13.1]: https://github.com/k4yt3x/mekaweb/compare/0.13.0...0.13.1
