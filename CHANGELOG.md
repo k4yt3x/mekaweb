@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- In Firefox, typing or pasting in the message input scrolls it to keep the cursor in view.
+
 ## [0.14.2] - 2026-10-03
 
 ### Fixed

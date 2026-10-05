@@ -81,6 +81,7 @@ export function MessageComposer({
 }) {
   const inputId = useId();
   const input = useRef<HTMLTextAreaElement>(null);
+  const measure = useRef<HTMLTextAreaElement>(null);
   const editor = useRef<HTMLDivElement>(null);
   const area = useRef<HTMLDivElement>(null);
   const box = useRef<HTMLDivElement>(null);
@@ -110,9 +111,9 @@ export function MessageComposer({
     onResize(height);
   }
   useLayoutEffect(() => {
-    const textarea = input.current,
+    const copy = measure.current,
       inputBox = editor.current;
-    if (!fitsText || !textarea || !inputBox || !width) return;
+    if (!fitsText || !copy || !inputBox || !width) return;
     const frame = getComputedStyle(inputBox);
     const padding = [
       frame.paddingTop,
@@ -122,16 +123,9 @@ export function MessageComposer({
     ]
       .map(parseFloat)
       .reduce((sum, value) => sum + value, 0);
-    // Collapse to measure, so deleted lines can shrink the input as well. Overflow stays hidden
-    // meanwhile: a classic scrollbar would narrow the text and measure it wrapped more.
-    const { scrollTop } = textarea;
-    const { height: styleHeight, overflowY } = textarea.style;
-    textarea.style.overflowY = 'hidden';
-    textarea.style.height = '0px';
-    const needed = Math.ceil(textarea.scrollHeight + padding);
-    textarea.style.height = styleHeight;
-    textarea.style.overflowY = overflowY;
-    textarea.scrollTop = scrollTop;
+    // A collapsed copy measures the text, so deleted lines can shrink the input as well. Collapsing
+    // the input itself would cancel Firefox's scroll to the caret, which follows the keystroke.
+    const needed = Math.ceil(copy.scrollHeight + padding);
     const height = Math.max(DEFAULT_INPUT_HEIGHT, Math.min(maxHeight, needed));
     // The measurement is rounded at the input's subpixel position, which resizing can move: a
     // centered composer shifts by half the change. It can then alternate between adjacent heights
@@ -285,10 +279,20 @@ export function MessageComposer({
               }}
               rows={2}
               // Sized to its text below the maximum, so a sub-pixel remainder never shows a scrollbar.
-              style={fitsText && inputHeight < maxHeight ? { overflowY: 'hidden' } : undefined}
+              // Not overflow: hidden, as switching overflow cancels Firefox's scroll to the caret.
+              style={fitsText && inputHeight < maxHeight ? { scrollbarWidth: 'none' } : undefined}
               disabled={readOnly}
               readOnly={pending}
               aria-busy={pending || undefined}
+            />
+            <textarea
+              ref={measure}
+              className="composer-measure"
+              value={text}
+              placeholder={placeholder}
+              readOnly
+              tabIndex={-1}
+              aria-hidden
             />
           </div>
           {attachments.value.length > 0 && (

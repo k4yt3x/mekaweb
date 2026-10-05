@@ -2708,6 +2708,12 @@ progress::-moz-progress-bar {
   outline: none !important;
   box-shadow: none;
 }
+.composer .composer-measure {
+  /* Collapsed and unseen; a classic scrollbar would narrow the text and measure it wrapped more. */
+  visibility: hidden;
+  height: 0;
+  overflow: hidden;
+}
 .composer-toolbar {
   display: grid;
   grid-template-columns: 36px auto minmax(112px, 1fr) 36px;
