@@ -216,7 +216,11 @@ export function Conversation({ state }: { state: SessionState }) {
                   Load earlier messages ({state.offset})
                 </Button>
               )}
-              {state.loading && !state.saved && <Loading label="Loading saved conversation…" />}
+              {/* A new session's first message shows while its empty history loads; the notice
+                  would only push it down for a moment. */}
+              {state.loading && !state.saved && !live.length && (
+                <Loading label="Loading saved conversation…" />
+              )}
               {state.saved?.messages.length === 0 &&
                 !live.length &&
                 !waiting &&

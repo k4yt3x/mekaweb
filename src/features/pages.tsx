@@ -1,7 +1,4 @@
 import { lazy } from 'react';
-export const SessionsPage = lazy(() =>
-  import('./sessions').then((module) => ({ default: module.SessionsPage })),
-);
 export const SessionRoute = lazy(() =>
   import('./sessions').then((module) => ({ default: module.SessionRoute })),
 );

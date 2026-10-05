@@ -9,13 +9,7 @@ import {
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './app';
-import {
-  SessionsPage,
-  SessionRoute,
-  ResourcesPage,
-  SchedulesPage,
-  McpPage,
-} from './features/pages';
+import { SessionRoute, ResourcesPage, SchedulesPage, McpPage } from './features/pages';
 import { ConnectionRuntime } from './connections/runtime';
 import { browserStorage } from './connections/storage';
 
@@ -34,15 +28,17 @@ const rootRoute = createRootRoute({
     </div>
   ),
 });
+// The sessions routes share a component, so React keeps one sessions page across them: starting
+// a conversation moves to its session without remounting the page or suspending it to load.
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/',
-  component: () => <SessionsPage />,
+  component: SessionRoute,
 });
 const sessionsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/sessions',
-  component: () => <SessionsPage />,
+  component: SessionRoute,
 });
 const sessionRoute = createRoute({
   getParentRoute: () => rootRoute,
