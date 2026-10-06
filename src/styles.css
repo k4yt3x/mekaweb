@@ -330,14 +330,6 @@ progress {
   background: #eaf5ef;
   border-color: #cce8d8;
 }
-.status-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  display: inline-block;
-  background: #48a17e;
-  flex-shrink: 0;
-}
 .app-frame {
   height: var(--viewport-height);
   display: flex;
@@ -1453,7 +1445,7 @@ progress::-moz-progress-bar {
   grid-column: 1 / -1;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   line-height: 1.5;
 }
 .session-row-actions {
@@ -1551,37 +1543,44 @@ progress::-moz-progress-bar {
   text-overflow: ellipsis;
   font-weight: 550;
 }
-.session-item-title > .status-dot {
-  width: 5px;
-  height: 5px;
-  background: var(--muted);
+.status-dot {
+  display: flex;
+  width: 9px;
+  height: 9px;
+  flex-shrink: 0;
+  color: var(--muted);
+}
+.status-dot svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.status-dot[data-status='read'] {
   opacity: 0.6;
 }
-.session-item-title > .status-dot:not([data-status='read']) {
-  opacity: 1;
+.status-dot[data-status='running'] {
+  color: var(--success);
 }
-.session-item-title > .status-dot[data-status='running'] {
-  background: var(--success);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 22%, transparent);
+.status-dot[data-status='running'] svg {
+  animation: spin 1.2s linear infinite;
 }
-.session-item-title > .status-dot[data-status='approval'] {
-  background: var(--warning);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--warning) 25%, transparent);
+.status-dot[data-status='approval'] {
+  color: var(--warning);
 }
-/* Unread marks are larger and haloless; scaled rather than resized, so titles stay aligned. */
-.session-item-title
-  > .status-dot:is([data-status='completed'], [data-status='failed'], [data-status='unread']) {
-  transform: scale(1.4);
+.status-dot[data-status='completed'] {
+  color: var(--accent);
 }
-.session-item-title > .status-dot[data-status='completed'] {
-  background: var(--accent);
-}
-.session-item-title > .status-dot[data-status='failed'] {
-  background: var(--danger);
+.status-dot[data-status='failed'] {
+  color: var(--danger);
 }
 /* A change whose outcome this tab did not see. */
-.session-item-title > .status-dot[data-status='unread'] {
-  background: var(--text);
+.status-dot[data-status='unread'] {
+  color: var(--text);
 }
 .session-item-title .session-unread {
   font-weight: 700;
@@ -1596,7 +1595,7 @@ progress::-moz-progress-bar {
   justify-content: space-between;
   font-size: 0.62rem;
   color: var(--muted);
-  padding-left: 13px;
+  padding-left: 15px;
   gap: 0 7px;
 }
 .session-item-meta > span {
@@ -1622,7 +1621,7 @@ progress::-moz-progress-bar {
   -webkit-box-orient: vertical;
   overflow: hidden;
   overflow-wrap: anywhere;
-  margin: 7px 0 0 13px;
+  margin: 7px 0 0 15px;
   color: var(--muted);
   font-size: 0.76rem;
   line-height: 1.5;

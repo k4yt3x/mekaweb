@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Session list statuses have their own shapes, such as a spinner for running and a check for done.
+
 ## [0.14.3] - 2026-10-05
 
 ### Fixed

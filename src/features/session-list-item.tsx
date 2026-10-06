@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
+import { useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { LoaderCircle, Pencil, Pin, PinOff, Trash2 } from 'lucide-react';
 import type { Schema } from '../api/client';
 import { supportsSessionOrganization } from '../api/version';
@@ -16,6 +16,16 @@ const statusLabels: Record<SessionStatus, string | undefined> = {
   completed: 'Unread, finished',
   unread: 'Unread',
   read: undefined,
+};
+// Each status has its own shape as well as colour, so they can be told apart without colour.
+// Drawn on a 10-unit grid, stroked as the stylesheet sets unless filled here.
+const statusShapes: Record<SessionStatus, ReactNode> = {
+  approval: <path d="M5 1.1 9.2 8.4H.8Z" fill="currentColor" />,
+  running: <path d="M5 1.2a3.8 3.8 0 1 1-3.8 3.8" />,
+  failed: <path d="m2.4 2.4 5.2 5.2m0-5.2L2.4 7.6" />,
+  completed: <path d="m1.5 5.4 2.4 2.4 4.6-5.3" />,
+  unread: <circle cx="5" cy="5" r="2.8" fill="currentColor" />,
+  read: <circle cx="5" cy="5" r="1.3" fill="currentColor" />,
 };
 
 export function SessionListItem({
@@ -133,7 +143,11 @@ export function SessionListItem({
               role={statusLabels[status] ? 'img' : undefined}
               aria-label={statusLabels[status]}
               title={statusLabels[status]}
-            />
+            >
+              <svg viewBox="0 0 10 10" aria-hidden="true">
+                {statusShapes[status]}
+              </svg>
+            </span>
             <strong
               className={
                 ['failed', 'completed', 'unread'].includes(status) ? 'session-unread' : undefined
