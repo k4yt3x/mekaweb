@@ -33,9 +33,8 @@ export function SessionList({
   const sessions = useSessionStates();
   const action = useAction();
   const sessionItems = useRef<HTMLDivElement>(null);
-  // The sessions whose sub-agents were shown or hidden from their row. The rest show theirs when
-  // they are open or lead to the open session.
-  const [folds, setFolds] = useState<ReadonlyMap<string, boolean>>(() => new Map());
+  // The sessions whose sub-agents were shown from their row; every other session's stay hidden.
+  const [folds, setFolds] = useState<ReadonlySet<string>>(() => new Set());
   const [search, setSearch] = useState('');
   const query = search.trim();
   const [debounced, setDebounced] = useState(query);
@@ -80,62 +79,8 @@ export function SessionList({
   const rows = searching
     ? (matches.data?.sessions ?? [])
     : (list.data?.pages.flatMap((page) => page.sessions) ?? []);
-  // The open session's sub-agents are listed beneath it, and an open sub-agent's siblings beneath
-  // its parent, without listing every session's.
-  const state = (id: string) => sessions.find((s) => s.id === id);
-  const record = selectedId
-    ? (state(selectedId)?.session ?? rows.find((row) => row.id === selectedId))
-    : undefined;
-  const parent = record?.parent_id;
-  // An open sub-agent's parents are read up to the root, however deep it sits, since a parent that
-  // is itself a sub-agent is listed nowhere else. A session's parents never change, so this is
-  // read once rather than with the list.
-  const ancestry = useQuery({
-    queryKey: [connection?.id, authority, 'session-ancestry', selectedId, parent],
-    queryFn: async ({ signal }) => {
-      if (!api) throw new Error('Connect first.');
-      const chain: string[] = [];
-      for (let id = parent; id && !chain.includes(id);) {
-        chain.push(id);
-        const record =
-          rows.find((row) => row.id === id) ??
-          (await api.get<Schema['SessionResponse']>(sessionPath(id), undefined, signal));
-        id = record.parent_id ?? undefined;
-      }
-      return chain;
-    },
-    enabled: Boolean(api && parent) && !searching,
-    staleTime: Infinity,
-    retry: false,
-  });
-  const [listedLineage, setListedLineage] = useState('');
-  const known = selectedId ? [selectedId, ...(parent ? (ancestry.data ?? [parent]) : [])] : [];
-  // Until the open session's record and parents are read, where it sits is unknown. The line
-  // listed before stays listed meanwhile, so a sub-agent opened from its row keeps the row and
-  // its focus.
-  const lineage =
-    !selectedId || (record && (!parent || ancestry.data))
-      ? known
-      : [...new Set([...known, ...listedLineage.split(' ').filter(Boolean)])];
-  const lineageKey = lineage.join(' ');
-  const unfolded = (id: string) => folds.get(id) ?? lineage.includes(id);
-  // Opening a sub-agent shows its parents' sub-agents again, so its own row is listed.
-  if (listedLineage !== lineageKey) {
-    setListedLineage(lineageKey);
-    if (lineage.slice(1).some((id) => folds.get(id) === false))
-      setFolds(
-        new Map([...folds].filter(([id, shown]) => shown || !lineage.slice(1).includes(id))),
-      );
-  }
-  // The open session's line is read down from its root until a session whose sub-agents are hidden.
-  const line: string[] = [];
-  for (const id of [...lineage].reverse()) {
-    if (!unfolded(id)) break;
-    line.push(id);
-  }
-  const spawners = searching
-    ? []
-    : [...new Set([...line, ...[...folds].filter(([, shown]) => shown).map(([id]) => id)])];
+  const unfolded = (id: string) => folds.has(id);
+  const spawners = searching ? [] : [...folds];
   const subagents = useQueries({
     queries: spawners.map((id) => subagentsQuery(api, connection, id)),
   });
@@ -153,8 +98,38 @@ export function SessionList({
     ? items.map((session) => ({ session, depth: 0, branches: [] }))
     : foldTree(sessionTree(items), unfolded);
   function fold(id: string) {
-    setFolds(new Map(folds).set(id, !unfolded(id)));
+    const next = new Set(folds);
+    if (!next.delete(id)) next.add(id);
+    setFolds(next);
   }
+  const state = (id: string) => sessions.find((s) => s.id === id);
+  const record = selectedId
+    ? (state(selectedId)?.session ?? items.find((item) => item.id === selectedId))
+    : undefined;
+  const parent = record?.parent_id;
+  const hidden = Boolean(parent) && !entries.some(({ session }) => session.id === selectedId);
+  // An open sub-agent hidden beneath a folded session has its parents read up to the root, however
+  // deep it sits, so moving to the next session starts from the row it is hidden beneath. A
+  // session's parents never change, so this is read once rather than with the list.
+  const ancestry = useQuery({
+    queryKey: [connection?.id, authority, 'session-ancestry', selectedId, parent],
+    queryFn: async ({ signal }) => {
+      if (!api) throw new Error('Connect first.');
+      const chain: string[] = [];
+      for (let id = parent; id && !chain.includes(id);) {
+        chain.push(id);
+        const record =
+          items.find((item) => item.id === id) ??
+          (await api.get<Schema['SessionResponse']>(sessionPath(id), undefined, signal));
+        id = record.parent_id ?? undefined;
+      }
+      return chain;
+    },
+    enabled: Boolean(api) && hidden && !searching,
+    staleTime: Infinity,
+    retry: false,
+  });
+  const lineage = selectedId ? [selectedId, ...(parent ? (ancestry.data ?? [parent]) : [])] : [];
   const seen = useSeenSessions();
   const firstPage = list.data?.pages[0]?.sessions;
   useEffect(() => {
@@ -182,8 +157,8 @@ export function SessionList({
   // folded session, or of one no longer listed, stop being read, and one listed again starts over.
   if (!searching && !pending) {
     const visible = new Set(entries.map(({ session }) => session.id));
-    if ([...folds.keys()].some((id) => !visible.has(id)))
-      setFolds(new Map([...folds].filter(([id]) => visible.has(id))));
+    if ([...folds].some((id) => !visible.has(id)))
+      setFolds(new Set([...folds].filter((id) => visible.has(id))));
   }
   function moveSession(direction: -1 | 1) {
     const ids = entries.map(({ session }) => session.id);
