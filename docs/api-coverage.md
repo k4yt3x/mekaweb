@@ -1,41 +1,41 @@
 # API support
 
-mekaweb targets **meka 0.68.0**, commit `41db1959534e21c7204a6f8dc9aea82e64fff0f5`. Meka 0.59.0–0.67.0 retain their existing features; titles, pins, and conversation search require 0.64.0. The table maps supported HTTP operations to the interface. Available actions depend on the token's scopes and the server's configuration.
+mekaweb targets **meka 0.71.0**, commit `8940142b8b37718b36b5a19c8458f185827717d7`. It refuses older servers when connecting, since 0.70.0 reshaped the API and 0.71.0 changed how feeds report a gap. The table maps supported HTTP operations to the interface. Available actions depend on the token's scopes and the server's configuration.
 
-See the [captured schema and generation instructions](api/README.md) for the wire contract and the [meka HTTP API reference](https://github.com/k4yt3x/meka/blob/0.68.0/docs/book/src/usage/http-api.md) for server behavior.
+See the [captured schema and generation instructions](api/README.md) for the wire contract and the [meka HTTP API reference](https://github.com/k4yt3x/meka/blob/0.71.0/docs/book/src/usage/http-api.md) for server behavior.
 
 | Method | Endpoint                                   | Interface support                                                               |
 | ------ | ------------------------------------------ | ------------------------------------------------------------------------------- |
 | GET    | `/v1/health/live`                          | Connection diagnostics                                                          |
 | GET    | `/v1/health/ready`                         | Readiness and reported setup state                                              |
-| GET    | `/v1/info`                                 | Version, permissions, scopes, and default vision information                    |
-| GET    | `/v1/profiles`                             | Profile inspection and session profile selection                                |
+| GET    | `/v1/info`                                 | Version check, permissions, and scopes                                          |
+| GET    | `/v1/profiles`                             | Profile inspection, image support, and session profile selection                |
 | POST   | `/v1/sessions`                             | Create with supported settings and capabilities                                 |
-| GET    | `/v1/sessions`                             | Pinned-first cursor pagination and optional children                            |
-| GET    | `/v1/sessions/search`                      | Conversation and title search, excerpts, and optional children                  |
+| GET    | `/v1/sessions`                             | Pinned-first pagination, statuses, and one session's sub-agents                 |
+| GET    | `/v1/sessions/search`                      | Conversation and title search, excerpts, and sub-agents                         |
 | GET    | `/v1/sessions/{id}`                        | Session details and activity                                                    |
 | PATCH  | `/v1/sessions/{id}`                        | Permission, approvals, cwd, profile, title, and pin, with live-edit constraints |
 | DELETE | `/v1/sessions/{id}`                        | Confirmation and explicit Shift-click deletion                                  |
-| POST   | `/v1/sessions/{id}/fork`                   | Fork with supported overrides                                                   |
-| GET    | `/v1/sessions/{id}/messages`               | Paged history, revision, and compaction markers                                 |
+| POST   | `/v1/sessions/{id}/fork`                   | Fork with supported overrides, and conditional branching from a turn            |
+| GET    | `/v1/sessions/{id}/messages`               | Paged history, revision, compaction markers, and `ETag` for history edits       |
 | GET    | `/v1/sessions/{id}/blobs/{hash}`           | Authenticated image display/download                                            |
 | POST   | `/v1/sessions/{id}/turn`                   | Streaming idle turns, images, skills, retention, and recovery                   |
 | POST   | `/v1/sessions/{id}/cancel`                 | Cancel the observed turn id                                                     |
 | POST   | `/v1/sessions/{id}/inbox`                  | Steer, follow-up, interrupt, and durable idempotency                            |
 | GET    | `/v1/sessions/{id}/inbox`                  | Pending/appended items and delivery state                                       |
 | DELETE | `/v1/sessions/{id}/inbox/{item_id}`        | Withdraw an eligible item                                                       |
-| POST   | `/v1/sessions/{id}/responses/{request_id}` | Allow, deny, allow always, and deny always                                      |
-| GET    | `/v1/sessions/{id}/stream`                 | Attendance, replay, lifecycle, content, tools, progress, inbox, and notices     |
+| POST   | `/v1/sessions/{id}/responses/{request_id}` | Allow, deny, allow always, and deny always, including for sub-agents            |
+| GET    | `/v1/stream`                               | Live session list and statuses across sessions                                  |
+| GET    | `/v1/sessions/{id}/stream`                 | Attendance, replay, lifecycle, content, tools, inbox, and live sub-agents       |
 | POST   | `/v1/sessions/{id}/compact`                | Explicit compaction and its result                                              |
 | GET    | `/v1/sessions/{id}/context`                | Context capacity, cumulative usage, and cache hit rate                          |
-| POST   | `/v1/sessions/{id}/rewind`                 | Confirmed rewind and history refresh                                            |
+| POST   | `/v1/sessions/{id}/rewind`                 | Rewind, and conditional delete, edit, and run-again message actions             |
 | GET    | `/v1/sessions/{id}/export`                 | Full-transcript Markdown and JSON archive downloads                             |
 | POST   | `/v1/sessions/import`                      | Import a supported JSON session tree                                            |
 | GET    | `/v1/sessions/{id}/tools`                  | Tool catalog, including nonresident state                                       |
 | GET    | `/v1/sessions/{id}/tasks`                  | Background tasks and outcomes                                                   |
 | DELETE | `/v1/sessions/{id}/tasks/{task_id}`        | Task cancellation with ownership limitations                                    |
-| GET    | `/v1/schedule`                             | Global job listing                                                              |
-| GET    | `/v1/sessions/{id}/schedule`               | Session job listing                                                             |
+| GET    | `/v1/schedule`                             | Global and per-session job listings                                             |
 | POST   | `/v1/sessions/{id}/schedule`               | One-time and recurring jobs, with supported gates                               |
 | DELETE | `/v1/schedule/{job_id}`                    | Job cancellation                                                                |
 | GET    | `/v1/skills`                               | Skill index and selection                                                       |
@@ -55,10 +55,10 @@ See the [captured schema and generation instructions](api/README.md) for the wir
 
 ## Limits and behavior
 
-- **Sessions:** Lists use cursor pagination and can include sub-agents. Search returns up to 100 matches in server relevance order, including conversation text and titles. It excludes thinking and tool inputs/results. Refine the query when the result limit is reached; the search API has no pagination. Listings group loaded sub-agents beneath their parents, retaining the server’s pin and recency order among roots and siblings. Titles can be reset to the first message; neither renaming nor pinning changes `updated_at`. The interface does not offer a working-directory filter. Fork supports a working-directory override. Directory/profile changes require an idle session, while permission, approval mode, titles, and pins can change during a turn.
-- **Read-only tokens:** Since meka 0.68.0, a token without `sessions:w` cannot load a session by opening its feed. The interface shows the saved conversation and retries the feed every 15 seconds until the server loads the session, such as when a client with write access opens it.
-- **Sub-agents:** Their parent drives them. Their history, context, and tasks can be inspected, but they cannot receive direct user turns or independent settings, title, or pin changes through the HTTP API. Meka 0.64.1 stops prepending environment context to their task text, so new sub-agent titles show the assigned task. Older stored prompts are unchanged.
-- **History:** Compaction and rewind alter model context. Live replay is bounded and cannot serve as a complete transcript. Export supports Markdown transcripts and JSON archives. Meka 0.68.0 exports archive format 6 and imports formats 3 through 6; older data conversion is handled by the server. Since 0.65.0, compaction summaries quote the most recent messages received as they were written; the summary view renders them as block quotes. Since 0.68.0, an explicit compaction runs as a turn, shown as compacting, without a completion notification. Stop ends its checkpoint early, and meka still writes the summary.
+- **Sessions:** Lists use cursor pagination and hold top-level sessions; a session's sub-agents are read with `parent` when it is unfolded. Search includes sub-agents. Search returns up to 100 matches in server relevance order, including conversation text and titles. It excludes thinking and tool inputs/results. Refine the query when the result limit is reached; the search API has no pagination. Listings group loaded sub-agents beneath their parents, retaining the server’s pin and recency order among roots and siblings. Titles can be reset to the first message; neither renaming nor pinning changes `updated_at`. The interface does not offer a working-directory filter. Fork supports a working-directory override. Directory/profile changes require an idle session, while permission, approval mode, titles, and pins can change during a turn.
+- **Read-only tokens:** A token without `sessions:w` cannot load a session by opening its feed. The interface shows the saved conversation and retries the feed every 15 seconds until the server loads the session, such as when a client with write access opens it.
+- **Sub-agents:** Their parent drives them. Their history, context, and tasks can be inspected, and a running sub-agent's feed is shown live, but they cannot receive direct user turns or independent settings, title, or pin changes through the HTTP API. The parent's feed carries a sub-agent's approval prompts.
+- **History:** Compaction and rewind alter model context. Live replay is bounded and cannot serve as a complete transcript. Export supports Markdown transcripts and JSON archives. Meka 0.71.0 exports archive format 9 and imports formats 3 through 9; older data conversion is handled by the server. Compaction summaries quote the most recent messages received as they were written; the summary view renders them as block quotes. An explicit compaction runs as a turn, shown as compacting, without a completion notification. Stop ends its checkpoint early, and meka still writes the summary.
 - **Images and skills:** These use direct turns while idle; the inbox accepts text only. Skill activation is available from composer Settings.
 - **Sending:** Idle text uses a direct streaming turn; busy text uses the selected inbox mode. Only an explicit `turn-in-flight` conflict permits a text-only fallback to the inbox. Streaming turns are never retried automatically. The session feed supplies displayed events and approvals; the POST stream tracks admission and the submitted turn's outcome.
 - **Memory:** Search filters the complete returned index; this release has no memory pagination or server-side filter parameters. Editing preserves omitted-versus-empty body and tag values.
@@ -69,5 +69,3 @@ See the [captured schema and generation instructions](api/README.md) for the wir
 - **Documentation:** OpenAPI and Swagger endpoints are optional and require `[serve].docs` on the server.
 
 See [using mekaweb](usage.md) for connection setup, recovery guidance, and browser compatibility, and the [architecture](architecture.md) for credential and state-handling invariants.
-
-Built-in tool names changed in meka 0.60.0, and `tool_search` was added. The interface displays tool names from the server without translating them. Update old names in custom skill bodies, standing instructions, and new tool-gate definitions using the [meka upgrade guide](https://github.com/k4yt3x/meka/blob/0.60.0/docs/book/src/getting-started/upgrading.md#059-to-060). Existing stored sessions, tasks, and gates are migrated by meka.

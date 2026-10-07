@@ -4,7 +4,7 @@
     "title": "meka HTTP API",
     "description": "Service-to-service API for driving meka agent turns programmatically. Mirrors the wire format described in the HTTP API docs. A field that has no value is omitted from every response and event, never sent as `null`.",
     "license": { "name": "AGPL-3.0-or-later" },
-    "version": "0.68.0"
+    "version": "0.71.0"
   },
   "paths": {
     "/v1/health/live": {
@@ -292,11 +292,26 @@
     "/v1/memory": {
       "get": {
         "tags": ["memory"],
-        "summary": "`GET /v1/memory`: the memory index, most important first.",
         "operationId": "list_memories",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "description": "Words to search for. The memories the agent's own `memory_search` would find for them,\nbest first, each with the `snippet` it was found on; absent, the whole index.",
+            "required": false,
+            "schema": { "type": ["string", "null"] }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "How many a search answers with at most. Default 10, clamped to 1..25. Ignored without\n`q`.",
+            "required": false,
+            "schema": { "type": ["integer", "null"], "format": "int32", "minimum": 0 }
+          }
+        ],
         "responses": {
           "200": {
-            "description": "Memory index",
+            "description": "Memory index, or the memories a search found",
             "content": {
               "application/json": {
                 "schema": { "$ref": "#/components/schemas/MemoryListResponse" }
@@ -521,15 +536,29 @@
     "/v1/schedule": {
       "get": {
         "tags": ["schedule"],
-        "summary": "`GET /v1/schedule`: every scheduled job in the database, across all sessions.",
         "operationId": "list_all",
+        "parameters": [
+          {
+            "name": "session",
+            "in": "query",
+            "description": "Only the jobs planted on this session. A session with none, or an id no session has,\nanswers an empty list, as every listing filter does.",
+            "required": false,
+            "schema": { "type": ["string", "null"], "format": "uuid" }
+          }
+        ],
         "responses": {
           "200": {
-            "description": "All scheduled jobs",
+            "description": "Scheduled jobs: every session's, or one session's with `session`",
             "content": {
               "application/json": {
                 "schema": { "$ref": "#/components/schemas/ScheduledJobsResponse" }
               }
+            }
+          },
+          "400": {
+            "description": "`session` is not a UUID (`/errors/invalid-body`)",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
             }
           },
           "401": {
@@ -558,13 +587,13 @@
       "delete": {
         "tags": ["schedule"],
         "summary": "`DELETE /v1/schedule/{job_id}`: cancel a job.",
-        "description": "Keyed on the job id alone rather than nested under its session, because that is how a client\nthat read `GET /v1/schedule` holds it.\n\nTakes a unique id prefix as well as the full id, and 404s when nothing matches. Both halves\nmatter, and for the same reason: the 8-character short form is what every surface that renders a\njob to a human shows (`meka schedule list`, the REPL's `/schedule`, the `schedule_list` tool),\nso an operator will paste one here, and answering 204 to an id that matched nothing would report\na still-firing job as canceled. A gated job kept alive that way goes on running a shell command\nunattended.",
+        "description": "Keyed on the job id alone rather than nested under its session, because that is how a client\nthat read `GET /v1/schedule` holds it.\n\nTakes the full id and 404s when nothing matches: a client holds the id whole from the listing,\nand answering 204 to an id that matched nothing would report a still-firing job as canceled. A\ngated job kept alive that way goes on running a shell command unattended.",
         "operationId": "cancel",
         "parameters": [
           {
             "name": "job_id",
             "in": "path",
-            "description": "Scheduled job id, or a unique prefix of one",
+            "description": "Scheduled job id",
             "required": true,
             "schema": { "type": "string" }
           }
@@ -584,13 +613,7 @@
             }
           },
           "404": {
-            "description": "No job matches that id",
-            "content": {
-              "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
-            }
-          },
-          "422": {
-            "description": "The prefix matches more than one job",
+            "description": "No job has that id",
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
             }
@@ -636,6 +659,34 @@
             "description": "Only list sessions whose working directory is this one, compared in the canonical spelling\nevery session records.",
             "required": false,
             "schema": { "type": ["string", "null"] }
+          },
+          {
+            "name": "parent",
+            "in": "query",
+            "description": "Only the sub-agents this session spawned, its direct children. A tree view expands one\nnode with one call and recurses for depth. Names sub-agents by definition, so\n`include_children` is moot beside it; a session with none, or an id no session has, is an\nempty page, as every listing filter answers.",
+            "required": false,
+            "schema": { "type": ["string", "null"], "format": "uuid" }
+          },
+          {
+            "name": "profile",
+            "in": "query",
+            "description": "Only the sessions on this profile.",
+            "required": false,
+            "schema": { "type": ["string", "null"] }
+          },
+          {
+            "name": "pinned",
+            "in": "query",
+            "description": "Only pinned sessions (`true`) or only unpinned ones (`false`).",
+            "required": false,
+            "schema": { "type": ["boolean", "null"] }
+          },
+          {
+            "name": "updated_since",
+            "in": "query",
+            "description": "Only the sessions changed after this RFC 3339 instant, by the `updated_at` the record\nshows: a turn or a change to what the session runs as, never a title or a pin.",
+            "required": false,
+            "schema": { "type": ["string", "null"], "format": "date-time" }
           }
         ],
         "responses": {
@@ -1314,13 +1365,20 @@
             "description": "Session UUID to fork",
             "required": true,
             "schema": { "type": "string", "format": "uuid" }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "The `ETag` of `GET /v1/sessions/{id}/messages` the copy was decided on. The fork is refused with 412 when the source has changed since.",
+            "required": false,
+            "schema": { "type": ["string", "null"] }
           }
         ],
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "oneOf": [{ "type": "null" }, { "$ref": "#/components/schemas/ForkSessionBody" }]
+                "oneOf": [{ "$ref": "#/components/schemas/ForkSessionBody" }, { "type": "null" }]
               }
             }
           }
@@ -1352,6 +1410,12 @@
           },
           "409": {
             "description": "A turn is in flight on the source; cancel first (`/errors/turn-in-flight`). Or another meka process holds the source (`/errors/session-locked`)",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
+            }
+          },
+          "412": {
+            "description": "`If-Match` names a conversation that has since changed (`/errors/precondition-failed`); `revision` and `total` carry the current state",
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
             }
@@ -1573,7 +1637,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Page of conversation messages",
+            "description": "Page of conversation messages. The `ETag` header identifies the whole conversation's current state, for `If-Match` on `POST /rewind` and `POST /fork`",
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/MessagesResponse" } }
             }
@@ -1686,6 +1750,13 @@
             "description": "Session UUID",
             "required": true,
             "schema": { "type": "string", "format": "uuid" }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "The `ETag` of `GET /v1/sessions/{id}/messages` the edit was decided on. The rewind is refused with 412 when the conversation has changed since.",
+            "required": false,
+            "schema": { "type": ["string", "null"] }
           }
         ],
         "requestBody": {
@@ -1696,7 +1767,7 @@
         },
         "responses": {
           "200": {
-            "description": "Turns removed",
+            "description": "Turns removed. The `ETag` header is the conversation's new tag",
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/RewindResponse" } }
             }
@@ -1725,6 +1796,12 @@
               "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
             }
           },
+          "412": {
+            "description": "`If-Match` names a conversation that has since changed (`/errors/precondition-failed`); `revision` and `total` carry the current state",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
+            }
+          },
           "413": {
             "description": "Request body exceeds `[serve] max_body_bytes`",
             "content": {
@@ -1748,55 +1825,6 @@
       }
     },
     "/v1/sessions/{id}/schedule": {
-      "get": {
-        "tags": ["schedule"],
-        "summary": "`GET /v1/sessions/{id}/schedule`: jobs belonging to one session.",
-        "operationId": "list_for_session",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "description": "Session UUID",
-            "required": true,
-            "schema": { "type": "string", "format": "uuid" }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Scheduled jobs for this session",
-            "content": {
-              "application/json": {
-                "schema": { "$ref": "#/components/schemas/ScheduledJobsResponse" }
-              }
-            }
-          },
-          "401": {
-            "description": "Authorization missing or invalid",
-            "content": {
-              "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
-            }
-          },
-          "403": {
-            "description": "Insufficient scope",
-            "content": {
-              "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
-            }
-          },
-          "404": {
-            "description": "Session not found",
-            "content": {
-              "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
-            }
-          },
-          "500": {
-            "description": "Internal server error",
-            "content": {
-              "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
-            }
-          }
-        },
-        "security": [{ "bearerAuth": ["schedule:r"] }]
-      },
       "post": {
         "tags": ["schedule"],
         "summary": "`POST /v1/sessions/{id}/schedule`: plant a job on a session.",
@@ -1867,7 +1895,7 @@
       "get": {
         "tags": ["turn"],
         "summary": "`GET /v1/sessions/{id}/stream`: rejoin the current turn's SSE stream.",
-        "description": "Replays the events after `Last-Event-ID` from a bounded per-turn ring, then follows the live\nstream. When the turn has already ended, the backlog plus its terminal event are delivered and\nthe connection closes, so a client that dropped at the last moment still learns the outcome.\n\nTwo limits worth stating plainly. The ring holds `[serve] stream_replay_events` events, so a\nclient that was away longer than that gets a `notice` saying its replay has a hole rather than a\ntranscript that silently skips. And only the most recent turn is retained: reconnecting after a\n*newer* turn has started returns that turn's stream, which the `turn_id` on the re-issued\n`turn.started` identifies.",
+        "description": "Replays the events after `Last-Event-ID` from a bounded per-turn ring, then follows the live\nstream. When the turn has already ended, the backlog plus its terminal event are delivered and\nthe connection closes, so a client that dropped at the last moment still learns the outcome.\n\nTwo limits worth stating plainly. The ring holds `[serve] stream_replay_events` events, so a\nclient that was away longer than that gets a `notice` saying its replay has a hole rather than a\ntranscript that silently skips. And only the most recent turn is retained: reconnecting after a\n*newer* turn has started returns that turn's stream, which the `turn_id` on the re-issued\n`turn.started` identifies.\n\nA sub-agent's id names its own feed for as long as this process runs it: the same events a\nsession's feed carries, read-only, with `turn.started` naming the parent and its `agent_spawn`\ncall. Its prompts park on the parent's feed, so `attend` is refused here.",
         "operationId": "stream_turn",
         "parameters": [
           {
@@ -1920,13 +1948,13 @@
             }
           },
           "409": {
-            "description": "Another meka process holds the session (`/errors/session-locked`), or the token may only read and the session is not loaded (`/errors/session-not-loaded`)",
+            "description": "Another meka process holds the session (`/errors/session-locked`), the token may only read and the session is not loaded (`/errors/session-not-loaded`), or the id names a sub-agent this process is not running (`/errors/subagent-not-running`)",
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
             }
           },
           "422": {
-            "description": "The id names a sub-agent's session (`/errors/session-not-drivable`)",
+            "description": "`attend` on a sub-agent's feed, which is read-only (`/errors/session-not-drivable`)",
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
             }
@@ -2029,12 +2057,6 @@
           },
           "404": {
             "description": "Session or task not found",
-            "content": {
-              "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
-            }
-          },
-          "422": {
-            "description": "The prefix matches more than one task",
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
             }
@@ -2200,6 +2222,75 @@
           }
         },
         "security": [{ "bearerAuth": ["sessions:w"] }]
+      }
+    },
+    "/v1/sessions/{id}/turns": {
+      "get": {
+        "tags": ["conversation"],
+        "summary": "`GET /v1/sessions/{id}/turns`: every turn that began on the session, newest first.",
+        "operationId": "turns",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Session UUID",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "How many turns at most. Default 50, clamped to 1..200.",
+            "required": false,
+            "schema": { "type": ["integer", "null"], "format": "int32", "minimum": 0 }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "description": "The id of the oldest turn already read; the page holds the turns before it.",
+            "required": false,
+            "schema": { "type": ["string", "null"], "format": "uuid" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of turns, newest first",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/TurnsResponse" } }
+            }
+          },
+          "400": {
+            "description": "`before` is not a UUID (`/errors/invalid-body`)",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
+            }
+          },
+          "401": {
+            "description": "Authorization missing or invalid",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
+            }
+          },
+          "403": {
+            "description": "Insufficient scope",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
+            }
+          },
+          "404": {
+            "description": "Session not found",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
+            }
+          }
+        },
+        "security": [{ "bearerAuth": ["sessions:r"] }]
       }
     },
     "/v1/skills": {
@@ -2419,6 +2510,105 @@
         },
         "security": [{ "bearerAuth": ["skills:w"] }]
       }
+    },
+    "/v1/stream": {
+      "get": {
+        "tags": ["sessions"],
+        "summary": "`GET /v1/stream`: the server feed, the listing's change feed across every session this process\nholds; see [`crate::host::http::feed::ServerFeed`] for what it carries.",
+        "operationId": "stream_server",
+        "parameters": [
+          {
+            "name": "last_event_id",
+            "in": "query",
+            "description": "The last event id received, for a client whose transport cannot send the\n`Last-Event-ID` header.",
+            "required": false,
+            "schema": { "type": ["integer", "null"], "format": "int64", "minimum": 0 }
+          },
+          {
+            "name": "Last-Event-ID",
+            "in": "header",
+            "description": "Resume from this id; the ring replays what followed it",
+            "required": false,
+            "schema": { "type": ["integer", "null"], "format": "int64", "minimum": 0 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Server-sent events: `session.created`, `session.updated`, `session.deleted`, the four turn lifecycle events and the two permission events, each naming its session",
+            "content": { "text/event-stream": {} }
+          },
+          "401": {
+            "description": "Authorization missing or invalid",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
+            }
+          },
+          "403": {
+            "description": "Insufficient scope",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
+            }
+          }
+        },
+        "security": [{ "bearerAuth": ["sessions:r"] }]
+      }
+    },
+    "/v1/tasks": {
+      "get": {
+        "tags": ["tasks"],
+        "summary": "`GET /v1/tasks`: every session's background tasks, newest first.",
+        "operationId": "list_all_tasks",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "description": "Only the tasks in this status: `running`, `completed`, `failed`, `canceled` or\n`interrupted`.",
+            "required": false,
+            "schema": { "type": ["string", "null"] }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Background tasks across every session",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/BackgroundTasksResponse" }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization missing or invalid",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
+            }
+          },
+          "403": {
+            "description": "Insufficient scope",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
+            }
+          },
+          "422": {
+            "description": "`status` is not a task status",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
+            }
+          }
+        },
+        "security": [{ "bearerAuth": ["sessions:r"] }]
+      }
     }
   },
   "components": {
@@ -2454,6 +2644,11 @@
           "status": {
             "type": "string",
             "description": "`running`, `completed`, `failed`, `canceled`, or `interrupted`."
+          },
+          "subagent_id": {
+            "type": ["string", "null"],
+            "format": "uuid",
+            "description": "The session a backgrounded `agent_spawn` runs, once it has made one. Omitted on every\nother task."
           },
           "tool": {
             "type": "string",
@@ -2496,6 +2691,29 @@
           }
         },
         "additionalProperties": false
+      },
+      "ChecklistItem": {
+        "type": "object",
+        "description": "One item on the list.",
+        "required": ["id", "text", "status"],
+        "properties": {
+          "id": { "type": "integer", "format": "int64", "minimum": 0 },
+          "reason": {
+            "type": ["string", "null"],
+            "description": "Why the item waits; present on every deferred item."
+          },
+          "status": { "$ref": "#/components/schemas/ChecklistStatus" },
+          "task": {
+            "type": ["string", "null"],
+            "description": "The background task a deferred item waits on, as the model named it: the full id or the\nshort prefix `task_list` shows. Kept as named rather than resolved, because the list is\nrecovered from the model's calls and a resolution the call does not carry could not be."
+          },
+          "text": { "type": "string" }
+        }
+      },
+      "ChecklistStatus": {
+        "type": "string",
+        "description": "A state an item sits in while it is on the list.",
+        "enum": ["pending", "in_progress", "deferred"]
       },
       "CompactRequestBody": {
         "type": "object",
@@ -2569,11 +2787,21 @@
           },
           {
             "type": "object",
-            "description": "What meka injected ahead of the user's words for that turn (permission and environment\ncontext, todos, catalog changes, background outcomes, the resume notice), which the model\nsaw as text ahead of them. Typed so a client can show or hide it; `text` alone is the words.",
+            "description": "What meka injected ahead of the user's words for that turn (permission and environment\ncontext, catalog changes, background outcomes, the resume notice), which the model\nsaw as text ahead of them. Typed so a client can show or hide it; `text` alone is the words.",
             "required": ["text", "type"],
             "properties": {
               "text": { "type": "string" },
               "type": { "type": "string", "enum": ["turn_context"] }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Words meka wrote into the model's own turn in the user's role, to send it back to work:\n`kind` is `visible_reply` after a reply with no visible text, `checklist` after one that\nleft checklist items open. Typed so a client can show it as meka's rather than the person's.",
+            "required": ["kind", "text", "type"],
+            "properties": {
+              "kind": { "type": "string" },
+              "text": { "type": "string" },
+              "type": { "type": "string", "enum": ["nudge"] }
             }
           },
           {
@@ -2665,12 +2893,6 @@
             "description": "Tokens behind the most recent provider round, omitted when no turn has run since this\nprocess loaded the session.\n\nAbsent rather than zero, deliberately. A re-attached session has a full conversation and an\nunmeasured window, and reporting `0` there would read as \"empty\" to every client that\ndivides by `window`. Run a turn, or read `total_input_tokens` for the cumulative figure\nthat does survive a restart.",
             "minimum": 0
           },
-          "used_percent": {
-            "type": ["integer", "null"],
-            "format": "int64",
-            "description": "Occupancy percent, present only when both `used` and `window` are known.",
-            "minimum": 0
-          },
           "window": {
             "type": ["integer", "null"],
             "format": "int64",
@@ -2710,11 +2932,11 @@
           },
           "gate": {
             "oneOf": [
-              { "type": "null" },
               {
                 "$ref": "#/components/schemas/CreateGate",
                 "description": "Guard the job on a probe: a shell command, or a call to a read-only tool.\n\nThe level required depends on which. A shell command runs unattended and with no sandbox,\nso it needs `unrestricted` and no level that promises a boundary can honestly authorize it.\nA tool probe needs only what the tool itself resolves to, which a gate requires to be\n`read`."
-              }
+              },
+              { "type": "null" }
             ]
           },
           "prompt": {
@@ -2780,16 +3002,19 @@
       },
       "ImageInput": {
         "type": "object",
-        "description": "One inline image attachment. Base64 rather than a path or URL because the API is a network\nsurface: `[serve].bind` may be non-loopback, so the caller generally shares no filesystem with\nthe agent and cannot name a file for it to read.",
-        "required": ["media_type", "data"],
+        "description": "One image attachment: the bytes inline, or a reference to an image the session's history\nholds. Bytes are base64 rather than a path or URL because the API is a network surface:\n`[serve].bind` may be non-loopback, so the caller generally shares no filesystem with the agent\nand cannot name a file for it to read. A reference is the `hash` an image block of\n`GET /v1/sessions/{id}/messages` carries, so a client sends an image again, after an edit or a\nrewind, without fetching and uploading its bytes.",
         "properties": {
           "data": {
-            "type": "string",
+            "type": ["string", "null"],
             "description": "Base64-encoded image bytes (standard alphabet, padding required)."
           },
+          "hash": {
+            "type": ["string", "null"],
+            "description": "The hash of an image the session's history holds, whose stored bytes are attached."
+          },
           "media_type": {
-            "type": "string",
-            "description": "Declared MIME type, e.g. `image/png`. Used as the primary format hint; the payload's magic\nbytes win if this doesn't name a supported format."
+            "type": ["string", "null"],
+            "description": "Declared MIME type, e.g. `image/png`, beside `data`. Used as the primary format hint; the\npayload's magic bytes win if this doesn't name a supported format. Refused beside `hash`,\nwhose media type is the stored one."
           }
         },
         "additionalProperties": false
@@ -2886,7 +3111,7 @@
       "InfoResponse": {
         "type": "object",
         "description": "What this server is, for a client deciding how to talk to it.\n\nDeliberately carries no backend, profile or model. A server-wide field for either invites a\nclient to post it back to `POST /v1/sessions`, whose `profile` names a profile (`work`) and\nnever a backend (`anthropic-messages`): one field, two meanings, one API, and a 422 for the\nclient that mixed them. `GET /v1/profiles` answers both questions and names them apart, `name`\nfor the profile and `backend` for the backend, and marks the default with `active`.",
-        "required": ["version", "default_permission", "enabled_permissions", "vision", "scopes"],
+        "required": ["version", "default_permission", "enabled_permissions", "scopes"],
         "properties": {
           "default_permission": { "type": "string" },
           "enabled_permissions": { "type": "array", "items": { "type": "string" } },
@@ -2895,11 +3120,7 @@
             "items": { "type": "string" },
             "description": "The scopes the calling token holds, sorted. A client otherwise learns what it may do by\ncollecting 403s."
           },
-          "version": { "type": "string" },
-          "vision": {
-            "type": "boolean",
-            "description": "Whether the process default profile accepts image attachments. The HTTP analog of ACP's\n`promptCapabilities.image`, so a client can tell whether attaching one is worth the base64\npayload instead of discovering it from a 422.\n\nAn answer for the process, like everything else on this endpoint, and therefore only for a\nsession created without naming a `profile`. `POST /turn` asks the session itself\n(`ResidentSession::accepts_images`), so a session on another profile can differ."
-          }
+          "version": { "type": "string" }
         }
       },
       "InstructionsResponse": {
@@ -3033,6 +3254,10 @@
             "description": "How many times the agent has recalled this memory through `memory_read`. Feeds search\nranking; an operator reading the memory does not move it.",
             "minimum": 0
           },
+          "snippet": {
+            "type": ["string", "null"],
+            "description": "The line the words of a search were found on, present only on an entry a search found."
+          },
           "tags": {
             "type": "array",
             "items": { "type": "string" },
@@ -3058,11 +3283,11 @@
         "properties": {
           "compaction": {
             "oneOf": [
-              { "type": "null" },
               {
                 "$ref": "#/components/schemas/CompactionMarker",
                 "description": "Present only on a message that *is* a compaction summary.\n\nWithout this a client polling `/messages` watches history rewrite itself: a compaction\ntruncates the materialized tail and pushes a summary in its place, so `total` shrinks and\nmessages the client already rendered stop coming back. The marker is what lets it tell\n\"the window was summarized\" from \"the server lost my conversation\"."
-              }
+              },
+              { "type": "null" }
             ]
           },
           "content": {
@@ -3076,7 +3301,12 @@
           "role": { "type": "string" },
           "turn_id": {
             "type": ["string", "null"],
-            "description": "Virtual per-conversation turn correlator (`t_001`, `t_002`, …). Derived at query time\nby grouping every user-role message into a new turn that includes the assistant +\ntool-result messages that follow it. `None` on messages from the assembled-response\npath (no turn boundary known yet).\n\nNote: these are dense sequential indexes (`t_0001`, not UUIDs). The UUID-shaped\n`turn_id` on `POST /v1/sessions/{id}/turn` is a different identifier."
+            "format": "uuid",
+            "description": "The turn that added this message: the id `turn.started` announced it under and\n`GET /v1/sessions/{id}/turns` lists it by. Omitted on a row no turn added (a compaction\nsummary, a repair's replacement)."
+          },
+          "turn_label": {
+            "type": ["string", "null"],
+            "description": "Dense positional turn label (`t_0001`, `t_0002`, …), derived at query time. A message\nthat opens a turn starts a new label, and the assistant and tool-result messages after it\nshare it; what opens a turn is `Message::opens_turn`, the one rule rewind counts by, so a\ntool round's results never read as a turn of their own, and the labels from a chosen one\nto the last are the `turns` a rewind to that point takes. `None` on messages from the\nassembled-response path, which holds one turn and no view to count in."
           }
         }
       },
@@ -3138,12 +3368,16 @@
       "PermissionRequiredEvent": {
         "type": "object",
         "description": "The `permission_required` SSE event's payload: what a client needs to show the prompt and\nanswer it.",
-        "required": ["request_id", "tool_name", "input", "expires_in_seconds"],
+        "required": ["request_id", "tool_name", "input", "expires_in_seconds", "expires_at"],
         "properties": {
+          "expires_at": {
+            "type": "string",
+            "description": "RFC 3339, when the request is denied unanswered. The absolute form of\n`expires_in_seconds`, for a client that receives the event from the replay ring minutes\nafter it was parked."
+          },
           "expires_in_seconds": {
             "type": "integer",
             "format": "int64",
-            "description": "How long the request stays answerable before it is denied.",
+            "description": "How long the request stays answerable before it is denied, counted from when it was\nparked.",
             "minimum": 0
           },
           "input": {
@@ -3152,6 +3386,11 @@
           "request_id": {
             "type": "string",
             "description": "Names the parked request on `POST /v1/sessions/{id}/responses/{request_id}`."
+          },
+          "subagent_id": {
+            "type": ["string", "null"],
+            "format": "uuid",
+            "description": "The sub-agent whose call this is, when a sub-agent asked through its parent's feed.\nOmitted for the session's own call."
           },
           "tool_name": { "type": "string" }
         }
@@ -3196,7 +3435,7 @@
       "ProfileView": {
         "type": "object",
         "description": "A profile as `meka profile list` prints it and `GET /v1/profiles` answers with: its account, the\naccount's backend and its model, and never a credential.",
-        "required": ["name", "account", "active"],
+        "required": ["name", "account", "vision", "active"],
         "properties": {
           "account": { "type": "string", "description": "The account this profile bills." },
           "active": {
@@ -3208,7 +3447,11 @@
             "description": "The account's backend, e.g. `anthropic-messages`, `openai-responses` or\n`chatgpt-subscription`. Omitted when the profile names an account that is not configured,\nwhich a listing reports beside the table and which no server starts on."
           },
           "model": { "type": ["string", "null"] },
-          "name": { "type": "string" }
+          "name": { "type": "string" },
+          "vision": {
+            "type": "boolean",
+            "description": "Whether a session on this profile accepts image attachments, so a client can tell whether\nattaching one is worth the base64 payload instead of discovering it from a 422. Per\nprofile, because `POST /turn` asks the session's own profile."
+          }
         }
       },
       "ProfilesResponse": {
@@ -3269,11 +3512,11 @@
           "created_at": { "type": "string" },
           "gate": {
             "oneOf": [
-              { "type": "null" },
               {
                 "$ref": "#/components/schemas/GateView",
                 "description": "Present when the job is gated, on a shell command or a tool call."
-              }
+              },
+              { "type": "null" }
             ]
           },
           "id": { "type": "string" },
@@ -3349,9 +3592,20 @@
             "type": "object",
             "required": ["capabilities", "turn_in_flight"],
             "properties": {
+              "approvals_pending": {
+                "type": ["integer", "null"],
+                "format": "int64",
+                "description": "Approval prompts parked on this session, waiting for a person. Reported for a session this\nprocess holds, on the listing too, since the count is a fact of the resident frontend and\ncosts no query; it is what lets a session list say \"waiting on a person\" without a feed\nper row. The prompts themselves are on the feed, which replays every one still parked.",
+                "minimum": 0
+              },
               "capabilities": {
                 "$ref": "#/components/schemas/SessionCapabilities",
                 "description": "Per-session capability flags declared at create time (or re-attach), echoed back so clients\ncan confirm the settings their session actually ended up with."
+              },
+              "checklist": {
+                "type": ["array", "null"],
+                "items": { "$ref": "#/components/schemas/ChecklistItem" },
+                "description": "The open checklist: every item the agent has committed to and not yet disposed of. Reported\nfor a session this process holds, whose cell is the live list; a dormant session's list is\nin its conversation, which a record does not replay. `checklist.updated` on the feed\ncarries the same list on every change."
               },
               "inbox_pending": {
                 "type": ["integer", "null"],
@@ -3359,13 +3613,9 @@
                 "description": "Inbox items waiting to be appended. Reported for a loaded session only, since it is what a\nclient asks a session it is driving; a listing does not pay a query per row for it.",
                 "minimum": 0
               },
-              "last_turn_at": {
-                "type": ["string", "null"],
-                "description": "Wall-clock timestamp (RFC 3339) of the last successful turn on this session. Omitted when\nthe session has never run a turn (just-created or just-re-attached). Distinct from\n`updated_at`, which advances on any session-level mutation (PATCH included)."
-              },
               "turn_in_flight": {
                 "type": "boolean",
-                "description": "Whether a turn is running on this session right now.\n\nExists so a client whose SSE stream dropped mid-turn can tell \"my turn is still running\"\nfrom \"my turn died\" without submitting a speculative turn and reading the 409. A dropped\nstream does not cancel the turn: the spawned task keeps the runtime lock and dropping the\n`JoinHandle` detaches rather than aborts, so the work completes and resubmitting would\nduplicate a reply the user is about to receive anyway.\n\nAlways `false` for a GC-evicted session, since eviction requires an idle session."
+                "description": "Whether a turn is running on this session right now.\n\nExists so a client whose SSE stream dropped mid-turn can tell \"my turn is still running\"\nfrom \"my turn died\" without submitting a speculative turn and reading the 409. A dropped\nstream does not cancel the turn: the spawned task keeps the runtime lock and dropping the\n`JoinHandle` detaches rather than aborts, so the work completes and resubmitting would\nduplicate a reply the user is about to receive anyway.\n\n`false` for a GC-evicted session, since eviction requires an idle session, and `true` for\na sub-agent this process is running under its parent, which is never resident itself. A\nsession another process runs (a REPL open on it) reads as idle: only its file lock knows,\nand a read may not probe it."
               }
             }
           }
@@ -3391,7 +3641,7 @@
       },
       "SessionView": {
         "type": "object",
-        "description": "A session's row: what `meka session list` prints and what `GET /v1/sessions/{id}` answers with,\nless the facts only the process holding the session can add (`last_turn_at`, `capabilities`,\n`turn_in_flight`), which the HTTP response flattens this under.",
+        "description": "A session's row: what `meka session list` prints and what `GET /v1/sessions/{id}` answers with,\nless the facts only the process holding the session can add (`capabilities`, `turn_in_flight`,\n`inbox_pending`, `approvals_pending`, `checklist`), which the HTTP response flattens this\nunder.",
         "required": ["id", "created_at", "updated_at", "approvals", "profile", "title"],
         "properties": {
           "approvals": {
@@ -3404,6 +3654,15 @@
             "description": "Omitted when the row recorded none: an archive that carried no working directory is\nimported as it was written."
           },
           "id": { "type": "string", "format": "uuid" },
+          "last_turn": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TurnRecord",
+                "description": "The latest turn: who opened it and when, and once it has ended, how (`succeeded` with its\n`stop_reason`, `failed` with its `error`, or `canceled`), when, and what it spent. Omitted\nfor a session no turn has begun on. A turn that began and shows no ending is either in\nflight, which `turn_in_flight` says, or one the process died under. The record carries it\nbecause a list of sessions is rendered from it, one row per session; the whole history of\nturns is `GET /v1/sessions/{id}/turns`."
+              },
+              { "type": "null" }
+            ]
+          },
           "parent_id": {
             "type": ["string", "null"],
             "format": "uuid",
@@ -3475,44 +3734,6 @@
           "version": { "type": ["string", "null"] }
         }
       },
-      "ToolCallContentView": {
-        "oneOf": [
-          {
-            "type": "object",
-            "required": ["text", "type"],
-            "properties": {
-              "text": { "type": "string" },
-              "type": { "type": "string", "enum": ["text"] }
-            }
-          },
-          {
-            "type": "object",
-            "required": ["media_type", "type"],
-            "properties": {
-              "media_type": { "type": "string" },
-              "type": { "type": "string", "enum": ["image"] }
-            }
-          }
-        ]
-      },
-      "ToolCallView": {
-        "type": "object",
-        "required": ["id", "name", "input", "is_error", "content"],
-        "properties": {
-          "content": {
-            "type": "array",
-            "items": { "$ref": "#/components/schemas/ToolCallContentView" }
-          },
-          "display_summary": {
-            "type": ["string", "null"],
-            "description": "The one-line label a terminal shows for the call, when the tool has one. Omitted otherwise,\nlike every optional field on this API."
-          },
-          "id": { "type": "string" },
-          "input": { "type": "object" },
-          "is_error": { "type": "boolean" },
-          "name": { "type": "string" }
-        }
-      },
       "ToolResultContentView": {
         "oneOf": [
           {
@@ -3561,6 +3782,17 @@
           "tools": { "type": "array", "items": { "$ref": "#/components/schemas/ToolView" } }
         }
       },
+      "TurnError": {
+        "type": "object",
+        "required": ["type", "detail"],
+        "properties": {
+          "detail": { "type": "string", "description": "meka's own sentence about the failure" },
+          "type": {
+            "type": "string",
+            "description": "The error's `type`, as a Problem Detail names it"
+          }
+        }
+      },
       "TurnOptions": {
         "type": "object",
         "description": "Per-turn options. `#[serde(deny_unknown_fields)]` here (and only here) so a typo in\n`option.skil` surfaces as a 422 rather than being silently dropped.",
@@ -3576,6 +3808,41 @@
         },
         "additionalProperties": false
       },
+      "TurnRecord": {
+        "type": "object",
+        "description": "One turn as its row records it: when it began and, once it has, how it ended.\n\n`ended_at` and `status` are absent together on a turn that began and has not ended: the one\nin flight, or one the process died under. Whether it is the former is `turn_in_flight` on\nthe session, a live fact no row stores.",
+        "required": ["id", "source", "started_at", "usage"],
+        "properties": {
+          "ended_at": {
+            "type": ["string", "null"],
+            "description": "RFC 3339, when the turn ended."
+          },
+          "error": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TurnError",
+                "description": "What a turn that failed failed on, in the words a Problem Detail uses."
+              },
+              { "type": "null" }
+            ]
+          },
+          "id": { "type": "string", "format": "uuid" },
+          "source": {
+            "type": "string",
+            "description": "Who opened it: `client`, `inbox`, `schedule`, `background`, or `parent` for a sub-agent's."
+          },
+          "started_at": { "type": "string", "description": "RFC 3339, when the turn began." },
+          "status": { "type": ["string", "null"] },
+          "stop_reason": {
+            "type": ["string", "null"],
+            "description": "`end_turn`, `max_tokens` or `refusal`, on a turn that succeeded."
+          },
+          "usage": {
+            "$ref": "#/components/schemas/TurnUsage",
+            "description": "What the turn spent, every round of it."
+          }
+        }
+      },
       "TurnRequest": {
         "type": "object",
         "required": ["message"],
@@ -3583,7 +3850,7 @@
           "images": {
             "type": "array",
             "items": { "$ref": "#/components/schemas/ImageInput" },
-            "description": "Image attachments for this turn. A sibling of `message` rather than a member of\n[`TurnOptions`] because these are user content, not a per-turn knob. Requires the session's\nprofile to have vision enabled; see [`decode_turn_images`]."
+            "description": "Image attachments for this turn. A sibling of `message` rather than a member of\n[`TurnOptions`] because these are user content, not a per-turn knob. Requires the session's\nprofile to have vision enabled; see [`resolve_turn_images`]."
           },
           "message": { "type": "string" },
           "options": {
@@ -3599,25 +3866,12 @@
       },
       "TurnResponse": {
         "type": "object",
-        "required": [
-          "turn_id",
-          "session_id",
-          "stop_reason",
-          "final_text",
-          "messages",
-          "tool_calls",
-          "usage",
-          "notices"
-        ],
+        "required": ["turn_id", "session_id", "stop_reason", "messages", "usage", "notices"],
         "properties": {
-          "final_text": {
-            "type": "string",
-            "description": "Concatenated assistant text produced this turn. **Excludes** refusal explanation:\nwhen the model refuses, the refusal text rides on the dedicated `refusal_text` field\ninstead. Clients that just want \"what the user sees\" should consume both:\n`final_text` for the normal response, `refusal_text` when `stop_reason == \"refusal\"`."
-          },
           "messages": {
             "type": "array",
             "items": { "$ref": "#/components/schemas/MessageView" },
-            "description": "Structured view of the assistant's message(s) produced this turn. Per the spec, this is\nthe \"richer access\" companion to `final_text`. Clients that want the text plus its\nformatting context (text/thinking content blocks) consume this; clients that just want\na single string consume `final_text`. Tool calls live in their own `tool_calls` array."
+            "description": "The messages this turn added to the conversation, in order and in the shape\n`GET /v1/sessions/{id}/messages` reads them back: the assistant's messages with their\ntext, their thinking when the session streams reasoning, and their tool calls, and the\ntool-result messages that answered those calls. The user's own message is not repeated."
           },
           "notices": { "type": "array", "items": { "$ref": "#/components/schemas/NoticeView" } },
           "refusal_text": {
@@ -3626,12 +3880,41 @@
           },
           "session_id": { "type": "string", "format": "uuid" },
           "stop_reason": { "type": "string" },
-          "tool_calls": {
-            "type": "array",
-            "items": { "$ref": "#/components/schemas/ToolCallView" }
-          },
           "turn_id": { "type": "string", "format": "uuid" },
           "usage": { "$ref": "#/components/schemas/UsageView" }
+        }
+      },
+      "TurnUsage": {
+        "type": "object",
+        "description": "The tokens a turn spent, as the provider reported them round by round.",
+        "required": [
+          "input_tokens",
+          "output_tokens",
+          "cache_creation_input_tokens",
+          "cache_read_input_tokens"
+        ],
+        "properties": {
+          "cache_creation_input_tokens": { "type": "integer", "format": "int64", "minimum": 0 },
+          "cache_read_input_tokens": { "type": "integer", "format": "int64", "minimum": 0 },
+          "input_tokens": { "type": "integer", "format": "int64", "minimum": 0 },
+          "output_tokens": { "type": "integer", "format": "int64", "minimum": 0 }
+        }
+      },
+      "TurnsResponse": {
+        "type": "object",
+        "required": ["session_id", "turns"],
+        "properties": {
+          "next_before": {
+            "type": ["string", "null"],
+            "format": "uuid",
+            "description": "The id to pass back as `before` for the next page, when turns remain."
+          },
+          "session_id": { "type": "string", "format": "uuid" },
+          "turns": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/TurnRecord" },
+            "description": "Newest first."
+          }
         }
       },
       "UsageView": {

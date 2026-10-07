@@ -1,7 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Check, LoaderCircle, X } from 'lucide-react';
 import type { Schema } from '../api/client';
-import { supportsSessionOrganization } from '../api/version';
 import { useCan, useConnection } from '../connections/context';
 import { Button } from '../components/ui/button';
 import { useShortcut } from '../components/use-shortcut';
@@ -16,9 +15,9 @@ export function SessionHeading({
   disabled: boolean;
   onError: (error: unknown) => void;
 }) {
-  const { controller, info } = useConnection();
+  const { controller } = useConnection();
   const canWrite = useCan('sessions:w');
-  const editable = canWrite && !session.parent_id && supportsSessionOrganization(info?.version);
+  const editable = canWrite && !session.parent_id;
   const [draft, setDraft] = useState<string>();
   const [saving, setSaving] = useState(false);
   const [failed, setFailed] = useState(false);

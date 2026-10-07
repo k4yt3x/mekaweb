@@ -54,24 +54,72 @@ export function groupToolResults(messages: readonly Schema['MessageView'][]) {
 
 export type HistoryMessage = ReturnType<typeof groupToolResults>['messages'][number];
 
+/** A message meka wrote to send the model back to work, rather than someone's words. */
+export function isNudge(message: Schema['MessageView']) {
+  return message.role === 'user' && message.content[0]?.type === 'nudge';
+}
+
 export function groupAgentMessages(messages: HistoryMessage[]) {
   const groups: HistoryMessage[][] = [];
   for (const message of messages) {
-    const previous = groups.at(-1)?.at(-1);
+    const group = groups.at(-1);
+    const previous = group?.at(-1);
     if (
-      previous?.message.role === 'assistant' &&
-      message.message.role === 'assistant' &&
-      !previous.message.compaction &&
+      group?.[0]?.message.role === 'assistant' &&
+      !group[0].message.compaction &&
       !message.message.compaction &&
-      // Meka encodes results as user-role rows, so their virtual turn index can advance.
-      // A gap here contains only matched results removed by groupToolResults, never user text.
-      ((previous.message.turn_id ?? null) === (message.message.turn_id ?? null) ||
-        message.index > previous.index + 1)
+      // A nudge stays in the turn it answers, unless a steer rides it and so speaks for someone.
+      (message.message.role === 'assistant' ||
+        (isNudge(message.message) &&
+          !message.message.content.some((block) => block.type === 'text'))) &&
+      // Every message a turn added names it, results included. Rows saved before meka recorded
+      // turns name none; adjacent ones still belong together, with only matched results between.
+      previous?.message.turn_id === message.message.turn_id
     )
-      groups.at(-1)!.push(message);
+      group.push(message);
     else groups.push([message]);
   }
   return groups;
+}
+
+/**
+ * The turns of the loaded history by `turn_label`, which meka gives every message by the rule its
+ * rewinds count by: for each label, the loaded message its turn opens at, and how many turns a
+ * rewind to before it drops, that one and every later one. One pass, from the end. The first
+ * loaded turn is left out when earlier messages are not loaded, since it may open among them.
+ */
+export function turnIndex(messages: readonly Schema['MessageView'][], offset: number) {
+  const turns = new Map<string, { start: number; turns: number }>();
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const label = messages[index]!.turn_label;
+    if (label) turns.set(label, { start: index, turns: turns.get(label)?.turns ?? turns.size + 1 });
+  }
+  const first = messages[0]?.turn_label;
+  if (offset > 0 && first) turns.delete(first);
+  return turns;
+}
+/** What the messages say, as written: their text, without thinking, tools, or meka's context. */
+export function messageText(messages: readonly Schema['MessageView'][]) {
+  return messages
+    .flatMap((message) =>
+      message.content.flatMap((block) => (block.type === 'text' ? [block.text.trim()] : [])),
+    )
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+/**
+ * What sending a saved message again takes: its text, and its images by the hash the session holds
+ * them under. Undefined when it has nothing to send, or an image without a hash to name it by.
+ */
+export function resendable(message: Schema['MessageView']) {
+  const images = message.content.flatMap((block) => (block.type === 'image' ? [block] : []));
+  const text = messageText([message]);
+  if (images.some((image) => !image.hash) || (!text && !images.length)) return;
+  return {
+    text,
+    images: images.map((image, index) => ({ name: `Image ${index + 1}`, hash: image.hash! })),
+  };
 }
 
 type AgentBlock = Exclude<LiveBlock, { kind: 'submission' }>;

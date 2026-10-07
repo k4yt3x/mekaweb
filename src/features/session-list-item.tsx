@@ -1,7 +1,6 @@
 import { useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import { LoaderCircle, Pencil, Pin, PinOff, Trash2 } from 'lucide-react';
+import { ChevronRight, LoaderCircle, Pencil, Pin, PinOff, Trash2 } from 'lucide-react';
 import type { Schema } from '../api/client';
-import { supportsSessionOrganization } from '../api/version';
 import { useCan, useConnection, useRuntime } from '../connections/context';
 import { useAction } from '../components/actions';
 import { ErrorNotice } from '../components/common';
@@ -34,6 +33,7 @@ export function SessionListItem({
   branches,
   selected,
   running,
+  subagents,
   status,
   excerpt,
   onOpen,
@@ -43,11 +43,14 @@ export function SessionListItem({
   branches: boolean[];
   selected: boolean;
   running: boolean;
+  /** Whether the row lists the sub-agents beneath it, which search results do not. */
+  subagents?:
+    { shown: boolean; loading: boolean; found: boolean; onToggle: () => void } | undefined;
   status: SessionStatus;
   excerpt?: string | undefined;
   onOpen: () => void;
 }) {
-  const { controller, info } = useConnection();
+  const { controller } = useConnection();
   const runtime = useRuntime();
   const canWrite = useCan('sessions:w');
   const [confirm, setConfirm] = useState(false);
@@ -61,7 +64,7 @@ export function SessionListItem({
   const pinAction = useAction();
   const busy = action.busy || pinAction.busy;
   const title = session.title || 'New conversation';
-  const editable = supportsSessionOrganization(info?.version) && canWrite && !session.parent_id;
+  const editable = canWrite && !session.parent_id;
   useLayoutEffect(() => {
     if (
       pinFocus.current === undefined ||
@@ -173,6 +176,28 @@ export function SessionListItem({
             </time>
           </div>
         </a>
+        {subagents && (
+          <button
+            type="button"
+            className="session-twisty"
+            aria-label={`Sub-agents of session: ${title}`}
+            aria-expanded={subagents.shown}
+            aria-busy={subagents.loading}
+            data-found={subagents.found || undefined}
+            title={
+              !subagents.shown
+                ? 'Show sub-agents'
+                : subagents.loading
+                  ? 'Loading sub-agents…'
+                  : subagents.found
+                    ? 'Hide sub-agents'
+                    : 'No sub-agents'
+            }
+            onClick={subagents.onToggle}
+          >
+            <ChevronRight size={11} strokeWidth={2.5} aria-hidden="true" />
+          </button>
+        )}
         <div
           className="session-row-actions"
           role="group"

@@ -1,5 +1,6 @@
 import { QueryClient } from '@tanstack/react-query';
 import { ApiClient, ConnectionError, errorMessage, type Schema } from '../api/client';
+import { minimumVersion, supportsVersion } from '../api/version';
 import { SessionController } from '../session/controller';
 import { BrowserStorage, type Connection } from './storage';
 import { BrowserNotifications } from '../notifications/client';
@@ -218,10 +219,13 @@ export class ConnectionRuntime {
         typeof info.version !== 'string' ||
         typeof info.default_permission !== 'string' ||
         !Array.isArray(info.enabled_permissions) ||
-        !info.enabled_permissions.every((permission) => typeof permission === 'string') ||
-        typeof info.vision !== 'boolean'
+        !info.enabled_permissions.every((permission) => typeof permission === 'string')
       )
         throw new Error('This endpoint did not return a supported meka discovery response.');
+      if (!supportsVersion(info.version))
+        throw new Error(
+          `This server runs meka ${info.version}. mekaweb needs meka ${minimumVersion} or newer.`,
+        );
       if (attempt !== this.attempt) {
         candidate.dispose();
         return false;

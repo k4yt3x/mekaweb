@@ -44,3 +44,16 @@ export function sessionTree<T extends SessionLink>(sessions: T[]) {
   for (const session of sessions) if (!visited.has(session.id)) append(session);
   return result;
 }
+
+/** Drop the rows beneath each session whose sub-agents are hidden, however deep they sit. */
+export function foldTree<T extends { session: SessionLink; depth: number }>(
+  rows: T[],
+  unfolded: (id: string) => boolean,
+) {
+  let folded = Infinity;
+  return rows.filter(({ session, depth }) => {
+    if (depth > folded) return false;
+    folded = unfolded(session.id) ? Infinity : depth;
+    return true;
+  });
+}

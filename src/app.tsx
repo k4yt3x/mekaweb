@@ -30,7 +30,6 @@ import { KeyboardShortcutsButton, KeyboardShortcutsDialog } from './components/s
 import { useShortcut } from './components/use-shortcut';
 import { SessionNavigationContext } from './features/session-navigation';
 import { useNewConversation } from './features/use-new-conversation';
-import { supportsSessionOrganization } from './api/version';
 
 export function App({ runtime }: { runtime: ConnectionRuntime }) {
   useEffect(trackFocusInput, []);
@@ -115,11 +114,7 @@ function Workspace() {
       )
         window.location.hash = '/sessions';
     },
-    Boolean(
-      state.api &&
-      state.info?.scopes.includes('sessions:r') &&
-      supportsSessionOrganization(state.info.version),
-    ),
+    Boolean(state.api && state.info?.scopes.includes('sessions:r')),
   );
   useShortcut(
     'showShortcuts',
@@ -370,6 +365,14 @@ function ApprovalCard({ approval }: { approval: Approval }) {
       <p className="muted small">
         {connection?.name} ·{' '}
         <a href={`#/sessions/${approval.sessionId}`}>Session {approval.sessionId.slice(0, 8)}</a>
+        {approval.subagentId && (
+          <>
+            {' · '}
+            <a href={`#/sessions/${approval.subagentId}`}>
+              Sub-agent {approval.subagentId.slice(0, 8)}
+            </a>
+          </>
+        )}
       </p>
       <h3>{approval.tool}</h3>
       <details open>

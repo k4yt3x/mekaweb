@@ -20,6 +20,7 @@ it('includes cache writes and reads in input totals and weights hits by tokens, 
   expect(contextMetrics(context)).toEqual({
     totalInputTokens: 2000,
     cacheHitPercent: 85,
+    usedPercent: 75,
     remainingTokens: 5000,
   });
 });
@@ -44,8 +45,15 @@ it.each<[number, number, number, number | null]>([
 });
 
 it('does not invent context capacity when occupancy or the window is unavailable', () => {
-  expect(contextMetrics({ ...context, used: null }).remainingTokens).toBeNull();
-  expect(contextMetrics({ ...context, window: null }).remainingTokens).toBeNull();
-  expect(contextMetrics({ ...context, window: 0 }).remainingTokens).toBeNull();
+  for (const missing of [{ used: null }, { window: null }, { window: 0 }]) {
+    const metrics = contextMetrics({ ...context, ...missing });
+    expect(metrics.remainingTokens).toBeNull();
+    expect(metrics.usedPercent).toBeNull();
+  }
   expect(contextMetrics({ ...context, used: 21000 }).remainingTokens).toBe(0);
+});
+
+it('rounds occupancy down, as meka did', () => {
+  expect(contextMetrics({ ...context, used: 19999 }).usedPercent).toBe(99);
+  expect(contextMetrics({ ...context, used: 21000 }).usedPercent).toBe(105);
 });

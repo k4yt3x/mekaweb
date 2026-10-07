@@ -18,10 +18,7 @@ export function isUnread(
   return Date.parse(session.updated_at) > Date.parse(since);
 }
 
-/**
- * What a session-list dot shows, most urgent first. Outcomes are known only for turns this tab
- * followed on a live feed; other changes are `unread` without one.
- */
+/** What a session-list dot shows, most urgent first. */
 export type SessionStatus = 'approval' | 'running' | 'failed' | 'completed' | 'unread' | 'read';
 export function sessionStatus({
   session,
@@ -30,24 +27,29 @@ export function sessionStatus({
   seen,
   selected,
 }: {
-  /** With `updated_at` already the newest of the listing and the live snapshot. */
-  session: Pick<Schema['SessionResponse'], 'id' | 'updated_at' | 'parent_id'>;
-  live: Pick<SessionState, 'approvals' | 'lastTurn'> | undefined;
+  /** The newest record of the session, from the listing or the live snapshot. */
+  session: Pick<
+    Schema['SessionResponse'],
+    'id' | 'updated_at' | 'parent_id' | 'approvals_pending' | 'last_turn'
+  >;
+  live: Pick<SessionState, 'approvals'> | undefined;
   running: boolean;
   seen: SeenSessions;
   selected: boolean;
 }): SessionStatus {
-  if (live?.approvals.length) return 'approval';
+  if (live?.approvals.length || session.approvals_pending) return 'approval';
   if (running) return 'running';
   if (selected || !isUnread(session, seen, false)) return 'read';
-  const last = live?.lastTurn;
-  // Activity after the followed turn, such as a scheduled turn elsewhere, leaves its outcome stale.
-  if (
-    !last ||
-    (last.updatedAt !== undefined && Date.parse(session.updated_at) > Date.parse(last.updatedAt))
-  )
-    return 'unread';
-  return last.outcome === 'canceled' ? 'unread' : last.outcome;
+  // A turn with no end that is not running died with its process, so its outcome is unknown. One
+  // that ended before the session was last seen is old news, unread again by a later change such
+  // as a profile switch. Both times are the server's.
+  const last = session.last_turn;
+  const since = seen.sessions[session.id] ?? seen.baseline;
+  const news =
+    last?.ended_at && (since === undefined || Date.parse(last.ended_at) > Date.parse(since));
+  if (news && last.status === 'succeeded') return 'completed';
+  if (news && last.status === 'failed') return 'failed';
+  return 'unread';
 }
 
 const noneSeen: SeenSessions = { sessions: {} };

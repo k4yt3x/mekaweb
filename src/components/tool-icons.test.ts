@@ -4,13 +4,16 @@ import { toolIconKey, toolIcons } from './tool-icons';
 
 const icon = (name: string) => toolIcons[toolIconKey(name)];
 
-// meka 0.68.0: src/tools/registry.rs::BUILTIN_TOOL_NAMES, plus the checkpoint-only context_replace.
+// meka 0.71.0: src/tools/registry.rs::BUILTIN_TOOL_NAMES, plus the checkpoint-only context_replace.
 const builtins = [
   'agent_delete',
   'agent_followup',
   'agent_list',
   'agent_spawn',
   'agent_steer',
+  'checklist_add',
+  'checklist_edit',
+  'checklist_read',
   'context_check',
   'context_compact',
   'context_replace',
@@ -52,27 +55,14 @@ const builtins = [
   'skill_write',
   'task_cancel',
   'task_list',
-  'todo_edit',
-  'todo_read',
-  'todo_write',
   'tool_load',
   'tool_search',
   'web_fetch',
-  'edit_file',
-  'execute_command',
-  'fetch_url',
-  'find_files',
-  'load_tool',
-  'read_file',
-  'render_image',
-  'search_contents',
-  'write_file',
 ];
 
-it('gives every built-in tool, including the 0.59 names, a specific icon', () => {
+it('gives every built-in tool a specific icon', () => {
   for (const name of builtins) expect(icon(name), name).toBeDefined();
   expect(icon('shell_execute')).toBe(SquareTerminal);
-  expect(icon('execute_command')).toBe(SquareTerminal);
   expect(icon('file_read')).toBe(FileText);
   expect(icon('agent_spawn')).toBe(Bot);
 });

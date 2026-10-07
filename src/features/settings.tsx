@@ -11,7 +11,7 @@ import { Dialog } from '../components/ui/dialog';
 import { ConfirmButton, ErrorNotice, Field, Json, Loading } from '../components/common';
 import { MekawebLink } from '../components/layout';
 import { PixelInput } from '../components/pixel-input';
-import { supportedVersions } from '../api/version';
+import { verifiedVersions } from '../api/version';
 import { NotificationSettings } from '../notifications/settings';
 
 export function ConnectionForm({
@@ -318,10 +318,10 @@ export function SettingsPage() {
           <dt>meka version</dt>
           <dd>
             {state.info?.version}
-            {!supportedVersions.includes(state.info?.version ?? '') && (
+            {!verifiedVersions.includes(state.info?.version ?? '') && (
               <span className="muted">
                 {' '}
-                · Unverified version (supported: {supportedVersions.join(', ')}).
+                · Unverified version (verified: {verifiedVersions.join(', ')}).
               </span>
             )}
           </dd>
@@ -331,8 +331,6 @@ export function SettingsPage() {
           <dd>{ready.isPending ? 'Checking…' : (ready.data?.status ?? 'Unavailable')}</dd>
           <dt>Default permission</dt>
           <dd>{state.info?.default_permission}</dd>
-          <dt>Default vision</dt>
-          <dd>{state.info?.vision ? 'Available' : 'Unavailable'}</dd>
           <dt>Token scopes</dt>
           <dd className="scope-list">
             {state.info?.scopes.map((scope) => (
@@ -403,7 +401,8 @@ export function SettingsPage() {
               {p.active && <span className="badge">Default</span>}
             </strong>
             <span className="muted">
-              {p.model ?? 'No model'} · {p.backend ?? 'Backend unavailable'} · Account: {p.account}
+              {p.model ?? 'No model'} · {p.backend ?? 'Backend unavailable'} · Account: {p.account}{' '}
+              · {p.vision ? 'Images' : 'No images'}
             </span>
           </div>
         ))}

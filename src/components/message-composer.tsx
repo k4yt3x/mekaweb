@@ -55,6 +55,7 @@ export function MessageComposer({
   action,
   settings,
   onError,
+  above,
   children,
 }: {
   text: string;
@@ -77,6 +78,8 @@ export function MessageComposer({
   action: { kind: keyof typeof actions; disabled: boolean; busy: boolean; run: () => void };
   settings: { disabled: boolean; busy: boolean; open: () => void };
   onError: (error: unknown) => void;
+  /** Shown just above the input, inside the composer's width. */
+  above?: ReactNode;
   children?: ReactNode;
 }) {
   const inputId = useId();
@@ -252,6 +255,7 @@ export function MessageComposer({
             Profile: {profile.value}
           </span>
         )}
+        {above}
         <div className="composer" ref={box} data-dropping={dropping || undefined}>
           <ComposerResizeHandle
             key={resizeGeneration}

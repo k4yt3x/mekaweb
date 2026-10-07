@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { sessionTree } from './session-tree';
+import { foldTree, sessionTree } from './session-tree';
 
 const session = (id: string, parent_id: string | null = null) => ({ id, parent_id });
 const outline = (sessions: ReturnType<typeof session>[]) =>
@@ -67,5 +67,31 @@ it('continues ancestor guides past nested children and ends each branch at its l
     ['b', [false]],
     ['b1', [false, false]],
     ['other-root', []],
+  ]);
+});
+
+it('hides everything beneath a folded session and nothing beside it', () => {
+  const rows = sessionTree([
+    session('root'),
+    session('a', 'root'),
+    session('a1', 'a'),
+    session('a1x', 'a1'),
+    session('b', 'root'),
+    session('b1', 'b'),
+    session('other-root'),
+    session('other-child', 'other-root'),
+  ]);
+  const folded = new Set(['a', 'other-root']);
+  expect(foldTree(rows, (id) => !folded.has(id)).map(({ session }) => session.id)).toEqual([
+    'root',
+    'a',
+    'b',
+    'b1',
+    'other-root',
+  ]);
+  expect(foldTree(rows, (id) => id !== 'root').map(({ session }) => session.id)).toEqual([
+    'root',
+    'other-root',
+    'other-child',
   ]);
 });

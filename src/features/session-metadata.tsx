@@ -2,7 +2,6 @@ import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { Pencil, Pin, PinOff } from 'lucide-react';
 import { useEffect, useRef, useState, type RefObject } from 'react';
 import type { Schema } from '../api/client';
-import { supportsSessionOrganization } from '../api/version';
 import { useCan, useConnection } from '../connections/context';
 import { useAction } from '../components/actions';
 import { ErrorNotice, Field } from '../components/common';
@@ -20,9 +19,7 @@ export function SessionMetadataItems({
   onRename: () => void;
   onPin: () => void;
 }) {
-  const { info } = useConnection();
   const canWrite = useCan('sessions:w');
-  if (!supportsSessionOrganization(info?.version)) return null;
   const unavailable = disabled || !canWrite || Boolean(session.parent_id);
   return (
     <>

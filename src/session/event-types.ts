@@ -35,20 +35,27 @@ export interface EventPayloads {
   'tool_call.completed': Correlation & {
     id: string;
     is_error: boolean;
-    content: Schema['ToolCallContentView'][];
+    content: Schema['ToolResultContentView'][];
   };
   'tool_call.output_delta': Correlation & { id: string; chunk: string };
-  'subagent.activity': Correlation & { id: string; summary: string };
   permission_required: Correlation & {
     request_id: string;
     tool_name: string;
     input: unknown;
     expires_in_seconds: number;
+    expires_at?: string;
+    subagent_id?: string;
   };
+  permission_resolved: Correlation & { request_id: string; outcome: string };
   notice: Correlation & { text: string; level?: string };
   'inbox.delivered': Correlation & { item_ids: string[] };
   'inbox.failed': Correlation & { item_id: string; reason?: string };
   'inbox.withdrawn': Correlation & { item_id: string };
+  'session.updated': Schema['SessionResponse'];
+  'conversation.rewound': { revision: number; total: number; turns_removed: number };
+  'turn.nudged': Correlation & { kind: string; text: string };
+  'feed.gap': { session_id?: string; dropped?: number };
+  'checklist.updated': Correlation & { items: Schema['ChecklistItem'][] };
   'context.compacted': Correlation & { source: string; replaced_count: number; generation: number };
   progress: Correlation & {
     server_name: string;

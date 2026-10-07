@@ -9,8 +9,6 @@ it('shows the command or path without including unrelated arguments', () => {
   };
   expect(toolSummary('shell_execute', input)).toBe(input.command);
   expect(toolSummary('file_read', input)).toBe(input.path);
-  expect(toolSummary('execute_command', input)).toBe(input.command);
-  expect(toolSummary('read_file', input)).toBe(input.path);
   expect(toolSummary('file_write', { path: 'config.json', content: 'file contents' })).toBe(
     'config.json',
   );
@@ -54,15 +52,14 @@ it('coerces scalar and list arguments like meka without serializing nested objec
 it('summarizes cancellation, task edits, and image inputs without displaying binary payloads', () => {
   expect(toolSummary('task_cancel', { id: 'task', all: true })).toBe('all');
   expect(toolSummary('task_cancel', { id: 'task', all: false })).toBe('task');
-  expect(toolSummary('todo_edit', { set: { 2: 'done', 1: 'in_progress', 3: null } })).toBe(
-    '#1 in_progress, #2 done',
-  );
+  expect(toolSummary('checklist_edit', { id: 2, status: 'completed' })).toBe('#2 completed');
+  expect(toolSummary('checklist_edit', { id: 2, text: 'Reworded' })).toBe('#2');
+  expect(toolSummary('checklist_edit', {})).toBeUndefined();
+  expect(toolSummary('checklist_add', { items: ['one', { text: 'two' }] })).toBe('one');
+  expect(toolSummary('checklist_read', {})).toBeUndefined();
   expect(toolSummary('image_render', { from_scratchpad: 'frame', base64: 'opaque' })).toBe('frame');
   expect(toolSummary('image_render', { base64: 'opaque' })).toBe('<inline base64>');
   expect(toolSummary('image_render', {})).toBeUndefined();
-  expect(toolSummary('todo', { title: 'Plan', items: [1] })).toBe('Plan');
-  expect(toolSummary('todo', { items: [1] })).toBe('1 task');
-  expect(toolSummary('todo', {})).toBe('read');
 });
 
 it('flattens header text while preserving the original input and readable Unicode', () => {

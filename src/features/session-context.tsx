@@ -7,15 +7,11 @@ export function SessionContext({ context }: { context: Schema['ContextResponse']
     <div className="context-details stack">
       <section aria-label="Context window">
         <h3>Context window</h3>
-        {context.used_percent != null ? (
+        {metrics.usedPercent != null ? (
           <>
-            <progress
-              aria-label="Context window occupancy"
-              max={100}
-              value={context.used_percent}
-            />
+            <progress aria-label="Context window occupancy" max={100} value={metrics.usedPercent} />
             <p>
-              {context.used_percent}% · {context.used?.toLocaleString()} /{' '}
+              {metrics.usedPercent}% · {context.used?.toLocaleString()} /{' '}
               {context.window?.toLocaleString()} tokens
             </p>
           </>

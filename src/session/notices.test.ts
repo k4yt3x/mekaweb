@@ -52,3 +52,13 @@ it('presents terminal failures and refusals while leaving tool errors in their o
     }),
   ).toBeUndefined();
 });
+
+it('passes every notice the agent raises through, nudges included', () => {
+  expect(
+    sessionNotice('notice', {
+      level: 'info',
+      text: 'checklist: 2 open items, continuing, nudge 1 of 3',
+      turn_id: 'turn',
+    }),
+  ).toMatchObject({ level: 'info', text: 'checklist: 2 open items, continuing, nudge 1 of 3' });
+});

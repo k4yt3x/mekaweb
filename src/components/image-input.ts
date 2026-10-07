@@ -1,5 +1,3 @@
-import type { Schema } from '../api/client';
-
 // meka passes the first five formats through and converts the rest to PNG.
 const fileExtensions = [
   'png',
@@ -58,7 +56,7 @@ export function pastedFiles<T>({
 }
 
 /** Use raster signatures, not a file's MIME hint, before embedding local bytes. */
-export function inputImageBlob(image: Schema['ImageInput']): Blob {
+export function inputImageBlob(image: { media_type: string; data: string }): Blob {
   if (image.data.length > 5_000_000) throw new Error('This image exceeds the preview size limit.');
   const binary = atob(image.data);
   const type = binary.startsWith('\x89PNG\r\n\x1a\n')

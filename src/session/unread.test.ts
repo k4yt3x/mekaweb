@@ -27,15 +27,21 @@ it('leaves running sessions, sub-agents, and untracked connections unmarked', ()
 });
 
 const status = (
-  patch: Partial<Parameters<typeof sessionStatus>[0]> & { updated_at?: string } = {},
+  patch: Partial<Parameters<typeof sessionStatus>[0]> & {
+    updated_at?: string;
+    record?: Partial<Parameters<typeof sessionStatus>[0]['session']>;
+  } = {},
 ) =>
   sessionStatus({
-    session: session('other', patch.updated_at ?? '2026-09-26T11:00:00Z'),
     live: undefined,
     running: false,
     seen,
     selected: false,
     ...patch,
+    session: {
+      ...session('other', patch.updated_at ?? '2026-09-26T11:00:00Z'),
+      ...patch.record,
+    },
   });
 const approval = {
   id: 'r',
@@ -45,42 +51,48 @@ const approval = {
   input: {},
   expires: 0,
 };
-const followed = (outcome: 'completed' | 'failed' | 'canceled', updatedAt?: string) => ({
-  approvals: [],
-  lastTurn: { outcome, updatedAt },
+const lastTurn = (status: string, ended = true) => ({
+  last_turn: {
+    id: 't',
+    source: 'client',
+    started_at: '2026-09-26T10:59:00Z',
+    ...(ended ? { ended_at: '2026-09-26T11:00:00Z', status } : {}),
+    usage: {
+      input_tokens: 0,
+      output_tokens: 0,
+      cache_creation_input_tokens: 0,
+      cache_read_input_tokens: 0,
+    },
+  },
 });
 
 it('puts a pending approval ahead of running, and running ahead of unread', () => {
-  expect(status({ live: { approvals: [approval], lastTurn: undefined }, running: true })).toBe(
-    'approval',
-  );
+  expect(status({ live: { approvals: [approval] }, running: true })).toBe('approval');
+  expect(status({ record: { approvals_pending: 1 }, running: true })).toBe('approval');
+  expect(status({ record: { approvals_pending: 0 }, running: true })).toBe('running');
   expect(status({ running: true })).toBe('running');
 });
-it('colours unread sessions by the outcome this tab followed', () => {
-  expect(status({ live: followed('completed', '2026-09-26T11:00:00Z') })).toBe('completed');
-  expect(status({ live: followed('failed', '2026-09-26T11:00:00Z') })).toBe('failed');
-  expect(status({ live: followed('failed') })).toBe('failed');
-  expect(status({ live: followed('canceled', '2026-09-26T11:00:00Z') })).toBe('unread');
+it('colours unread sessions by how their last turn ended', () => {
+  expect(status({ record: lastTurn('succeeded') })).toBe('completed');
+  expect(status({ record: lastTurn('failed') })).toBe('failed');
+  expect(status({ record: lastTurn('canceled') })).toBe('unread');
   expect(status()).toBe('unread');
 });
-it('drops an outcome that later activity superseded', () => {
-  expect(
-    status({
-      live: followed('failed', '2026-09-26T11:00:00Z'),
-      updated_at: '2026-09-26T11:30:00Z',
-    }),
-  ).toBe('unread');
+it('leaves an unfinished turn that is not running without an outcome', () => {
+  expect(status({ record: lastTurn('succeeded', false) })).toBe('unread');
 });
 it('shows read sessions, the open one, and sub-agents plainly', () => {
-  expect(status({ updated_at: '2026-09-26T09:00:00Z', live: followed('failed') })).toBe('read');
-  expect(status({ selected: true, live: followed('completed') })).toBe('read');
+  expect(status({ updated_at: '2026-09-26T09:00:00Z', record: lastTurn('failed') })).toBe('read');
+  expect(status({ selected: true, record: lastTurn('succeeded') })).toBe('read');
+  expect(status({ record: { ...lastTurn('failed'), parent_id: 'parent' } })).toBe('read');
+});
+
+it('does not show an outcome already seen as news when a later change makes it unread', () => {
+  // Seen at 12:00, after the turn ended at 11:00; a profile switch at 12:30 makes it unread.
   expect(
-    sessionStatus({
-      session: session('other', '2026-09-26T11:00:00Z', 'parent'),
-      live: followed('failed'),
-      running: false,
-      seen,
-      selected: false,
+    status({
+      record: { ...lastTurn('succeeded'), id: 'viewed' },
+      updated_at: '2026-09-26T12:30:00Z',
     }),
-  ).toBe('read');
+  ).toBe('unread');
 });

@@ -265,7 +265,7 @@ export function SessionsPage({ id }: { id?: string | undefined }) {
           {selected?.session && (
             <div className="toolbar-actions">
               <ReadingOptionsControl />
-              {selected.feed === 'unavailable' && (
+              {selected.feed === 'unavailable' && !selected.session.parent_id && (
                 <Button
                   variant="ghost"
                   size="icon"

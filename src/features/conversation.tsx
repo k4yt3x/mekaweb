@@ -9,7 +9,17 @@ import {
   useSyncExternalStore,
   type ReactNode,
 } from 'react';
-import { ArrowDown, FoldVertical, ShieldCheck, Unplug } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
+import {
+  ArrowDown,
+  FoldVertical,
+  GitBranch,
+  Pencil,
+  RotateCcw,
+  ShieldCheck,
+  Trash2,
+  Unplug,
+} from 'lucide-react';
 import { sessionPath, type Schema } from '../api/client';
 import {
   useCan,
@@ -18,13 +28,20 @@ import {
   useRuntime,
   useSettings,
 } from '../connections/context';
-import type { SessionState, LiveTool, Submission, ComposerOptions } from '../session/controller';
-import { isSessionRunning } from '../session/controller';
+import type {
+  SessionState,
+  LiveTool,
+  Submission,
+  ComposerOptions,
+  ImageAttachment,
+} from '../session/controller';
+import { isSessionRunning, UnsentMessage } from '../session/controller';
 import { useTextDraft } from '../session/drafts';
+import { subagentsQuery, useSessionStates } from '../session/hooks';
 import { useMarkSeen } from '../session/unread';
 import { Button } from '../components/ui/button';
 import { Empty, ErrorNotice, Loading } from '../components/common';
-import { NoticeMessage } from '../components/notice-message';
+import { NoticeMessage, TurnNotice } from '../components/notice-message';
 import { ToolCard } from '../components/tool-card';
 import { Markdown, MarkdownPreview } from '../components/markdown';
 import { Attachment, InlineAttachment, ImageViewerProvider } from '../components/image-attachment';
@@ -35,13 +52,18 @@ import {
   groupAgentMessages,
   groupLiveMessages,
   groupToolResults,
+  messageText,
   pendingInboxMessages,
+  resendable,
   responseActivityIndicator,
+  turnIndex,
   type HistoryMessage,
   type ToolResultBlock,
   type ToolUseBlock,
 } from './conversation-history';
 import { MessageComposer } from '../components/message-composer';
+import { CopyAction, HistoryAction, MessageEditor, TurnActions } from './turn-actions';
+import { ChecklistStrip } from './checklist-strip';
 import {
   DEFAULT_INPUT_HEIGHT,
   emptyComposerOptions,
@@ -49,7 +71,20 @@ import {
 } from '../session/composer-options';
 const positions = new Map<string, { top: number; following: boolean }>();
 export function Conversation({ state }: { state: SessionState }) {
-  const { controller, connection, connectionIssue } = useConnection();
+  const { api, controller, connection, connectionIssue } = useConnection();
+  // A running sub-agent's feed tells which call in this session runs it, and what it is doing.
+  // Over HTTP/1.1 a browser holds about six connections to a server, and this session's feed and
+  // the server feed take two of them, so only the most recently active two are followed.
+  const subagents = useQuery(subagentsQuery(api, connection, state.id));
+  const runningSubagents =
+    subagents.data?.sessions
+      .filter((session) => session.turn_in_flight)
+      .slice(0, 2)
+      .map((session) => session.id)
+      .join(' ') ?? '';
+  useEffect(() => {
+    for (const id of runningSubagents.split(' ').filter(Boolean)) controller?.watch(id);
+  }, [controller, runningSubagents]);
   const runtime = useRuntime();
   const draft = useTextDraft(runtime.storage, connection?.id ?? '', state.id);
   const profiles = useResource<Schema['ProfilesResponse']>('/v1/profiles');
@@ -125,6 +160,151 @@ export function Conversation({ state }: { state: SessionState }) {
     />
   );
   const appendActivity = waiting && live[waiting.index - 1]?.kind === 'agent';
+  const changes = useAction(setFeedbackError);
+  const [editing, setEditing] = useState<number>();
+  // Read once per history, not on every streamed token.
+  const saved = useMemo(() => state.saved?.messages ?? [], [state.saved]);
+  const turns = useMemo(() => turnIndex(saved, state.offset), [saved, state.offset]);
+  const kinds = useMemo(() => messages.map(turnKind), [messages]);
+  const latestInput = kinds.lastIndexOf('input');
+  const latestReply = kinds.lastIndexOf('reply');
+  // History edits are decided on the saved conversation, so none while a turn adds to it.
+  const changeable =
+    canWithdraw &&
+    state.feed === 'connected' &&
+    !isSessionRunning(state) &&
+    !live.length &&
+    !state.loading &&
+    !changes.busy;
+  const run = (action: () => Promise<unknown>) => void changes.run(action);
+  const resend = (count: number, message: string, images: ImageAttachment[]) =>
+    run(async () => {
+      try {
+        await controller?.resend(state.id, count, message, images);
+        setEditing(undefined);
+      } catch (error) {
+        if (!(error instanceof UnsentMessage)) throw error;
+        // The rewind took the message away with its turn, so it goes where it can be sent again.
+        setEditing(undefined);
+        draft.setText((value) => (value.trim() ? `${value}\n\n${error.text}` : error.text));
+        const options = controller?.draft(state.id) ?? emptyComposerOptions;
+        if (error.images.length)
+          controller?.saveDraft(state.id, {
+            ...options,
+            images: [...options.images, ...error.images],
+          });
+        throw new Error(`${error.message} It is back in the message input.`, { cause: error });
+      }
+    });
+  function turnActions(group: HistoryMessage[], position: number) {
+    const first = group[0]!;
+    const kind = kinds[position];
+    const label = first.message.turn_label;
+    const turn = label ? turns.get(label) : undefined;
+    if (!kind) return {};
+    const later = (turn?.turns ?? 1) - 1;
+    const removed = `${later} later turn${later === 1 ? '' : 's'}`;
+    const files = 'Files the agent changed stay changed.';
+    if (kind === 'input') {
+      const text = messageText([first.message]);
+      const again = resendable(first.message);
+      const at = state.offset + first.index;
+      // A steer meka folded into a tool round or a nudge is part of the turn, not its opening.
+      const opens = turn?.start === first.index;
+      return {
+        editor: editing === at && turn && opens && again && (
+          <MessageEditor
+            initial={again.text}
+            images={again.images.length}
+            disabled={!changeable}
+            confirm={
+              later
+                ? {
+                    title: 'Send the edited message?',
+                    description: `Its reply and ${removed} are removed first. ${files}`,
+                    action: 'Send',
+                  }
+                : undefined
+            }
+            onCancel={() => setEditing(undefined)}
+            onSend={(message) => resend(turn.turns, message, again.images)}
+          />
+        ),
+        actions: (
+          <TurnActions label="Message actions" latest={position === latestInput}>
+            <CopyAction text={text} label="Copy message" onError={setFeedbackError} />
+            {canWithdraw && turn && opens && (
+              <>
+                <HistoryAction
+                  icon={<Pencil size={15} />}
+                  label="Edit and send again"
+                  disabled={!changeable || !again}
+                  confirm={undefined}
+                  onRun={() => setEditing(at)}
+                />
+                <HistoryAction
+                  icon={<Trash2 size={15} />}
+                  label="Delete this turn"
+                  danger
+                  disabled={!changeable}
+                  confirm={{
+                    title: 'Delete this turn?',
+                    description: `Your message${later ? ', its reply, and ' + removed : ' and its reply'} are removed. ${files}`,
+                    action: 'Delete',
+                  }}
+                  onRun={() => run(async () => controller?.rewind(state.id, turn.turns))}
+                />
+              </>
+            )}
+          </TurnActions>
+        ),
+      };
+    }
+    const text = messageText(
+      group.flatMap(({ message }) => (message.role === 'assistant' ? [message] : [])),
+    );
+    const opening = turn && saved[turn.start];
+    // A turn that opened with a compaction summary has no message to send again.
+    const again = opening && !opening.compaction ? resendable(opening) : undefined;
+    return {
+      actions: (
+        <TurnActions label="Reply actions" latest={position === latestReply}>
+          <CopyAction text={text} label="Copy reply" onError={setFeedbackError} />
+          {canWithdraw && turn && (
+            <>
+              <HistoryAction
+                icon={<RotateCcw size={15} />}
+                label="Run this turn again"
+                disabled={!changeable || !again}
+                confirm={
+                  later
+                    ? {
+                        title: 'Run this turn again?',
+                        description: `This reply and ${removed} are removed, then your message is sent again. ${files}`,
+                        action: 'Run again',
+                      }
+                    : undefined
+                }
+                onRun={() => again && resend(turn.turns, again.text, again.images)}
+              />
+              <HistoryAction
+                icon={<GitBranch size={15} />}
+                label="Branch into a new session from here"
+                disabled={!changeable}
+                confirm={undefined}
+                onRun={() =>
+                  run(async () => {
+                    const id = await controller?.branch(state.id, later);
+                    if (id) location.hash = '/sessions/' + encodeURIComponent(id);
+                  })
+                }
+              />
+            </>
+          )}
+        </TurnActions>
+      ),
+    };
+  }
   const key = connection?.id + ':' + state.id;
   useEffect(() => {
     const node = scroller.current;
@@ -227,7 +407,7 @@ export function Conversation({ state }: { state: SessionState }) {
                 !state.notices.length &&
                 !recovered.length &&
                 !queued.length && <Empty title="Send a message to begin" />}
-              {messages.map((group) => (
+              {messages.map((group, position) => (
                 <Message
                   key={`${state.saved?.revision}:${state.offset + group[0]!.index}`}
                   sessionId={state.id}
@@ -235,6 +415,7 @@ export function Conversation({ state }: { state: SessionState }) {
                   offset={state.offset}
                   toolResults={history.results}
                   showTurnContext={showTurnContext}
+                  {...turnActions(group, position)}
                 />
               ))}
               {state.partial && (
@@ -260,9 +441,17 @@ export function Conversation({ state }: { state: SessionState }) {
                           />
                           {group.blocks.map(({ block, index }) =>
                             block.kind === 'tool' ? (
-                              <Tool key={block.id} tool={state.tools[block.id]} />
+                              <Tool
+                                key={block.id}
+                                tool={state.tools[block.id]}
+                                sessionId={state.id}
+                              />
                             ) : block.kind === 'thinking' ? (
                               <Thinking key={index} text={block.text} />
+                            ) : block.kind === 'nudge' ? (
+                              <Nudge key={index} kind={block.nudge} text={block.text} />
+                            ) : block.kind === 'notice' ? (
+                              <TurnNotice key={index} notice={block} />
                             ) : (
                               <Markdown key={index} text={block.text} />
                             ),
@@ -401,6 +590,21 @@ function AgentActivity({
     </p>
   );
 }
+/** What meka wrote to send the agent back to work, kept apart from what the person wrote. */
+function Nudge({ kind, text }: { kind: string; text: string }) {
+  return (
+    <details className="injected">
+      <summary>
+        {kind === 'checklist'
+          ? 'meka sent the agent back to its checklist'
+          : kind === 'visible_reply'
+            ? 'meka asked the agent for a reply it could show'
+            : 'meka sent the agent back to work'}
+      </summary>
+      <pre className="plain-text">{text}</pre>
+    </details>
+  );
+}
 function Thinking({ text }: { text: string }) {
   const [open, setOpen] = useState(false);
   return (
@@ -418,18 +622,33 @@ function Thinking({ text }: { text: string }) {
     </details>
   );
 }
+/** What a saved group is to the actions under it: a message someone sent, or the agent's turn. */
+function turnKind(group: HistoryMessage[]) {
+  const message = group[0]?.message;
+  if (!message || message.compaction) return;
+  if (message.role === 'assistant') return 'reply';
+  if (
+    message.role === 'user' &&
+    message.content.some((block) => block.type === 'text' || block.type === 'image')
+  )
+    return 'input';
+}
 function Message({
   messages,
   sessionId,
   toolResults,
   offset,
   showTurnContext,
+  actions,
+  editor,
 }: {
   messages: HistoryMessage[];
   sessionId: string;
   toolResults: ReadonlyMap<ToolUseBlock, ToolResultBlock>;
   offset: number;
   showTurnContext: boolean;
+  actions?: ReactNode;
+  editor?: ReactNode;
 }) {
   const [summaryOpen, setSummaryOpen] = useState(false);
   const message = messages[0]?.message;
@@ -501,14 +720,16 @@ function Message({
         }
         createdAt={message.created_at}
       />
-      {content.map(({ block, index, messageIndex }) => (
-        <ContentBlock
-          key={`${offset + messageIndex}:${index}`}
-          block={block}
-          sessionId={sessionId}
-          result={block.type === 'tool_use' ? toolResults.get(block) : undefined}
-        />
-      ))}
+      {editor ||
+        content.map(({ block, index, messageIndex }) => (
+          <ContentBlock
+            key={`${offset + messageIndex}:${index}`}
+            block={block}
+            sessionId={sessionId}
+            result={block.type === 'tool_use' ? toolResults.get(block) : undefined}
+          />
+        ))}
+      {!editor && actions}
     </article>
   );
 }
@@ -604,9 +825,18 @@ function SentMessage({
         }
       />
       {submission.body.message && <Markdown text={submission.body.message} />}
-      {images.map((image, index) => (
-        <InlineAttachment key={index} image={image} index={index} />
-      ))}
+      {images.map((image, index) =>
+        // Sent again by hash, the image is the one the session already holds.
+        image.hash ? (
+          <Attachment key={index} sessionId={sessionId} hash={image.hash} />
+        ) : image.data ? (
+          <InlineAttachment
+            key={index}
+            image={{ media_type: image.media_type ?? '', data: image.data }}
+            index={index}
+          />
+        ) : null,
+      )}
       {skill && <p className="muted small">Skill: {skill}</p>}
       {recoverable && (
         <SubmissionRecovery
@@ -696,6 +926,8 @@ function ContentBlock({
       );
     case 'thinking':
       return <Thinking text={block.thinking} />;
+    case 'nudge':
+      return <Nudge kind={block.kind} text={block.text} />;
     case 'redacted_thinking':
       return <p className="muted small">Thinking unavailable.</p>;
     case 'image':
@@ -708,6 +940,15 @@ function ContentBlock({
           status={result ? (result.is_error ? 'Error' : 'Completed') : 'Arguments'}
           isError={result?.is_error ?? false}
         >
+          {agentCalls.has(block.name) && (
+            <SubagentSection
+              sessionId={sessionId}
+              call={block.id}
+              name={block.name}
+              input={block.input}
+              result={result?.content}
+            />
+          )}
           {result && (
             <div className="tool-section">
               <h4>Result</h4>
@@ -762,7 +1003,7 @@ function ToolOutput({ children, label = 'Tool result' }: { children: ReactNode; 
     </div>
   );
 }
-function Tool({ tool }: { tool: LiveTool | undefined }) {
+function Tool({ tool, sessionId }: { tool: LiveTool | undefined; sessionId: string }) {
   if (!tool) return null;
   return (
     <ToolCard
@@ -790,7 +1031,15 @@ function Tool({ tool }: { tool: LiveTool | undefined }) {
           </ToolOutput>
         </div>
       )}
-      {tool.activity && <pre className="plain-text">{tool.activity}</pre>}
+      {agentCalls.has(tool.name) && (
+        <SubagentSection
+          sessionId={sessionId}
+          call={tool.id}
+          name={tool.name}
+          input={tool.input}
+          result={Array.isArray(tool.content) ? tool.content : undefined}
+        />
+      )}
       {tool.progress && <p>{tool.progress}</p>}
       {['completed', 'error'].includes(tool.state) && (
         <div className="tool-section">
@@ -812,6 +1061,60 @@ function Tool({ tool }: { tool: LiveTool | undefined }) {
         </div>
       )}
     </ToolCard>
+  );
+}
+/**
+ * The sub-agent an `agent_spawn` or `agent_followup` call runs, and while it runs, the calls it
+ * has made. Its own feed names the call; otherwise a follow-up names the sub-agent, perhaps by a
+ * unique prefix, and a spawn reports it in its result.
+ */
+const agentCalls = new Set(['agent_spawn', 'agent_followup']);
+function SubagentSection({
+  sessionId,
+  call,
+  name,
+  input,
+  result,
+}: {
+  sessionId: string;
+  call: string;
+  name: string;
+  input: unknown;
+  result: { type: string; text?: string }[] | undefined;
+}) {
+  const { api, connection } = useConnection();
+  const children = useQuery(subagentsQuery(api, connection, sessionId)).data?.sessions;
+  const running = useSessionStates().find(
+    ({ spawnedBy }) => spawnedBy?.sessionId === sessionId && spawnedBy.toolCallId === call,
+  );
+  const named =
+    name === 'agent_followup'
+      ? (input as { id?: unknown } | null)?.id
+      : /^agent: (\S+)/.exec(result?.find((item) => item.type === 'text')?.text ?? '')?.[1];
+  const matches =
+    typeof named === 'string' ? (children ?? []).filter(({ id }) => id.startsWith(named)) : [];
+  const id =
+    running?.id ??
+    (matches.length === 1
+      ? matches[0]!.id
+      : typeof named === 'string' && /^[0-9a-f-]{36}$/.test(named)
+        ? named
+        : undefined);
+  if (!id) return null;
+  const calls = (running?.blocks ?? []).flatMap((block) => {
+    const tool = block.kind === 'tool' ? running?.tools[block.id] : undefined;
+    return tool ? [tool.displaySummary ? `${tool.name}: ${tool.displaySummary}` : tool.name] : [];
+  });
+  return (
+    <div className="tool-section">
+      <h4>Sub-agent</h4>
+      <p>
+        <a href={`#/sessions/${encodeURIComponent(id)}`}>
+          {children?.find((child) => child.id === id)?.title || 'Open its session'}
+        </a>
+      </p>
+      {calls.length > 0 && <pre className="plain-text">{calls.slice(-20).join('\n')}</pre>}
+    </div>
   );
 }
 const subscribeToNothing = () => () => {};
@@ -936,6 +1239,7 @@ function Composer({
   }
   return (
     <MessageComposer
+      above={<ChecklistStrip items={state.session?.checklist ?? []} />}
       text={draft.text}
       onTextChange={draft.setText}
       readOnly={!canWrite || Boolean(state.session?.parent_id) || state.deleting}

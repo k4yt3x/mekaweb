@@ -1,21 +1,12 @@
-// /info has no feature flags for these additions. Gate writes as well as search: older
-// servers may silently ignore unknown PATCH fields and still return success.
-export function supportsSessionOrganization(version: string | undefined): boolean {
-  const match = /^(\d+)\.(\d+)\.(\d+)(?:\+[\w.-]+)?$/.exec(version ?? '');
-  if (!match) return false;
-  return Number(match[1]) > 0 || Number(match[2]) >= 64;
-}
+// meka 0.70.0 reshaped the API this client is built on, and 0.71.0 names a hole in a feed and
+// takes stored images by hash, so older servers are refused at connect rather than half supported.
+export const minimumVersion = '0.71.0';
 
-export const supportedVersions = [
-  '0.59.0',
-  '0.60.0',
-  '0.61.0',
-  '0.62.0',
-  '0.63.0',
-  '0.64.0',
-  '0.64.1',
-  '0.65.0',
-  '0.66.0',
-  '0.67.0',
-  '0.68.0',
-];
+/** The versions this release was checked against. A newer one connects, flagged in Settings. */
+export const verifiedVersions = ['0.71.0'];
+
+export function supportsVersion(version: string): boolean {
+  const match = /^(\d+)\.(\d+)\.(\d+)(?:\+[\w.-]+)?$/.exec(version);
+  if (!match) return false;
+  return Number(match[1]) > 0 || Number(match[2]) >= 71;
+}

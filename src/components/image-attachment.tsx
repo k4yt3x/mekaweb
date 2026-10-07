@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ApiClient, sessionPath, segment, type Schema } from '../api/client';
+import { ApiClient, sessionPath, segment } from '../api/client';
 import { useConnection } from '../connections/context';
 import { ErrorNotice } from './common';
 import { useBlobUrl } from './blob-url';
@@ -115,7 +115,13 @@ function ImagePreview({
   );
 }
 
-export function InlineAttachment({ image, index }: { image: Schema['ImageInput']; index: number }) {
+export function InlineAttachment({
+  image,
+  index,
+}: {
+  image: { media_type: string; data: string };
+  index: number;
+}) {
   const decoded = useMemo(() => {
     try {
       return { blob: inputImageBlob(image) };

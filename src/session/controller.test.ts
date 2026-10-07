@@ -7,14 +7,19 @@ import {
   type Query,
   type Schema,
 } from '../api/client';
-import { SessionController } from './controller';
+import { SessionController, UnsentMessage } from './controller';
+import { emptyComposerOptions } from './composer-options';
 const controllers: SessionController[] = [];
 afterEach(() => {
   for (const controller of controllers) controller.dispose();
   controllers.length = 0;
   vi.useRealTimers();
 });
-async function fixture(canWrite = true, updatedAt = '2026-09-17T00:00:00Z') {
+async function fixture(
+  canWrite = true,
+  updatedAt = '2026-09-17T00:00:00Z',
+  record: Partial<Schema['SessionResponse']> = {},
+) {
   const session: Schema['SessionResponse'] = {
     id: 's',
     created_at: '2026-09-17T00:00:00Z',
@@ -24,6 +29,7 @@ async function fixture(canWrite = true, updatedAt = '2026-09-17T00:00:00Z') {
     title: '',
     capabilities: { supports_permission_prompts: true, supports_reasoning_stream: false },
     turn_in_flight: false,
+    ...record,
   };
   const saved: Schema['MessagesResponse'] = {
     session_id: 's',
@@ -349,7 +355,7 @@ it('notifies for a running turn joined through resumed and isolates notification
   expect(f.state().running).toBe(false);
 });
 
-it('follows a compaction turn without notifying or recording it as the last turn', async () => {
+it('follows a compaction turn without notifying', async () => {
   const f = await fixture();
   const completed = vi.fn();
   f.controller.onCompletion(completed);
@@ -367,10 +373,260 @@ it('follows a compaction turn without notifying or recording it as the last turn
   });
   await f.event('turn.finished', { turn_id: 'compaction' });
   await vi.waitFor(() => expect(f.state().partial).toBe(false));
-  expect(f.state()).toMatchObject({ running: false, compacting: false, lastTurn: undefined });
+  expect(f.state()).toMatchObject({ running: false, compacting: false });
   await f.event('turn.started', { turn_id: 'joined', source: 'compaction', resumed: true });
   await f.event('turn.failed', { turn_id: 'joined' });
   expect(completed).not.toHaveBeenCalled();
+});
+
+it('reads a running sub-agent’s feed without attending, and lets it go when the run ends', async () => {
+  const f = await fixture(true, undefined, { parent_id: 'parent', turn_in_flight: true });
+  expect(f.api.stream).toHaveBeenCalledWith(
+    '/v1/sessions/s/stream',
+    undefined,
+    undefined,
+    expect.any(AbortSignal),
+  );
+  await f.event('turn.started', {
+    turn_id: 'run',
+    source: 'parent',
+    parent_id: 'parent',
+    tool_call_id: 'call',
+  });
+  expect(f.state().spawnedBy).toEqual({ sessionId: 'parent', toolCallId: 'call' });
+  // The parent's feed carries the prompt and takes the answer.
+  await f.event('permission_required', {
+    turn_id: 'run',
+    request_id: 'prompt',
+    tool_name: 'file_write',
+    input: {},
+    expires_in_seconds: 60,
+    subagent_id: 's',
+  });
+  expect(f.state().approvals).toEqual([]);
+  f.session.turn_in_flight = false;
+  await f.event('turn.finished', { turn_id: 'run' });
+  f.closeFeed();
+  await vi.waitFor(() => expect(f.state().feed).toBe('unavailable'));
+  expect(f.state().running).toBe(false);
+  expect(f.api.stream).toHaveBeenCalledTimes(1);
+});
+
+it('opens an idle sub-agent’s feed when a follow-up runs it, until the run is gone', async () => {
+  const f = await fixture(true, undefined, { parent_id: 'parent' });
+  expect(f.state().feed).toBe('unavailable');
+  expect(f.api.stream).not.toHaveBeenCalled();
+  f.session.turn_in_flight = true;
+  await f.controller.refreshMetadata('s');
+  await vi.waitFor(() => expect(f.state().feed).toBe('connected'));
+  expect(f.api.stream).toHaveBeenCalledTimes(1);
+
+  // A run that ended before its feed opened leaves the sub-agent idle, not retrying.
+  vi.mocked(f.api.stream).mockImplementation(() => {
+    f.session.turn_in_flight = false;
+    return Promise.reject(
+      new ApiError(409, { type: 'https://meka.run/errors/subagent-not-running' }),
+    );
+  });
+  await f.controller.reconnect('s');
+  await vi.waitFor(() => expect(f.state().feed).toBe('unavailable'));
+  expect(f.state().running).toBe(false);
+  expect(f.api.stream).toHaveBeenCalledTimes(2);
+});
+
+it('rewinds only the conversation it shows', async () => {
+  const f = await fixture();
+  const head = vi
+    .spyOn(f.api, 'getTagged')
+    .mockResolvedValue({ value: structuredClone(f.saved), etag: 'W/"0-0"' });
+  const mutate = vi.spyOn(f.api, 'mutate').mockResolvedValue(undefined);
+  await f.controller.rewind('s', 2);
+  expect(mutate).toHaveBeenCalledWith(
+    'POST',
+    '/v1/sessions/s/rewind',
+    { turns: 2 },
+    undefined,
+    'W/"0-0"',
+  );
+  // A conversation that moved on since it was shown is left alone.
+  head.mockResolvedValue({ value: { ...f.saved, total: 4 }, etag: 'W/"0-4"' });
+  await expect(f.controller.rewind('s', 1)).rejects.toThrow('changed since it was shown');
+  expect(mutate).toHaveBeenCalledTimes(1);
+  // As is one that moved on before the rewind landed.
+  head.mockResolvedValue({ value: structuredClone(f.saved), etag: 'W/"0-0"' });
+  mutate.mockRejectedValue(new ApiError(412, {}));
+  await expect(f.controller.rewind('s', 1)).rejects.toThrow('changed since it was shown');
+  // And without a version to hold it to, nothing is changed at all.
+  mutate.mockClear();
+  head.mockResolvedValue({ value: structuredClone(f.saved), etag: undefined });
+  await expect(f.controller.rewind('s', 1)).rejects.toThrow('ETag');
+  expect(mutate).not.toHaveBeenCalled();
+});
+
+it('sends a turn again after rewinding to before it', async () => {
+  const f = await fixture();
+  vi.spyOn(f.api, 'getTagged').mockResolvedValue({ value: structuredClone(f.saved), etag: 'tag' });
+  const mutate = vi.spyOn(f.api, 'mutate').mockResolvedValue(undefined);
+  const submit = vi.spyOn(f.controller, 'submitMessage').mockResolvedValue(true);
+  expect(await f.controller.resend('s', 1, 'Again')).toBe(true);
+  expect(mutate).toHaveBeenCalledWith(
+    'POST',
+    '/v1/sessions/s/rewind',
+    { turns: 1 },
+    undefined,
+    'tag',
+  );
+  expect(submit).toHaveBeenCalledWith('s', 'Again', expect.objectContaining({ images: [] }));
+});
+
+it('hands back a message whose turn was rewound but which could not be sent', async () => {
+  const f = await fixture();
+  vi.spyOn(f.api, 'getTagged').mockResolvedValue({ value: structuredClone(f.saved), etag: 'tag' });
+  vi.spyOn(f.api, 'mutate').mockResolvedValue(undefined);
+  vi.spyOn(f.controller, 'submitMessage').mockRejectedValue(new Error('Wait for the feed.'));
+  const images = [{ name: 'Image 1', hash: 'stored' }];
+  const failure: unknown = await f.controller
+    .resend('s', 1, 'Again', images)
+    .catch((error) => error);
+  expect(failure).toBeInstanceOf(UnsentMessage);
+  expect(failure).toMatchObject({ text: 'Again', images });
+  expect((failure as Error).message).toContain('Wait for the feed.');
+});
+
+it('sends a saved image again by its hash, and an attached one as its bytes', async () => {
+  const f = await fixture();
+  const submit = vi.spyOn(f.controller, 'submit').mockResolvedValue(true);
+  await f.controller.submitMessage('s', 'Look again', {
+    ...emptyComposerOptions,
+    images: [
+      { name: 'Image 1', hash: 'stored' },
+      { name: 'new.png', media_type: 'image/png', data: 'bytes' },
+    ],
+  });
+  expect(submit.mock.calls[0]?.[1]).toMatchObject({
+    message: 'Look again',
+    images: [{ hash: 'stored' }, { media_type: 'image/png', data: 'bytes' }],
+  });
+});
+
+it('branches by forking the shown conversation and trimming the copy', async () => {
+  const f = await fixture();
+  vi.spyOn(f.api, 'getTagged').mockResolvedValue({ value: structuredClone(f.saved), etag: 'tag' });
+  const mutate = vi
+    .spyOn(f.api, 'mutate')
+    .mockImplementation(
+      async (_method, path) =>
+        (path.endsWith('/fork') ? { ...f.session, id: 'copy' } : undefined) as never,
+    );
+  expect(await f.controller.branch('s', 2)).toBe('copy');
+  expect(mutate.mock.calls).toEqual([
+    ['POST', '/v1/sessions/s/fork', {}, undefined, 'tag'],
+    ['POST', '/v1/sessions/copy/rewind', { turns: 2 }],
+  ]);
+  mutate.mockClear();
+  // Branching from the latest turn keeps the whole copy.
+  await f.controller.branch('s', 0);
+  expect(mutate).toHaveBeenCalledTimes(1);
+});
+
+it('removes a branch’s copy that could not be trimmed, rather than leave a whole one', async () => {
+  const f = await fixture();
+  vi.spyOn(f.api, 'getTagged').mockResolvedValue({ value: structuredClone(f.saved), etag: 'tag' });
+  const mutate = vi.spyOn(f.api, 'mutate').mockImplementation(async (_method, path) => {
+    if (path.endsWith('/fork')) return { ...f.session, id: 'copy-0123' } as never;
+    if (path.endsWith('/rewind')) throw new ApiError(422, { detail: 'out of range' });
+    return undefined as never;
+  });
+  await expect(f.controller.branch('s', 2)).rejects.toThrow(
+    'could not be trimmed, so its copy was removed: out of range',
+  );
+  expect(mutate).toHaveBeenLastCalledWith('DELETE', '/v1/sessions/copy-0123');
+  // If the copy cannot go either, the error names it.
+  mutate.mockImplementation(async (_method, path) => {
+    if (path.endsWith('/fork')) return { ...f.session, id: 'copy-0123' } as never;
+    throw new ApiError(422, { detail: 'refused' });
+  });
+  await expect(f.controller.branch('s', 2)).rejects.toThrow('Delete the session copy-012 by hand');
+});
+
+it('reads the conversation again when another client rewinds it', async () => {
+  const f = await fixture();
+  const reads = vi.mocked(f.api.get).mock.calls.length;
+  await f.event('conversation.rewound', { revision: 1, total: 0, turns_removed: 1 });
+  await vi.waitFor(() =>
+    expect(
+      vi
+        .mocked(f.api.get)
+        .mock.calls.slice(reads)
+        .some(([path]) => path.endsWith('/messages')),
+    ).toBe(true),
+  );
+});
+
+it('shows a nudge in the live turn, and reads the conversation again after a feed gap', async () => {
+  const f = await fixture();
+  await f.event('turn.started', { turn_id: 'turn' });
+  await f.event('assistant_text.delta', { turn_id: 'turn', text: 'Done.' });
+  await f.event('turn.nudged', { turn_id: 'turn', kind: 'checklist', text: 'One item is open.' });
+  expect(f.state().blocks.at(-1)).toEqual({
+    kind: 'nudge',
+    nudge: 'checklist',
+    text: 'One item is open.',
+  });
+  // A notice is what the agent or a provider said, never a hole in the feed.
+  await f.event('notice', { level: 'warn', text: 'Provider advisory' });
+  expect(f.state().partial).toBe(false);
+  expect(f.state().notices.at(-1)?.text).toBe('Provider advisory');
+  const reads = vi.mocked(f.api.get).mock.calls.length;
+  await f.event('feed.gap', { session_id: 's', dropped: 3 }, true);
+  expect(f.state().partial).toBe(true);
+  await vi.waitFor(() =>
+    expect(
+      vi
+        .mocked(f.api.get)
+        .mock.calls.slice(reads)
+        .some(([path]) => path.endsWith('/messages')),
+    ).toBe(true),
+  );
+});
+
+it('shows a running turn’s notices where they arrived, keeping warnings below as well', async () => {
+  const f = await fixture();
+  await f.event('turn.started', { turn_id: 'turn' });
+  await f.event('notice', {
+    turn_id: 'turn',
+    level: 'info',
+    text: 'checklist: 1 open item, continuing, nudge 1 of 3',
+  });
+  await f.event('notice', { turn_id: 'turn', level: 'warn', text: 'Provider advisory' });
+  expect(f.state().blocks).toEqual([
+    { kind: 'notice', level: 'info', text: 'checklist: 1 open item, continuing, nudge 1 of 3' },
+    { kind: 'notice', level: 'warning', text: 'Provider advisory' },
+  ]);
+  expect(f.state().notices.map((notice) => notice.text)).toEqual(['Provider advisory']);
+  // Outside a running turn, there is nowhere else to show one.
+  await f.event('notice', { level: 'info', text: 'Between turns' });
+  expect(f.state().notices.at(-1)?.text).toBe('Between turns');
+});
+
+it('keeps the record’s open checklist as the agent changes it', async () => {
+  const f = await fixture();
+  await f.event('turn.started', { turn_id: 'turn' });
+  const items = [{ id: 1, text: 'write the tests', status: 'in_progress' }];
+  await f.event('checklist.updated', { turn_id: 'turn', items });
+  expect(f.state().session?.checklist).toEqual(items);
+  await f.event('checklist.updated', { turn_id: 'turn', items: [] });
+  expect(f.state().session?.checklist).toEqual([]);
+});
+
+it('takes its record from the feed when it changes elsewhere', async () => {
+  const f = await fixture();
+  await f.event('session.updated', { ...f.session, id: 'other', title: 'Not this one' });
+  expect(f.state().session?.title).toBe('');
+  await f.event('session.updated', { ...f.session, title: 'Renamed', profile: 'other' });
+  await vi.waitFor(() =>
+    expect(f.state().session).toMatchObject({ title: 'Renamed', profile: 'other' }),
+  );
 });
 
 it('shows the saved conversation of a session a read-only token cannot load, then attaches', async () => {
@@ -423,7 +679,7 @@ it('tracks text bursts and quiet intervals without treating a pause as turn comp
   expect(f.state().textStreaming).toBe(true);
 });
 
-it('retains the server tool summary through output, activity, and completion', async () => {
+it('retains the server tool summary through output and completion', async () => {
   const f = await fixture();
   await f.event('turn.started', { turn_id: 'turn' });
   await f.event('tool_call.composing', { id: 'tool', name: 'mcp__server__read', turn_id: 'turn' });
@@ -436,7 +692,6 @@ it('retains the server tool summary through output, activity, and completion', a
     display_summary: 'Resolved resource',
   });
   await f.event('tool_call.output_delta', { id: 'tool', turn_id: 'turn', chunk: 'output' });
-  await f.event('subagent.activity', { id: 'tool', turn_id: 'turn', summary: 'activity' });
   await f.event('tool_call.completed', {
     id: 'tool',
     turn_id: 'turn',
@@ -1015,6 +1270,24 @@ it('keeps approvals attended across navigation and clears a prompt answered in a
   await f.controller.respond(f.state().approvals[0]!, 'allow');
   expect(f.state().approvals).toHaveLength(0);
 });
+it('takes down a prompt resolved elsewhere, and keeps its deadline and sub-agent', async () => {
+  const f = await fixture();
+  await f.event('turn.started', { turn_id: 'turn-1' });
+  await f.event('permission_required', {
+    request_id: 'a',
+    tool_name: 'file_write',
+    input: { path: 'test' },
+    expires_in_seconds: 60,
+    expires_at: '2026-09-17T00:30:00Z',
+    subagent_id: 'worker',
+  });
+  expect(f.state().approvals[0]).toMatchObject({
+    expires: Date.parse('2026-09-17T00:30:00Z'),
+    subagentId: 'worker',
+  });
+  await f.event('permission_resolved', { request_id: 'a', outcome: 'allow' });
+  expect(f.state().approvals).toEqual([]);
+});
 it('does not send approval responses through a read-only controller', async () => {
   const f = await fixture(false);
   await f.event('permission_required', {
@@ -1442,8 +1715,13 @@ it('keeps server notice severity through refresh without adding routine tool or 
   for (const level of ['info', 'warn', 'error'])
     await f.event('notice', { turn_id: 'turn', level, text: `${level} message` });
   await f.controller.refresh('s');
+  // All show in the turn; only the warning and the error also stay below it.
+  expect(f.state().blocks.map((block) => block.kind === 'notice' && block.level)).toEqual([
+    'info',
+    'warning',
+    'error',
+  ]);
   expect(f.state().notices.map(({ level, text }) => ({ level, text }))).toEqual([
-    { level: 'info', text: 'info message' },
     { level: 'warning', text: 'warn message' },
     { level: 'error', text: 'error message' },
   ]);
@@ -1462,9 +1740,9 @@ it('keeps server notice severity through refresh without adding routine tool or 
   f.session.turn_in_flight = false;
   await f.event('turn.canceled', { turn_id: 'turn', reason: 'client' });
   await f.controller.refresh('s', true);
-  expect(f.state().notices).toHaveLength(3);
+  expect(f.state().notices).toHaveLength(2);
   expect(f.state().notices.every((notice) => notice.turnId === 'turn')).toBe(true);
-  expect(new Set(f.state().notices.map((notice) => notice.id)).size).toBe(3);
+  expect(new Set(f.state().notices.map((notice) => notice.id)).size).toBe(2);
 });
 
 it('does not duplicate a replayed terminal error and bounds retained notices', async () => {

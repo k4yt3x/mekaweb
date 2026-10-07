@@ -21,8 +21,8 @@ export function SchedulesPage({ sessionId }: { sessionId?: string }) {
   const canWrite = useCan('schedule:w');
   const [create, setCreate] = useState(false);
   const query = useResource<Schema['ScheduledJobsResponse']>(
-    sessionId ? sessionPath(sessionId) + '/schedule' : '/v1/schedule',
-    undefined,
+    '/v1/schedule',
+    sessionId ? { session: sessionId } : undefined,
     canRead,
   );
   const newSchedule = (

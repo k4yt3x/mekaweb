@@ -7,9 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-10-07
+
+### Added
+
+- The open session's sub-agents are listed beneath it, without listing every session's sub-agents.
+- An arrow at the start of each session's row shows or hides its sub-agents, loading them on demand.
+- A running sub-agent's page shows its work live, and again whenever a follow-up runs it.
+- Spawn and follow-up calls link to their sub-agent, listing the calls it makes while it runs.
+- Copy, edit, or delete your messages, and copy, run again, or branch from the agent's turns.
+- Approval prompts from a sub-agent name it and link to its session.
+- When meka sends the agent back to its checklist, the turn shows a note with what meka wrote.
+- The agent's open checklist shows above the message input while items remain open.
+
 ### Changed
 
 - Session list statuses have their own shapes, such as a spinner for running and a check for done.
+- mekaweb requires meka 0.71.0 or newer, and says so when connecting to an older server.
+- Settings shows whether each profile accepts images, rather than only the default profile.
+- The session list updates as soon as sessions change, rather than at the next 15-second refresh.
+- Statuses include approvals and outcomes of turns run elsewhere, such as other tabs or schedules.
+- Running sub-agents show as running in the session list.
+- An open session's title and settings follow changes made in other tabs or clients.
+- A conversation rewound in another tab or client updates without reloading.
+- An approval prompt closes in every tab once it is answered elsewhere, expires, or is canceled.
+- Tool calls are labeled with meka 0.70.0's checklist tools, which replace the todo tools.
+- A running turn's notices show where they arrived; warnings and errors also stay below it.
+- Search also finds sub-agent sessions, marked as sub-agents in the results.
+
+### Removed
+
+- The button that listed every session's sub-agents; each session's arrow lists its own instead.
+
+### Fixed
+
+- A notice from a running turn no longer marks the live preview incomplete or reloads the history.
 
 ## [0.14.3] - 2026-10-05
 
@@ -257,7 +289,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Light and dark themes, narrow layouts, and collapsible, resizable session panels.
 - Hosting at the root or a subpath, with GitHub Pages deployment on version tags.
 
-[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.14.3...HEAD
+[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.15.0...HEAD
+[0.15.0]: https://github.com/k4yt3x/mekaweb/compare/0.14.3...0.15.0
 [0.14.3]: https://github.com/k4yt3x/mekaweb/compare/0.14.2...0.14.3
 [0.14.2]: https://github.com/k4yt3x/mekaweb/compare/0.14.1...0.14.2
 [0.14.1]: https://github.com/k4yt3x/mekaweb/compare/0.14.0...0.14.1

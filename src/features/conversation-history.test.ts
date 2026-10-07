@@ -4,8 +4,11 @@ import {
   groupAgentMessages,
   groupLiveMessages,
   groupToolResults,
+  messageText,
   pendingInboxMessages,
+  resendable,
   responseActivityIndicator,
+  turnIndex,
   type ToolResultBlock,
   type ToolUseBlock,
 } from './conversation-history';
@@ -244,7 +247,7 @@ it('groups multiple assistant tool rounds and the final answer under one heading
     message('assistant', call('b')),
     message('user', result('b')),
     message('assistant', { type: 'text', text: 'Done.' }),
-  ].map((row, index) => ({ ...row, turn_id: `t_000${Math.floor(index / 2) + 1}` }));
+  ].map((row) => ({ ...row, turn_id: 'turn-1' }));
   const history = groupToolResults(input);
   const groups = groupAgentMessages(history.messages);
 
@@ -259,8 +262,8 @@ it('groups multiple assistant tool rounds and the final answer under one heading
 
 it('keeps user input, compaction, unmatched results, and distinct saved turns as boundaries', () => {
   const input = [
-    { ...message('assistant'), turn_id: 't_0001' },
-    { ...message('assistant'), turn_id: 't_0002' },
+    { ...message('assistant'), turn_id: 'turn-1' },
+    { ...message('assistant'), turn_id: 'turn-2' },
     message('user', { type: 'text', text: 'Another question.' }),
     message('assistant'),
     { ...message('assistant'), compaction: { generation: 1, replaced_count: 20 } },
@@ -314,7 +317,6 @@ function waitingState(patch: Partial<SessionState> = {}): SessionState {
     approvals: [],
     notices: [],
     revision: 0,
-    lastTurn: undefined,
     blocks: [{ kind: 'submission', key: 'direct' }],
     submissions: [
       {
@@ -435,4 +437,80 @@ it('names a running compaction, but not a turn whose compaction flag outlived it
   expect(activity(compaction)?.status).toBe('reconnecting');
   // An own turn can run before the feed announces it and clears the flag.
   expect(activity(waitingState({ compacting: true }))?.status).toBe('working');
+});
+
+it('counts the turns a rewind drops by meka’s labels, from the turn holding a message', () => {
+  const labeled = (label: string, row: Schema['MessageView']) => ({ ...row, turn_label: label });
+  const input = [
+    labeled('t_0001', message('user', { type: 'text', text: 'First.' })),
+    labeled('t_0001', message('assistant', call('a'))),
+    labeled('t_0001', message('user', result('a'))),
+    labeled('t_0001', message('assistant', { type: 'text', text: 'One.' })),
+    labeled('t_0002', message('user', { type: 'text', text: 'Second.' })),
+    labeled('t_0002', message('assistant', { type: 'text', text: 'Two.' })),
+    labeled('t_0003', message('user', { type: 'text', text: 'Third.' })),
+    // A row meka labels no turn, such as one from before turns were labeled, counts for none.
+    message('assistant', { type: 'text', text: 'Unlabeled.' }),
+  ];
+  const turns = turnIndex(input, 0);
+  expect(turns.get('t_0001')).toEqual({ start: 0, turns: 3 });
+  expect(turns.get('t_0002')).toEqual({ start: 4, turns: 2 });
+  expect(turns.get('t_0003')).toEqual({ start: 6, turns: 1 });
+  // The first loaded turn may open before the loaded history, so it cannot be addressed.
+  const later = turnIndex(input.slice(2), 2);
+  expect(later.has('t_0001')).toBe(false);
+  expect(later.get('t_0002')).toEqual({ start: 2, turns: 2 });
+});
+
+it('copies what was written, without thinking, tools, or context meka added', () => {
+  expect(
+    messageText([
+      message('user', { type: 'turn_context', text: 'Context.' }, { type: 'text', text: ' Ask. ' }),
+      message('assistant', { type: 'thinking', thinking: 'Hmm.' }, call('a'), {
+        type: 'text',
+        text: 'Answer.',
+      }),
+    ]),
+  ).toBe('Ask.\n\nAnswer.');
+});
+
+it('keeps a nudge in the turn it answers, apart from one a steer rides', () => {
+  const nudge = (...more: Schema['ContentBlockView'][]) =>
+    message('user', { type: 'nudge', kind: 'checklist', text: 'Two items are open.' }, ...more);
+  const input = [
+    message('user', { type: 'text', text: 'Do both.' }),
+    message('assistant', { type: 'text', text: 'Did one.' }),
+    nudge(),
+    message('assistant', { type: 'text', text: 'Did the other.' }),
+    nudge({ type: 'text', text: 'Also the third.' }),
+    message('assistant', { type: 'text', text: 'And the third.' }),
+  ].map((row) => ({ ...row, turn_id: 'turn', turn_label: 't_0001' }));
+  const groups = groupAgentMessages(groupToolResults(input).messages);
+  expect(groups.map((group) => group.map((row) => row.index))).toEqual([[0], [1, 2, 3], [4], [5]]);
+  // meka labels neither nudge as a turn of its own, so rewinding before the reply drops one.
+  expect(turnIndex(input, 0).get('t_0001')).toEqual({ start: 0, turns: 1 });
+  expect(messageText(input.slice(1, 4))).toBe('Did one.\n\nDid the other.');
+});
+
+it('sends a message again with its images by hash, or not at all if one has none', () => {
+  const image = (hash?: string): Schema['ContentBlockView'] => ({
+    type: 'image',
+    media_type: 'image/png',
+    ...(hash ? { hash } : {}),
+  });
+  expect(
+    resendable(message('user', { type: 'text', text: 'Compare.' }, image('a'), image('b'))),
+  ).toEqual({
+    text: 'Compare.',
+    images: [
+      { name: 'Image 1', hash: 'a' },
+      { name: 'Image 2', hash: 'b' },
+    ],
+  });
+  expect(resendable(message('user', image('a')))).toEqual({
+    text: '',
+    images: [{ name: 'Image 1', hash: 'a' }],
+  });
+  expect(resendable(message('user', { type: 'text', text: 'Hm.' }, image()))).toBeUndefined();
+  expect(resendable(message('user', { type: 'turn_context', text: 'Context.' }))).toBeUndefined();
 });

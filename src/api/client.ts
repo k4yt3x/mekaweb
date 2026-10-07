@@ -88,6 +88,8 @@ export interface RequestOptions {
   body?: unknown;
   signal?: AbortSignal | undefined;
   idempotencyKey?: string;
+  /** An `ETag` the write was decided on; meka refuses it with 412 once the resource moved on. */
+  ifMatch?: string | undefined;
   accept?: string;
 }
 export class ApiClient {
@@ -168,6 +170,7 @@ export class ApiClient {
     };
     if (options.body !== undefined) headers['Content-Type'] = 'application/json';
     if (options.idempotencyKey) headers['Idempotency-Key'] = options.idempotencyKey;
+    if (options.ifMatch) headers['If-Match'] = options.ifMatch;
     for (let attempt = 0; ; attempt++) {
       signal.throwIfAborted();
       const sequence = ++this.requestSequence;
@@ -232,15 +235,27 @@ export class ApiClient {
     const response = await this.response('GET', path, { ...(query ? { query } : {}), signal });
     return JSON.parse(await this.readResponse(response, () => response.text())) as T;
   }
+  /** A read with its `ETag`, for a conditional write decided on what it returned. */
+  async getTagged<T>(
+    path: string,
+    query?: Query,
+    signal?: AbortSignal,
+  ): Promise<{ value: T; etag: string | undefined }> {
+    const response = await this.response('GET', path, { ...(query ? { query } : {}), signal });
+    const value = JSON.parse(await this.readResponse(response, () => response.text())) as T;
+    return { value, etag: response.headers.get('ETag') ?? undefined };
+  }
   async mutate<T = void>(
     method: 'POST' | 'PUT' | 'PATCH' | 'DELETE',
     path: string,
     body?: unknown,
     idempotencyKey?: string,
+    ifMatch?: string,
   ): Promise<T> {
     const response = await this.response(method, path, {
       ...(body !== undefined ? { body } : {}),
       ...(idempotencyKey ? { idempotencyKey } : {}),
+      ifMatch,
     });
     if (response.status === 204) {
       await this.readResponse(response, () => Promise.resolve());
@@ -256,7 +271,8 @@ export class ApiClient {
   async stream(
     path: string,
     cursor: string | undefined,
-    attend: boolean,
+    /** Session feeds only; the server feed has no one to ask. */
+    attend: boolean | undefined,
     signal: AbortSignal,
   ): Promise<Response> {
     // Resume ids are sent only to the authenticated API, never content URLs.

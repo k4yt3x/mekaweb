@@ -9,6 +9,7 @@ import {
   UncertainMutationError,
   type Schema,
 } from '../api/client';
+import { emptyComposerOptions } from './composer-options';
 import { parseEvent, SseParser, string, type EventData, type SseFrame } from './events';
 import { createId } from '../identifiers';
 import { readTurnStream } from './turn-stream';
@@ -22,12 +23,15 @@ export interface LiveTool {
   state: 'composing' | 'executing' | 'completed' | 'error' | 'ended';
   output: string;
   content: unknown;
-  activity: string;
   progress: string;
 }
 export type LiveBlock =
   | { kind: 'text' | 'thinking'; text: string }
   | { kind: 'tool'; id: string }
+  /** What meka wrote to send the model back to work, of the `nudge` kind it names. */
+  | { kind: 'nudge'; nudge: string; text: string }
+  /** What the agent or a provider said during the turn, where it said it. */
+  | { kind: 'notice'; level: SessionNotice['level']; text: string }
   | { kind: 'submission'; key: string };
 export interface Approval {
   id: string;
@@ -36,6 +40,8 @@ export interface Approval {
   tool: string;
   input: unknown;
   expires: number;
+  /** The sub-agent whose call asks, answered here on its parent's behalf. */
+  subagentId?: string;
   error?: string;
 }
 export interface Submission {
@@ -86,19 +92,30 @@ export interface SessionState {
   notices: SessionNotice[];
   submissions: Submission[];
   revision: number;
-  /**
-   * How the latest turn this tab followed ended, with the session's `updated_at` read after it.
-   * Later activity moves `updated_at` past it, which is how the list knows the outcome is stale.
-   */
-  lastTurn:
-    { outcome: 'completed' | 'failed' | 'canceled'; updatedAt: string | undefined } | undefined;
+  /** For a sub-agent seen running: the parent and its tool call that run it. */
+  spawnedBy?: { sessionId: string; toolCallId: string };
 }
+/** An image attached here, as bytes, or one the session's history holds, named by its hash. */
+export type ImageAttachment =
+  { name: string; media_type: string; data: string } | { name: string; hash: string };
 export interface ComposerOptions {
-  images: (Schema['ImageInput'] & { name: string })[];
+  images: ImageAttachment[];
   skill: string;
   retention: string;
   mode: string;
   source: string;
+}
+/** A rewind went through, but the message meant to follow it was not sent. */
+export class UnsentMessage extends Error {
+  constructor(
+    readonly text: string,
+    readonly images: ImageAttachment[],
+    cause: unknown,
+  ) {
+    super(`The turn was removed, but its message was not sent: ${errorMessage(cause)}`, {
+      cause,
+    });
+  }
 }
 export interface TurnCompletion {
   sessionId: string;
@@ -153,10 +170,11 @@ function initial(id: string): SessionState {
     notices: [],
     submissions: [],
     revision: 0,
-    lastTurn: undefined,
   };
 }
-// From meka 0.68, a feed loads a session only for a token that can write.
+const subagentStopped = (error: unknown) =>
+  error instanceof ApiError && error.status === 409 && error.is('subagent-not-running');
+// A feed loads a session only for a token that can write.
 function isUnloaded(error: unknown) {
   return error instanceof ApiError && error.status === 409 && error.is('session-not-loaded');
 }
@@ -172,7 +190,13 @@ function turnBody(message: string, options: ComposerOptions): Schema['TurnReques
     message,
     stream: true,
     ...(options.images.length
-      ? { images: options.images.map(({ media_type, data }) => ({ media_type, data })) }
+      ? {
+          images: options.images.map((image) =>
+            'hash' in image
+              ? { hash: image.hash }
+              : { media_type: image.media_type, data: image.data },
+          ),
+        }
       : {}),
     ...(options.skill || options.retention !== 'keep'
       ? {
@@ -282,6 +306,16 @@ export class SessionController {
       this.publish(entry, { feed: 'closed' });
     }
   }
+  /** Session feeds attend to answer prompts; a sub-agent's is only read. */
+  private attends(entry: Entry) {
+    return entry.state.session?.parent_id ? undefined : this.canWrite;
+  }
+  private subagentStopped(entry: Entry) {
+    // The run ended, perhaps before its terminal reached this feed; its history has the outcome.
+    this.publish(entry, { feed: 'unavailable', running: false });
+    void this.refresh(entry.state.id, true);
+    this.release(entry);
+  }
   private async ensure(id: string): Promise<Entry> {
     if (this.disposed) throw new Error('This connection is no longer active.');
     let entry = this.entries.get(id);
@@ -329,9 +363,12 @@ export class SessionController {
         running: session.turn_in_flight,
         partial: session.turn_in_flight,
       });
-      if (session.parent_id) {
+      // A sub-agent has a feed only while its parent runs it; between runs, its history is all.
+      if (session.parent_id && !session.turn_in_flight) {
         this.publish(entry, { feed: 'unavailable' });
         await this.refresh(entry.state.id);
+        // Watched for its parent, it has nothing to follow, so a later watch starts afresh.
+        this.release(entry);
         return;
       }
       // Both this snapshot and turn.started use the server's clock. Initial replay predates
@@ -344,10 +381,11 @@ export class SessionController {
         response = await this.api.stream(
           sessionPath(entry.state.id) + '/stream',
           entry.cursor,
-          this.canWrite,
+          this.attends(entry),
           entry.abort.signal,
         );
       } catch (error) {
+        if (subagentStopped(error)) return this.subagentStopped(entry);
         if (!isUnloaded(error)) throw error;
         this.publish(entry, { feed: 'unloaded' });
         void this.consume(entry, undefined);
@@ -371,6 +409,12 @@ export class SessionController {
       if (response) {
         await this.read(entry, response);
         if (entry.abort.signal.aborted) return;
+        // A sub-agent's feed closes with its run, whose terminal already read its history.
+        if (entry.state.session?.parent_id && !entry.state.running) {
+          this.publish(entry, { feed: 'unavailable' });
+          this.release(entry);
+          return;
+        }
         // From meka 0.68, deleting a session ends its feed before the response arrives. The
         // deletion releases the entry; if it fails, the retry below reconnects as usual.
         if (!entry.state.deleting)
@@ -388,7 +432,7 @@ export class SessionController {
           response = await this.api.stream(
             sessionPath(entry.state.id) + '/stream',
             entry.cursor,
-            this.canWrite,
+            this.attends(entry),
             entry.abort.signal,
           );
           this.publish(entry, { feed: 'connected' });
@@ -396,6 +440,7 @@ export class SessionController {
           break;
         } catch (error) {
           if (entry.abort.signal.aborted) return;
+          if (subagentStopped(error)) return this.subagentStopped(entry);
           if (isUnloaded(error)) {
             // A turn this feed followed may have ended unseen, as when the server restarts.
             // meka reports no turn in flight for a session it has not loaded, so reconcile.
@@ -473,6 +518,12 @@ export class SessionController {
       }
     }
     if (!data) return;
+    if (frame.event === 'session.updated') {
+      // The whole record, renamed or switched elsewhere. This tab's own change publishes its own.
+      if (data.id === entry.state.id && !entry.state.deleting && !this.settingsChanges.has(data.id))
+        this.publish(entry, { session: data as Schema['SessionResponse'] });
+      return;
+    }
     const turnId = string(data, 'turn_id');
     // A POST terminal can reach us before the attending feed's replay. Its saved snapshot
     // supersedes those old deltas; replay must not reopen work or duplicate the saved answer.
@@ -504,6 +555,14 @@ export class SessionController {
           };
         entry.epoch++;
         this.publish(entry, {
+          ...(string(data, 'source') === 'parent'
+            ? {
+                spawnedBy: {
+                  sessionId: string(data, 'parent_id'),
+                  toolCallId: string(data, 'tool_call_id'),
+                },
+              }
+            : {}),
           turnId,
           running: true,
           compacting,
@@ -514,7 +573,6 @@ export class SessionController {
             .map((submission) => ({ kind: 'submission', key: submission.key })),
           tools: {},
           approvals: [],
-          lastTurn: undefined,
         });
       } else this.publish(entry, { running: true, compacting });
       return;
@@ -527,8 +585,8 @@ export class SessionController {
           'assistant_text.delta',
           'thinking.delta',
           'permission_required',
-          'subagent.activity',
           'progress',
+          'turn.nudged',
         ].includes(frame.event))
     ) {
       // A truncated replay may start in the middle of work. Its explicit turn ID is enough
@@ -573,11 +631,15 @@ export class SessionController {
       const textStreaming = tail?.kind === 'text' && Boolean(tail.text.trim());
       if (textStreaming) this.noteTextStreaming(entry);
       this.publish(entry, { blocks, textStreaming });
-    } else if (
-      frame.event.startsWith('tool_call.') ||
-      frame.event === 'subagent.activity' ||
-      frame.event === 'progress'
-    ) {
+    } else if (frame.event === 'turn.nudged') {
+      this.publish(entry, {
+        textStreaming: false,
+        blocks: [
+          ...state.blocks,
+          { kind: 'nudge', nudge: string(data, 'kind'), text: string(data, 'text') },
+        ],
+      });
+    } else if (frame.event.startsWith('tool_call.') || frame.event === 'progress') {
       const id = string(data, 'id') || string(data, 'tool_use_id');
       if (!id) return;
       const old = Object.hasOwn(state.tools, id) ? state.tools[id] : undefined;
@@ -589,7 +651,6 @@ export class SessionController {
           state: 'composing',
           output: '',
           content: [],
-          activity: '',
           progress: '',
         }),
       };
@@ -606,7 +667,6 @@ export class SessionController {
       }
       if (frame.event === 'tool_call.output_delta' && tool.state === 'executing')
         tool.output = (tool.output + string(data, 'chunk')).slice(-1_000_000);
-      if (frame.event === 'subagent.activity') tool.activity = string(data, 'summary');
       if (frame.event === 'progress')
         tool.progress = [data.progress, data.total ? `/ ${String(data.total)}` : '', data.message]
           .filter((v) => v !== undefined)
@@ -616,8 +676,12 @@ export class SessionController {
         tools: { ...entry.state.tools, [id]: tool },
         ...(!old ? { blocks: [...state.blocks, { kind: 'tool', id }] } : {}),
       });
-    } else if (frame.event === 'permission_required') {
+    } else if (frame.event === 'permission_required' && !state.session?.parent_id) {
+      // A sub-agent's feed mirrors its prompts; the parent's carries them and takes the answer.
       const id = string(data, 'request_id');
+      // The deadline itself, for a prompt replayed long after it was parked.
+      const deadline = Date.parse(string(data, 'expires_at'));
+      const subagentId = string(data, 'subagent_id');
       this.publish(entry, {
         textStreaming: false,
         approvals: [
@@ -628,20 +692,52 @@ export class SessionController {
             turnId: turnId || state.turnId || '',
             tool: string(data, 'tool_name'),
             input: data.input,
-            expires: Date.now() + Number(data.expires_in_seconds) * 1000,
+            expires: Number.isFinite(deadline)
+              ? deadline
+              : Date.now() + Number(data.expires_in_seconds) * 1000,
+            ...(subagentId ? { subagentId } : {}),
           },
         ],
       });
+    } else if (frame.event === 'permission_resolved') {
+      // Answered elsewhere, expired, or canceled with its turn.
+      const id = string(data, 'request_id');
+      this.publish(entry, { approvals: state.approvals.filter((a) => a.id !== id) });
+      this.release(entry);
     } else if (frame.event === 'notice') {
-      // Notices have no structured replay-gap discriminator. Conservatively refresh.
+      // A notice is ephemeral: the running turn shows it where it arrived, and the saved turn
+      // that replaces the preview drops it. A warning or error also stays below the conversation,
+      // so a turn that ends at once cannot take it away unseen.
+      const notice = sessionNotice(frame.event, data);
+      if (!notice) return;
+      const inTurn = Boolean(turnId) && turnId === state.turnId && isSessionRunning(state);
       this.publish(entry, {
-        notices: this.withNotice(entry, frame.event, data),
-        partial: true,
+        ...(inTurn
+          ? {
+              textStreaming: false,
+              blocks: [...state.blocks, { kind: 'notice', level: notice.level, text: notice.text }],
+            }
+          : {}),
+        ...(!inTurn || notice.level !== 'info'
+          ? { notices: this.withNotice(entry, frame.event, data) }
+          : {}),
       });
+    } else if (frame.event === 'checklist.updated') {
+      // The record carries the open list as well; keep it current between reads of the record.
+      if (state.session && Array.isArray(data.items))
+        this.publish(entry, {
+          session: { ...state.session, checklist: data.items as Schema['ChecklistItem'][] },
+        });
+    } else if (frame.event === 'feed.gap') {
+      // This copy of the feed has a hole, which the saved conversation fills.
+      this.publish(entry, { partial: true, textStreaming: false });
       void this.refresh(state.id);
     } else if (frame.event === 'context.compacted') {
       this.publish(entry, { partial: true, textStreaming: false });
       void this.refresh(state.id);
+    } else if (frame.event === 'conversation.rewound') {
+      // Rewound here or by another client; either way the shown turns may be gone.
+      void this.refresh(state.id, true);
     } else if (frame.event.startsWith('inbox.')) {
       const ids = Array.isArray(data.item_ids) ? data.item_ids : [data.item_id];
       if (
@@ -721,8 +817,6 @@ export class SessionController {
             compacting: false,
             textStreaming: false,
             approvals: [],
-            // The session list shows how the agent's work ended, which a compaction is not.
-            ...(!state.compacting ? { lastTurn: { outcome, updatedAt: undefined } } : {}),
             tools: Object.fromEntries(
               Object.entries(state.tools).map(([id, tool]) => [
                 id,
@@ -747,15 +841,6 @@ export class SessionController {
     });
     if (notify) this.notifyCompletion(entry, turnId, outcome);
     void this.refresh(state.id, current).then(() => {
-      const latest = this.entries.get(state.id);
-      if (
-        current &&
-        latest?.state.lastTurn?.outcome === outcome &&
-        !latest.state.lastTurn.updatedAt
-      )
-        this.publish(latest, {
-          lastTurn: { outcome, updatedAt: latest.state.session?.updated_at },
-        });
       this.invalidated(state.id);
       this.release(entry);
     });
@@ -918,8 +1003,12 @@ export class SessionController {
       !entry.state.loading &&
       !entry.state.deleting &&
       !this.settingsChanges.has(id)
-    )
+    ) {
       this.publish(entry, { session });
+      // A follow-up runs a sub-agent again, under a feed of its own.
+      if (session.parent_id && session.turn_in_flight && entry.state.feed === 'unavailable')
+        void this.reconnect(id).catch(() => {});
+    }
     return entry.state.session ?? session;
   }
   async refresh(id: string, replacePreview = false) {
@@ -1602,6 +1691,122 @@ export class SessionController {
     const entry = await this.ensure(id);
     if (entry.state.feed !== 'connected' || !this.canWrite || entry.state.session?.parent_id)
       throw new Error('An attending feed is required before starting work.');
+  }
+  private editable(id: string) {
+    const entry = this.entries.get(id);
+    if (
+      this.disposed ||
+      !this.canWrite ||
+      !entry ||
+      entry.state.session?.parent_id ||
+      entry.state.deleting
+    )
+      throw new Error('Changing the conversation requires a session you can write to.');
+    return entry;
+  }
+  /**
+   * Confirms the conversation is still the one this tab shows, answering its `ETag`. An edit sends
+   * that back, so meka refuses it if the conversation moves on before the edit lands.
+   */
+  private async shownConversation(entry: Entry) {
+    const saved = entry.state.saved;
+    if (!saved || isSessionRunning(entry.state))
+      throw new Error('Wait for the agent to finish before changing the conversation.');
+    const { value: head, etag } = await this.api.getTagged<Schema['MessagesResponse']>(
+      sessionPath(entry.state.id) + '/messages',
+      { offset: 0, limit: 1 },
+    );
+    if (head.revision !== saved.revision || head.total !== saved.total) throw this.changed(entry);
+    // Without it, the edit would land on whatever the conversation has become.
+    if (!etag)
+      throw new Error(
+        'meka did not say which version of the conversation this is, so it was not changed. A proxy between them may be hiding the ETag header.',
+      );
+    return etag;
+  }
+  private changed(entry: Entry) {
+    void this.refresh(entry.state.id, true);
+    return new Error('The conversation changed since it was shown here. Check it, then try again.');
+  }
+  /** Drops the last `turns` turns of the conversation as this tab shows it. */
+  async rewind(id: string, turns: number) {
+    const entry = this.editable(id);
+    const etag = await this.shownConversation(entry);
+    try {
+      await this.api.mutate(
+        'POST',
+        sessionPath(id) + '/rewind',
+        { turns } satisfies Schema['RewindRequestBody'],
+        undefined,
+        etag,
+      );
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 412) throw this.changed(entry);
+      // An unanswered rewind may have landed; show whichever conversation there is.
+      void this.refresh(id, true);
+      throw error;
+    }
+    await this.refresh(id, true);
+  }
+  /**
+   * Rewinds to before a turn and sends its message again, as it was or edited. A send that fails
+   * once queued keeps the message on screen to send again; one refused before that throws
+   * `UnsentMessage`, so the caller can keep what the rewind already removed.
+   */
+  async resend(id: string, turns: number, message: string, images: ImageAttachment[] = []) {
+    await this.rewind(id, turns);
+    try {
+      return await this.submitMessage(id, message, { ...emptyComposerOptions, images });
+    } catch (error) {
+      throw new UnsentMessage(message, images, error);
+    }
+  }
+  /**
+   * A new session holding this one's conversation without its last `turns` turns. meka forks the
+   * whole conversation; the copy, which nothing else can run a turn on yet, then drops the rest.
+   */
+  async branch(id: string, turns: number): Promise<string> {
+    const entry = this.editable(id);
+    const etag = await this.shownConversation(entry);
+    let fork: Schema['SessionResponse'];
+    try {
+      fork = await this.api.mutate<Schema['SessionResponse']>(
+        'POST',
+        sessionPath(id) + '/fork',
+        {},
+        undefined,
+        etag,
+      );
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 412) throw this.changed(entry);
+      throw error;
+    }
+    if (turns > 0) {
+      try {
+        await this.api.mutate('POST', sessionPath(fork.id) + '/rewind', {
+          turns,
+        } satisfies Schema['RewindRequestBody']);
+      } catch (error) {
+        // A whole copy is not the branch that was asked for, so it goes.
+        const reason = errorMessage(error);
+        try {
+          await this.api.mutate('DELETE', sessionPath(fork.id));
+        } catch (removal) {
+          throw new Error(
+            `The branch could not be trimmed (${reason}), nor its copy removed. Delete the session ${fork.id.slice(0, 8)} by hand.`,
+            { cause: removal },
+          );
+        }
+        throw new Error(`The branch could not be trimmed, so its copy was removed: ${reason}`, {
+          cause: error,
+        });
+      }
+    }
+    return fork.id;
+  }
+  /** Reads a sub-agent's feed while it runs, for the call in its parent that runs it. */
+  watch(id: string) {
+    void this.ensure(id).catch(() => {});
   }
   async reconnect(id: string) {
     const entry = this.entries.get(id);

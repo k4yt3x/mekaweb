@@ -1,12 +1,13 @@
 import { record } from './events';
 
-// meka 0.68.0: src/tools.rs::builtin_primary_param. History carries inputs, but
+// meka 0.71.0: src/tools.rs::builtin_primary_param. History carries inputs, but
 // neither resolved display summaries nor the schemas needed to label MCP calls.
 const primaryKeys: Readonly<Record<string, string>> = {
   agent_delete: 'id',
   agent_followup: 'id',
   agent_steer: 'id',
   agent_spawn: 'prompt',
+  checklist_add: 'items',
   context_compact: 'instructions',
   conversation_read: 'start',
   conversation_search: 'query',
@@ -40,19 +41,9 @@ const primaryKeys: Readonly<Record<string, string>> = {
   skill_read: 'name',
   skill_write: 'name',
   skill_search: 'pattern',
-  todo_write: 'title',
   tool_load: 'name',
   tool_search: 'query',
   web_fetch: 'url',
-  // The supported 0.59 API uses these older names.
-  edit_file: 'path',
-  read_file: 'path',
-  write_file: 'path',
-  execute_command: 'command',
-  fetch_url: 'url',
-  find_files: 'glob',
-  load_tool: 'name',
-  search_contents: 'pattern',
 };
 
 function scalar(value: unknown): string | undefined {
@@ -70,7 +61,7 @@ function displayValue(value: unknown): string | undefined {
 function builtinSummary(name: string, input: unknown): string | undefined {
   if (!record(input)) return undefined;
   const get = (key: string) => (Object.hasOwn(input, key) ? input[key] : undefined);
-  if (name === 'image_render' || name === 'render_image') {
+  if (name === 'image_render') {
     const from = get('from_scratchpad');
     return typeof from === 'string'
       ? from
@@ -82,19 +73,11 @@ function builtinSummary(name: string, input: unknown): string | undefined {
     const id = get('id');
     return get('all') === true ? 'all' : typeof id === 'string' ? id : undefined;
   }
-  if (name === 'todo_edit' || name === 'todo') {
-    const set = get('set');
-    const transitions = record(set)
-      ? Object.keys(set)
-          .sort()
-          .flatMap((id) => (typeof set[id] === 'string' ? [`#${id} ${set[id]}`] : []))
-          .join(', ')
-      : '';
-    if (transitions || name === 'todo_edit') return transitions || undefined;
-    const title = get('title');
-    if (typeof title === 'string' && title.trim()) return title;
-    const items = get('items');
-    return Array.isArray(items) ? `${items.length} task${items.length === 1 ? '' : 's'}` : 'read';
+  if (name === 'checklist_edit') {
+    // A transition shows the item and where it moves; a rewording, the item alone.
+    const id = scalar(get('id'));
+    const status = get('status');
+    return id && (typeof status === 'string' ? `#${id} ${status}` : `#${id}`);
   }
   const key = Object.hasOwn(primaryKeys, name) ? primaryKeys[name] : undefined;
   return key ? displayValue(get(key)) : undefined;
