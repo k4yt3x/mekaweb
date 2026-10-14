@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-10-14
+
+### Changed
+
+- Recognize meka 0.75.0 as a verified server version; meka 0.71.0 and newer still connect.
+
+### Fixed
+
+- Loading earlier messages no longer repeats some after meka's turn retention deletes old turns.
+
 ## [0.15.2] - 2026-10-14
 
 ### Fixed
@@ -301,7 +311,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Light and dark themes, narrow layouts, and collapsible, resizable session panels.
 - Hosting at the root or a subpath, with GitHub Pages deployment on version tags.
 
-[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.15.2...HEAD
+[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.16.0...HEAD
+[0.16.0]: https://github.com/k4yt3x/mekaweb/compare/0.15.2...0.16.0
 [0.15.2]: https://github.com/k4yt3x/mekaweb/compare/0.15.1...0.15.2
 [0.15.1]: https://github.com/k4yt3x/mekaweb/compare/0.15.0...0.15.1
 [0.15.0]: https://github.com/k4yt3x/mekaweb/compare/0.14.3...0.15.0

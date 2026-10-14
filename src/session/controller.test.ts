@@ -1804,6 +1804,38 @@ it('preserves loaded earlier pages on refresh and replaces them on a history rev
   expect(f.state().saved?.revision).toBe(2);
 });
 
+it('reads the shown window again when old turns are deleted without a new revision', async () => {
+  const f = await fixture();
+  let rows = Array.from({ length: 250 }, (_, i) => String(i));
+  vi.spyOn(f.api, 'get').mockImplementation(async <T>(path: string, query?: Query) => {
+    if (!path.endsWith('/messages')) return f.session as T;
+    const offset = Number(query?.offset ?? 0);
+    const limit = Number(query?.limit ?? 100);
+    return {
+      session_id: 's',
+      total: rows.length,
+      revision: 1,
+      messages: rows
+        .slice(offset, offset + limit)
+        .map((text) => ({ role: 'user', content: [{ type: 'text', text }] })),
+    } as T;
+  });
+  const shown = () =>
+    f.state().saved?.messages.map((message) => (message.content[0] as { text: string }).text);
+  await f.controller.refresh('s');
+  expect(f.state().offset).toBe(150);
+  await f.controller.earlier('s');
+  expect(shown()).toEqual(rows.slice(50));
+  // meka's turn retention sweeps the oldest turns; the revision stays, and the rest move up.
+  rows = rows.slice(30);
+  await f.controller.earlier('s');
+  expect(new Set(shown()).size).toBe(shown()?.length);
+  expect(shown()).toEqual(rows.slice(f.state().offset));
+  await f.controller.earlier('s');
+  expect(f.state().offset).toBe(0);
+  expect(shown()).toEqual(rows);
+});
+
 it('reconciles a finished preview even when a later history fetch supersedes the terminal fetch', async () => {
   const f = await fixture();
   await f.event('turn.started', { turn_id: 'finished' });

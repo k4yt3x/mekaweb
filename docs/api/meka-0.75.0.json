@@ -4,7 +4,7 @@
     "title": "meka HTTP API",
     "description": "Service-to-service API for driving meka agent turns programmatically. Mirrors the wire format described in the HTTP API docs. A field that has no value is omitted from every response and event, never sent as `null`.",
     "license": { "name": "AGPL-3.0-or-later" },
-    "version": "0.71.0"
+    "version": "0.75.0"
   },
   "paths": {
     "/v1/health/live": {
@@ -2296,7 +2296,7 @@
     "/v1/skills": {
       "get": {
         "tags": ["discovery"],
-        "summary": "`GET /v1/skills`: installed skill palette. Mirrors what the REPL `/skill` command and\nthe ACP `available_commands_update` notification surface.",
+        "summary": "`GET /v1/skills`: installed skill palette. Mirrors what the screen's `/skill` command and\nthe ACP `available_commands_update` notification surface.",
         "operationId": "skills",
         "responses": {
           "200": {
@@ -3615,7 +3615,7 @@
               },
               "turn_in_flight": {
                 "type": "boolean",
-                "description": "Whether a turn is running on this session right now.\n\nExists so a client whose SSE stream dropped mid-turn can tell \"my turn is still running\"\nfrom \"my turn died\" without submitting a speculative turn and reading the 409. A dropped\nstream does not cancel the turn: the spawned task keeps the runtime lock and dropping the\n`JoinHandle` detaches rather than aborts, so the work completes and resubmitting would\nduplicate a reply the user is about to receive anyway.\n\n`false` for a GC-evicted session, since eviction requires an idle session, and `true` for\na sub-agent this process is running under its parent, which is never resident itself. A\nsession another process runs (a REPL open on it) reads as idle: only its file lock knows,\nand a read may not probe it."
+                "description": "Whether a turn is running on this session right now.\n\nExists so a client whose SSE stream dropped mid-turn can tell \"my turn is still running\"\nfrom \"my turn died\" without submitting a speculative turn and reading the 409. A dropped\nstream does not cancel the turn: the spawned task keeps the runtime lock and dropping the\n`JoinHandle` detaches rather than aborts, so the work completes and resubmitting would\nduplicate a reply the user is about to receive anyway.\n\n`false` for a GC-evicted session, since eviction requires an idle session, and `true` for\na sub-agent this process is running under its parent, which is never resident itself. A\nsession another process runs (a screen open on it) reads as idle: only its file lock knows,\nand a read may not probe it."
               }
             }
           }
@@ -3799,11 +3799,11 @@
         "properties": {
           "skill": {
             "type": ["string", "null"],
-            "description": "Optional installed-skill name. When set, `message` is combined with the skill's body (user\ntext first, then the skill body) before the agent runs, matching `/skill <name> <prompt>`\nin the REPL and the `--skill` CLI flag. An unknown skill is a 422."
+            "description": "Optional installed-skill name. When set, `message` is combined with the skill's body (user\ntext first, then the skill body) before the agent runs, matching `/skill <name> <prompt>`\non the screen and the `--skill` CLI flag. An unknown skill is a 422."
           },
           "unanswered_message": {
             "type": "string",
-            "description": "What becomes of `message` if the turn ends, failed or canceled, before anything from the\nmodel reached the conversation. `keep` (default) leaves it in place, as the REPL does for a\nprompt whose turn failed; `withdraw` takes it back, for a client that will resend it. Once\na partial answer or a tool call is in the conversation, the message stays regardless."
+            "description": "What becomes of `message` if the turn ends, failed or canceled, before anything from the\nmodel reached the conversation. `keep` (default) leaves it in place, as the screen does for\na prompt whose turn failed; `withdraw` takes it back, for a client that will resend it.\nOnce a partial answer or a tool call is in the conversation, the message stays\nregardless."
           }
         },
         "additionalProperties": false

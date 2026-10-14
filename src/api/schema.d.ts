@@ -683,7 +683,7 @@ export interface paths {
       cookie?: never;
     };
     /**
-     * `GET /v1/skills`: installed skill palette. Mirrors what the REPL `/skill` command and
+     * `GET /v1/skills`: installed skill palette. Mirrors what the screen's `/skill` command and
      *     the ACP `available_commands_update` notification surface.
      */
     get: operations['skills'];
@@ -1637,7 +1637,7 @@ export interface components {
        *
        *     `false` for a GC-evicted session, since eviction requires an idle session, and `true` for
        *     a sub-agent this process is running under its parent, which is never resident itself. A
-       *     session another process runs (a REPL open on it) reads as idle: only its file lock knows,
+       *     session another process runs (a screen open on it) reads as idle: only its file lock knows,
        *     and a read may not probe it.
        */
       turn_in_flight: boolean;
@@ -1788,14 +1788,15 @@ export interface components {
       /**
        * @description Optional installed-skill name. When set, `message` is combined with the skill's body (user
        *     text first, then the skill body) before the agent runs, matching `/skill <name> <prompt>`
-       *     in the REPL and the `--skill` CLI flag. An unknown skill is a 422.
+       *     on the screen and the `--skill` CLI flag. An unknown skill is a 422.
        */
       skill?: string | null;
       /**
        * @description What becomes of `message` if the turn ends, failed or canceled, before anything from the
-       *     model reached the conversation. `keep` (default) leaves it in place, as the REPL does for a
-       *     prompt whose turn failed; `withdraw` takes it back, for a client that will resend it. Once
-       *     a partial answer or a tool call is in the conversation, the message stays regardless.
+       *     model reached the conversation. `keep` (default) leaves it in place, as the screen does for
+       *     a prompt whose turn failed; `withdraw` takes it back, for a client that will resend it.
+       *     Once a partial answer or a tool call is in the conversation, the message stays
+       *     regardless.
        */
       unanswered_message?: string;
     };

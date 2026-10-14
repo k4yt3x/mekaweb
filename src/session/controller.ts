@@ -1160,15 +1160,22 @@ export class SessionController {
     if (!entry?.state.saved || entry.state.offset === 0) return;
     const previous = entry.state.saved;
     const offset = Math.max(0, entry.state.offset - 100);
+    // One message more, to check the page ends where the shown ones begin: meka's turn retention
+    // deletes old turns without moving the revision, which moves every later message up.
+    const first = previous.messages[0];
     const request = ++entry.snapshotEpoch;
     try {
       const page = await this.api.get<Schema['MessagesResponse']>(
         sessionPath(id) + '/messages',
-        { offset, limit: entry.state.offset - offset },
+        { offset, limit: entry.state.offset - offset + (first ? 1 : 0) },
         entry.abort.signal,
       );
       if (request !== entry.snapshotEpoch) return;
-      if (page.revision !== previous.revision) {
+      const next = first && page.messages.pop();
+      if (
+        page.revision !== previous.revision ||
+        (first && JSON.stringify(next) !== JSON.stringify(first))
+      ) {
         await this.refresh(id);
         return;
       }
