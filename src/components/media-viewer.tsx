@@ -13,8 +13,10 @@ import { Dialog } from './ui/dialog';
 import {
   fitMedia,
   MAX_MEDIA_ZOOM,
+  MEDIA_ZOOM_STEP,
   pointerGesture,
   updateMediaView,
+  wheelZoom,
   type MediaView,
   type Point,
   type Size,
@@ -118,7 +120,7 @@ function MediaViewer({ url, title, size, kind }: MediaImage & { kind: 'diagram' 
         const rect = element.getBoundingClientRect();
         dispatch({
           type: 'zoom',
-          factor: Math.exp(Math.max(-1, Math.min(1, -event.deltaY * unit * 0.01))),
+          factor: wheelZoom(event.deltaY * unit),
           point: {
             x: event.clientX - rect.left - element.clientLeft,
             y: event.clientY - rect.top - element.clientTop,
@@ -173,7 +175,7 @@ function MediaViewer({ url, title, size, kind }: MediaImage & { kind: 'diagram' 
           aria-label="Zoom out"
           title="Zoom out (−)"
           disabled={view.scale <= fit + 0.000001}
-          onClick={() => dispatch({ type: 'zoom', factor: 0.8 })}
+          onClick={() => dispatch({ type: 'zoom', factor: 1 / MEDIA_ZOOM_STEP })}
         >
           <Minus size={18} />
         </Button>
@@ -184,7 +186,7 @@ function MediaViewer({ url, title, size, kind }: MediaImage & { kind: 'diagram' 
           aria-label="Zoom in"
           title="Zoom in (+)"
           disabled={view.scale >= MAX_MEDIA_ZOOM}
-          onClick={() => dispatch({ type: 'zoom', factor: 1.25 })}
+          onClick={() => dispatch({ type: 'zoom', factor: MEDIA_ZOOM_STEP })}
         >
           <Plus size={18} />
         </Button>
@@ -254,11 +256,11 @@ function MediaViewer({ url, title, size, kind }: MediaImage & { kind: 'diagram' 
           switch (event.key) {
             case '+':
             case '=':
-              dispatch({ type: 'zoom', factor: 1.25 });
+              dispatch({ type: 'zoom', factor: MEDIA_ZOOM_STEP });
               break;
             case '-':
             case '_':
-              dispatch({ type: 'zoom', factor: 0.8 });
+              dispatch({ type: 'zoom', factor: 1 / MEDIA_ZOOM_STEP });
               break;
             case '0':
             case 'Home':

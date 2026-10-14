@@ -21,6 +21,8 @@ export type MediaAction =
   | { type: 'gesture'; from: Point; to: Point; factor: number };
 
 export const MAX_MEDIA_ZOOM = 4;
+/** The zoom buttons' and keys' step. */
+export const MEDIA_ZOOM_STEP = 1.25;
 const padding = 16;
 const center = (size: Size): Point => ({ x: size.width / 2, y: size.height / 2 });
 
@@ -31,6 +33,15 @@ export function fitMedia(image: Size, viewport: Size) {
     Math.max(1, viewport.width - 2 * padding) / image.width,
     Math.max(1, viewport.height - 2 * padding) / image.height,
   );
+}
+
+/**
+ * Scale for a Ctrl+wheel or trackpad pinch delta, in pixels. A pinch sends many small deltas and
+ * zooms smoothly; a mouse wheel sends one large delta per notch, which takes one zoom step.
+ */
+export function wheelZoom(delta: number) {
+  const step = Math.log(MEDIA_ZOOM_STEP);
+  return Math.exp(Math.max(-step, Math.min(step, -delta * 0.01)));
 }
 
 function constrain(view: MediaView, image: Size): MediaView {

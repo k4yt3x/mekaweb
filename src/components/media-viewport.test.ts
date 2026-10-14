@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   fitMedia,
+  MEDIA_ZOOM_STEP,
   pointerGesture,
   updateMediaView,
+  wheelZoom,
   type MediaView,
   type Size,
 } from './media-viewport';
@@ -99,6 +101,13 @@ describe('media viewport', () => {
     const zoomed = updateMediaView(before, { type: 'zoom', factor: 10000 }, large);
     expect(zoomed.scale).toBe(4);
     expect(updateMediaView(zoomed, { type: 'fit' }, large)).toEqual(before);
+  });
+
+  it('zooms a mouse wheel notch by one step and a pinch smoothly', () => {
+    for (const notch of [48, 100, 120])
+      expect([wheelZoom(-notch), wheelZoom(notch)]).toEqual([MEDIA_ZOOM_STEP, 1 / MEDIA_ZOOM_STEP]);
+    expect(wheelZoom(-5)).toBeCloseTo(Math.exp(0.05));
+    expect(wheelZoom(5) * wheelZoom(-5)).toBeCloseTo(1);
   });
 
   it('keeps automatic fitting when a gesture cannot move or shrink the fitted image', () => {
