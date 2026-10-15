@@ -2361,7 +2361,8 @@ progress::-moz-progress-bar {
   border-left: 2px solid var(--border);
   padding-left: 13px;
 }
-.thinking > summary {
+.thinking > summary,
+.scheduled-fire:not([open]) > summary {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;

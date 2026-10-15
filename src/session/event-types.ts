@@ -54,6 +54,7 @@ export interface EventPayloads {
   'session.updated': Schema['SessionResponse'];
   'conversation.rewound': { revision: number; total: number; turns_removed: number };
   'turn.nudged': Correlation & { kind: string; text: string };
+  'task.reported': Correlation & { task_ids: string[]; text: string };
   'feed.gap': { session_id?: string; dropped?: number };
   'checklist.updated': Correlation & { items: Schema['ChecklistItem'][] };
   'context.compacted': Correlation & { source: string; replaced_count: number; generation: number };

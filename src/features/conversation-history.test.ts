@@ -4,10 +4,12 @@ import {
   groupAgentMessages,
   groupLiveMessages,
   groupToolResults,
+  isInput,
   messageText,
   pendingInboxMessages,
   resendable,
   responseActivityIndicator,
+  spawnedAgent,
   turnIndex,
   type ToolResultBlock,
   type ToolUseBlock,
@@ -482,7 +484,7 @@ it('keeps a nudge in the turn it answers, apart from one a steer rides', () => {
     message('assistant', { type: 'text', text: 'Did one.' }),
     nudge(),
     message('assistant', { type: 'text', text: 'Did the other.' }),
-    nudge({ type: 'text', text: 'Also the third.' }),
+    nudge({ type: 'inbox', class: 'steer', body: 'Also the third.', text: '[Message]\nAlso…' }),
     message('assistant', { type: 'text', text: 'And the third.' }),
   ].map((row) => ({ ...row, turn_id: 'turn', turn_label: 't_0001' }));
   const groups = groupAgentMessages(groupToolResults(input).messages);
@@ -490,6 +492,79 @@ it('keeps a nudge in the turn it answers, apart from one a steer rides', () => {
   // meka labels neither nudge as a turn of its own, so rewinding before the reply drops one.
   expect(turnIndex(input, 0).get('t_0001')).toEqual({ start: 0, turns: 1 });
   expect(messageText(input.slice(1, 4))).toBe('Did one.\n\nDid the other.');
+});
+
+it('keeps a background report in the turn it reached, and shows what meka relayed as such', () => {
+  const report: Schema['ContentBlockView'] = {
+    type: 'background_report',
+    task_ids: ['7f3a1c22'],
+    text: '[Background task reporting]\nok',
+  };
+  const steer: Schema['ContentBlockView'] = {
+    type: 'inbox',
+    class: 'steer',
+    source: 'telegram',
+    body: ' Check the logs too. ',
+    text: '[Message from telegram, arrived now]\n Check the logs too. ',
+  };
+  const context: Schema['ContentBlockView'] = { type: 'turn_context', text: 'Context.' };
+  const fire: Schema['ContentBlockView'] = {
+    type: 'scheduled',
+    job_id: '1a2b3c4d',
+    prompt: 'Stretch.',
+    text: '[Scheduled job 1a2b3c4d fired now]\n\nStretch.',
+  };
+  const input = [
+    { ...message('user', { type: 'text', text: 'Build it.' }), turn_id: 'turn-1' },
+    { ...message('assistant', call('a')), turn_id: 'turn-1' },
+    { ...message('user', result('a'), report), turn_id: 'turn-1' },
+    { ...message('assistant', call('b')), turn_id: 'turn-1' },
+    { ...message('user', result('b'), report, steer), turn_id: 'turn-1' },
+    { ...message('assistant', { type: 'text', text: 'Built.' }), turn_id: 'turn-1' },
+    { ...message('user', context, fire), turn_id: 'turn-2' },
+    { ...message('assistant', { type: 'text', text: 'Stretched.' }), turn_id: 'turn-2' },
+    { ...message('user', context, report), turn_id: 'turn-3' },
+    { ...message('assistant', { type: 'text', text: 'Noted.' }), turn_id: 'turn-3' },
+  ];
+  const groups = groupAgentMessages(groupToolResults(input).messages);
+  expect(groups.map((group) => group.map((row) => row.index))).toEqual([
+    [0],
+    [1, 2, 3],
+    [4],
+    [5],
+    [6],
+    [7],
+    [8],
+    [9],
+  ]);
+  // A steer is someone's words, which a fire or a report alone are not.
+  expect(input.map(isInput)).toEqual([
+    true,
+    false,
+    false,
+    false,
+    true,
+    false,
+    false,
+    false,
+    false,
+    false,
+  ]);
+  // A fire's words are the job's, copied and sent again as a message's would be.
+  expect(messageText([input[4]!, input[6]!, input[8]!])).toBe('Check the logs too.\n\nStretch.');
+  expect(resendable(input[4]!)).toEqual({ text: 'Check the logs too.', images: [] });
+  expect(resendable(input[6]!)).toEqual({ text: 'Stretch.', images: [] });
+  expect(resendable(input[8]!)).toBeUndefined();
+});
+
+it('reads the sub-agent a spawn names, in meka 0.76.0’s result and in older saved ones', () => {
+  const id = '51e4df31-a301-4041-ba63-bab893ac3f85';
+  expect(spawnedAgent(`Agent: ${id}\nPermission: workspace\nWorking directory: /srv\nDone.`)).toBe(
+    id,
+  );
+  expect(spawnedAgent(`agent: ${id}\n\nDone.`)).toBe(id);
+  // A report redirected to a scratchpad comes back without the header.
+  expect(spawnedAgent('Done.')).toBeUndefined();
 });
 
 it('sends a message again with its images by hash, or not at all if one has none', () => {

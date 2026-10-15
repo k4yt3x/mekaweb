@@ -5,7 +5,7 @@ import { ConnectionRuntime } from './runtime';
 import { BrowserStorage } from './storage';
 
 const info: Schema['InfoResponse'] = {
-  version: '0.71.0',
+  version: '0.76.0',
   default_permission: 'read',
   enabled_permissions: ['read'],
   scopes: ['sessions:r'],
@@ -334,7 +334,7 @@ it('does not reconnect when discovery completes after an explicit disconnect', a
   expect(await connecting).toBe(false);
   expect(runtime.getSnapshot()).toEqual({ busy: false });
 });
-it.each([null, { version: '0.71.0', scopes: [] }, { ...info, enabled_permissions: [null] }])(
+it.each([null, { version: '0.76.0', scopes: [] }, { ...info, enabled_permissions: [null] }])(
   'rejects malformed discovery before saving a connection',
   async (response) => {
     const { runtime, storage } = fixture();
@@ -344,12 +344,12 @@ it.each([null, { version: '0.71.0', scopes: [] }, { ...info, enabled_permissions
     expect(storage.getSnapshot().connections).toEqual([]);
   },
 );
-it('refuses meka older than 0.71.0 before saving a connection', async () => {
+it('refuses meka older than 0.76.0 before saving a connection', async () => {
   const { runtime, storage } = fixture();
-  vi.spyOn(ApiClient.prototype, 'get').mockResolvedValue({ ...info, version: '0.70.0' });
+  vi.spyOn(ApiClient.prototype, 'get').mockResolvedValue({ ...info, version: '0.75.0' });
   expect(await runtime.save('Test', 'https://example.org', 'dummy', false)).toBe(false);
   expect(runtime.getSnapshot().error).toBe(
-    'This server runs meka 0.70.0. mekaweb needs meka 0.71.0 or newer.',
+    'This server runs meka 0.75.0. mekaweb needs meka 0.76.0 or newer.',
   );
   expect(storage.getSnapshot().connections).toEqual([]);
 });

@@ -4,7 +4,7 @@
     "title": "meka HTTP API",
     "description": "Service-to-service API for driving meka agent turns programmatically. Mirrors the wire format described in the HTTP API docs. A field that has no value is omitted from every response and event, never sent as `null`.",
     "license": { "name": "AGPL-3.0-or-later" },
-    "version": "0.75.0"
+    "version": "0.76.0"
   },
   "paths": {
     "/v1/health/live": {
@@ -654,7 +654,7 @@
             "schema": { "type": ["boolean", "null"] }
           },
           {
-            "name": "cwd",
+            "name": "working_directory",
             "in": "query",
             "description": "Only list sessions whose working directory is this one, compared in the canonical spelling\nevery session records.",
             "required": false,
@@ -2430,7 +2430,7 @@
             }
           },
           "409": {
-            "description": "The skill lives in a read-only root from `[skills] extra_paths`",
+            "description": "The skill lives in a read-only root from `[skills] additional_directories`",
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
             }
@@ -2490,7 +2490,7 @@
             }
           },
           "409": {
-            "description": "The skill lives in a read-only root from `[skills] extra_paths`",
+            "description": "The skill lives in a read-only root from `[skills] additional_directories`",
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
             }
@@ -2806,6 +2806,40 @@
           },
           {
             "type": "object",
+            "description": "An inbox item the model read: `text` as it read it, header included, `body` the person's\nwords, with the item's id, its class (`steer`, `followup`, `interrupt`) and its source\nwhere they were recorded. Typed so a client shows the words as the person's and labels\nthem without parsing the header.",
+            "required": ["body", "text", "type"],
+            "properties": {
+              "body": { "type": "string" },
+              "class": { "type": ["string", "null"] },
+              "item_id": { "type": ["string", "null"], "format": "uuid" },
+              "source": { "type": ["string", "null"] },
+              "text": { "type": "string" },
+              "type": { "type": "string", "enum": ["inbox"] }
+            }
+          },
+          {
+            "type": "object",
+            "description": "A scheduled job's fire the model read: `text` as it read it, `prompt` the job's words,\n`job_id` the job. Typed so a client shows it as a fire rather than as words a person typed.",
+            "required": ["job_id", "prompt", "text", "type"],
+            "properties": {
+              "job_id": { "type": "string" },
+              "prompt": { "type": "string" },
+              "text": { "type": "string" },
+              "type": { "type": "string", "enum": ["scheduled"] }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Finished background work the model read, the tasks `task_ids` name: the `text` a\n`task.reported` feed event carried, or a turn of its own delivered.",
+            "required": ["task_ids", "text", "type"],
+            "properties": {
+              "task_ids": { "type": "array", "items": { "type": "string" } },
+              "text": { "type": "string" },
+              "type": { "type": "string", "enum": ["background_report"] }
+            }
+          },
+          {
+            "type": "object",
             "required": ["media_type", "type"],
             "properties": {
               "hash": {
@@ -2958,10 +2992,6 @@
             "$ref": "#/components/schemas/CapabilitiesBody",
             "description": "Per-session capability flags. See the HTTP API docs § \"Capabilities\"."
           },
-          "cwd": {
-            "type": ["string", "null"],
-            "description": "Absolute path. Defaults to the server process's `current_dir` if omitted."
-          },
           "permission": {
             "type": ["string", "null"],
             "description": "Permission level the session starts in. Defaults to the server's configured default\nfrom `[permissions].default` (typically `read`). Must be in the enabled set."
@@ -2969,6 +2999,10 @@
           "profile": {
             "type": ["string", "null"],
             "description": "Profile the session runs on, and keeps for the rest of its life unless a later PATCH moves\nit. Defaults to the server's own default profile. Must name a profile in `config.toml`;\n`GET /v1/profiles` lists them."
+          },
+          "working_directory": {
+            "type": ["string", "null"],
+            "description": "Absolute path. Defaults to the server process's `current_dir` if omitted."
           }
         },
         "additionalProperties": false
@@ -2977,7 +3011,7 @@
         "type": "object",
         "description": "Body for `POST /v1/sessions/{id}/fork`. Every field is optional; omitted means \"inherit from\nthe session being forked\".\n\nOnly `cwd` is offered, mirroring ACP's `session/fork` request, which likewise carries a\nworkspace but no permission or capability fields. Both of those are inherited and remain\nchangeable afterwards via `PATCH /v1/sessions/{id}`.",
         "properties": {
-          "cwd": {
+          "working_directory": {
             "type": ["string", "null"],
             "description": "Absolute path for the forked session. Absent → inherit the source's."
           }
@@ -3338,10 +3372,6 @@
             "type": ["boolean", "null"],
             "description": "Whether calls above the level are submitted for approval. Absent → keep current."
           },
-          "cwd": {
-            "type": ["string", "null"],
-            "description": "New working directory. Must be absolute. Absent → keep current."
-          },
           "permission": {
             "type": ["string", "null"],
             "description": "New permission level (`none` / `read` / `workspace` / `unrestricted`). Must be in the\nserver's enabled set. Absent → keep current."
@@ -3357,6 +3387,10 @@
           "title": {
             "type": ["string", "null"],
             "description": "The session's title, as every listing shows it. Empty clears it, so the session is labeled\nby its first words again. Absent → keep current. Does not move `updated_at`."
+          },
+          "working_directory": {
+            "type": ["string", "null"],
+            "description": "New working directory. Must be absolute. Absent → keep current."
           }
         },
         "additionalProperties": false
@@ -3649,10 +3683,6 @@
             "description": "Whether calls above the level are submitted for approval."
           },
           "created_at": { "type": "string", "description": "RFC 3339, when the row was made." },
-          "cwd": {
-            "type": ["string", "null"],
-            "description": "Omitted when the row recorded none: an archive that carried no working directory is\nimported as it was written."
-          },
           "id": { "type": "string", "format": "uuid" },
           "last_turn": {
             "oneOf": [
@@ -3684,6 +3714,10 @@
           "updated_at": {
             "type": "string",
             "description": "RFC 3339, moved by any session-level change, a `PATCH` included."
+          },
+          "working_directory": {
+            "type": ["string", "null"],
+            "description": "Omitted when the row recorded none: an archive that carried no working directory is\nimported as it was written."
           }
         }
       },

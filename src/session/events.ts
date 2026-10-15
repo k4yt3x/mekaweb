@@ -176,6 +176,7 @@ const required: Record<keyof EventPayloads, string[]> = {
   'session.updated': ['id', 'updated_at'],
   'conversation.rewound': [],
   'turn.nudged': ['kind', 'text'],
+  'task.reported': ['text'],
   'feed.gap': [],
   'checklist.updated': [],
   'context.compacted': ['source'],
@@ -201,6 +202,11 @@ export function parseEvent(
     (!Array.isArray(value.item_ids) || !value.item_ids.every((id) => typeof id === 'string'))
   )
     throw new Error('Invalid delivery event.');
+  if (
+    frame.event === 'task.reported' &&
+    (!Array.isArray(value.task_ids) || !value.task_ids.every((id) => typeof id === 'string'))
+  )
+    throw new Error('Invalid background report event.');
   for (const key of ['expires_in_seconds', 'progress', 'total', 'replaced_count', 'generation'])
     if (
       key in value &&

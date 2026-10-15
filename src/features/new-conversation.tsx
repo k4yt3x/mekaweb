@@ -137,9 +137,11 @@ export function NewConversation() {
           >
             <div className="new-session-context">
               <WorkingDirectoryPicker
-                value={creation.settings.cwd}
+                value={creation.settings.workingDirectory}
                 disabled={disabled}
-                onChange={(cwd) => creation.setSettings({ ...creation.settings, cwd })}
+                onChange={(workingDirectory) =>
+                  creation.setSettings({ ...creation.settings, workingDirectory })
+                }
               />
             </div>
             <Dialog open={settingsOpen} onOpenChange={setSettingsOpen} title="Session settings">

@@ -30,6 +30,8 @@ export type LiveBlock =
   | { kind: 'tool'; id: string }
   /** What meka wrote to send the model back to work, of the `nudge` kind it names. */
   | { kind: 'nudge'; nudge: string; text: string }
+  /** Background work that finished, which meka wrote into the turn at a round boundary. */
+  | { kind: 'report'; tasks: string[]; text: string }
   /** What the agent or a provider said during the turn, where it said it. */
   | { kind: 'notice'; level: SessionNotice['level']; text: string }
   | { kind: 'submission'; key: string };
@@ -587,6 +589,7 @@ export class SessionController {
           'permission_required',
           'progress',
           'turn.nudged',
+          'task.reported',
         ].includes(frame.event))
     ) {
       // A truncated replay may start in the middle of work. Its explicit turn ID is enough
@@ -637,6 +640,14 @@ export class SessionController {
         blocks: [
           ...state.blocks,
           { kind: 'nudge', nudge: string(data, 'kind'), text: string(data, 'text') },
+        ],
+      });
+    } else if (frame.event === 'task.reported') {
+      this.publish(entry, {
+        textStreaming: false,
+        blocks: [
+          ...state.blocks,
+          { kind: 'report', tasks: data.task_ids as string[], text: string(data, 'text') },
         ],
       });
     } else if (frame.event.startsWith('tool_call.') || frame.event === 'progress') {
@@ -1594,11 +1605,14 @@ export class SessionController {
           entry.abort.signal,
         );
         if (!current() || page.revision !== opening.saved.revision || !page.messages.length) return;
-        // Tool results also use the user role; only text or images identify an input.
+        // Tool results also use the user role. A turn opens with someone's words or images, typed
+        // or sent through the inbox, or with meka's context ahead of a scheduled fire or a report.
         const input = page.messages.findIndex(
           (message) =>
             message.role === 'user' &&
-            message.content.some((block) => block.type === 'text' || block.type === 'image'),
+            message.content.some((block) =>
+              ['text', 'inbox', 'image', 'turn_context', 'scheduled'].includes(block.type),
+            ),
         );
         messages.push(...(input < 0 ? page.messages : page.messages.slice(0, input + 1)));
         if (input >= 0) {

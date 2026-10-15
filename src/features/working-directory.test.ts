@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { directoryLabel, recentDirectories, sameDirectory } from './working-directory';
 
-const session = (cwd: string | null | undefined, updated_at: string) =>
-  cwd === undefined ? { updated_at } : { cwd, updated_at };
+const session = (working_directory: string | null | undefined, updated_at: string) =>
+  working_directory === undefined ? { updated_at } : { working_directory, updated_at };
 
 describe('recent directories', () => {
   it('orders by update time and removes duplicates', () => {

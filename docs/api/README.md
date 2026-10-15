@@ -1,8 +1,8 @@
 # API schema maintenance
 
-`meka-0.75.0.json` was captured from meka tag `0.75.0`, commit `aafaf3383d4d0cce7f11e5771d7b9788b3637a45`, through `/v1/openapi.json` with `[serve].docs = true`. The generated REST types are committed in `src/api/schema.d.ts`; runtime connections do not require schema access.
+`meka-0.76.0.json` was captured from meka tag `0.76.0`, commit `813d54d41ea5a31c56dd0af58678c8cc0d4754ea`, through `/v1/openapi.json` with `[serve].docs = true`. The generated REST types are committed in `src/api/schema.d.ts`; runtime connections do not require schema access.
 
-mekaweb requires meka 0.71.0 or newer and refuses older servers during connection discovery. Compared with 0.68.0, the 0.70.0 and 0.71.0 APIs change these shapes the client used:
+mekaweb requires meka 0.76.0 or newer and refuses older servers during connection discovery. Compared with 0.68.0, the 0.70.0 and 0.71.0 APIs change these shapes the client used:
 
 - `/v1/info` no longer reports `vision`; each `/v1/profiles` entry does.
 - `/v1/sessions/{id}/context` no longer reports `used_percent`. The client divides `used` by `window`, rounding down as meka did.
@@ -16,17 +16,25 @@ mekaweb requires meka 0.71.0 or newer and refuses older servers during connectio
 
 0.72.0 through 0.75.0 change no shape the client uses; the schema differs from 0.71.0's only in its descriptions. A title meka derives from the first message keeps 200 characters rather than 80. `[session].turn_retention` deletes the turns a compaction summarized once they age past its window, without an event and without moving `revision`, which counts the rewrite rows and so can even fall when an old compaction's row goes. Every later message moves up, so a page of earlier history is read with one message more and must end with the first one shown; otherwise the conversation is read again.
 
+0.76.0 changes these:
+
+- A session's `cwd` is `working_directory`: on the record, in create, fork, and `PATCH` bodies, and as the listing's filter. Every request type denies unknown fields, so an older server refuses the new name and a newer one the old; the client therefore requires 0.76.0.
+- A user message keeps the kind of what meka wrote into it on another's behalf. An `inbox` block carries an item's `body`, the sender's words, with its `class` and the `source` it named; a `scheduled` block a job's fire, with `job_id` and `prompt`; and a `background_report` finished background work, with `task_ids`. On each, `text` is what the model read, header included. meka types the rows and archives older versions wrote as `text` blocks, and moves a report out of the `turn_context` block it used to end, so the client reads no headers. A message counts as someone's input by its `text`, `inbox`, or `image` blocks, and its author is the inbox `source` when every word came from that one. A scheduled fire is meka's message, but its `prompt` is the job's words, so it is copied, edited, deleted, and run again as a message is, as it was while it was a `text` block.
+- A background task that finishes while a turn runs reaches it at the next tool-round boundary, as a `background_report` block behind that round's results, announced live as `task.reported` with `task_ids` and `text`. Like a nudge, it stays in the agent's turn. A turn that a scheduled fire or a report alone opens has no words from anyone, so it is shown as meka's.
+- An `agent_spawn` or `agent_followup` result opens `Agent: <id>`, then the sub-agent's permission and directories, where it opened `agent: <id>` and a blank line. The client reads the id from either, since saved results keep the old form.
+- The export archive is format 11, naming a session's `working_directory` and `additional_workspace_directories` where it named `cwd` and `additional_roots`.
+
 0.70.0 also adds turn records, the `/v1/stream` server feed, conditional rewind and fork through `ETag` and `If-Match`, `conversation.rewound`, `permission_resolved`, `approvals_pending`, the `parent` list filter, and the session's open `checklist` with `checklist.updated`. The client shows the open checklist above the message input. Notices are ephemeral: a running turn's show inline where they arrived, warnings and errors also stay below the conversation, and none survives a reload. The session feed parser ignores events it does not handle.
 
 A shell command may print 64 MiB, all of which `tool_call.completed` carries, while the saved result stays a bounded preview. The SSE parser therefore skips data past 2,000,000 characters and keeps the frame's id, so a reconnect cannot replay it. A skipped tool completion keeps its call, outcome, and correlation from the ends of its JSON, and other skipped events become a notice.
 
 The feed's 409 covers `session-not-loaded`: a token with only `sessions:r` does not load a session by attaching. The client then shows the saved conversation and retries the feed until the server loads the session. `POST /compact` runs as a turn on the feed, with `source: "compaction"` on `turn.started`; the client shows it as compacting and does not notify when it ends.
 
-Schema capture is a manual maintenance step. Choose a disposable meka instance with `[serve].docs = true`, confirm its version, and download its schema. For a 0.75.0 instance listening on port 8081:
+Schema capture is a manual maintenance step. Choose a disposable meka instance with `[serve].docs = true`, confirm its version, and download its schema. For a 0.76.0 instance listening on port 8081:
 
 ```sh
-curl --fail --silent --show-error http://127.0.0.1:8081/v1/openapi.json --output docs/api/meka-0.75.0.json
-npx prettier --write docs/api/meka-0.75.0.json
+curl --fail --silent --show-error http://127.0.0.1:8081/v1/openapi.json --output docs/api/meka-0.76.0.json
+npx prettier --write docs/api/meka-0.76.0.json
 npm run api:generate
 ```
 

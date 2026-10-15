@@ -5,7 +5,7 @@ import type { ComposerOptions } from '../session/controller';
 import { emptyComposerOptions, remainingComposerOptions } from '../session/composer-options';
 
 export interface NewSessionSettings {
-  cwd: string;
+  workingDirectory: string;
   profile: string;
   permission: string;
   approvals: string;
@@ -15,7 +15,7 @@ export function useNewConversation(onCreated: (id: string) => void) {
   const { api, controller, connection, info } = useConnection();
   const runtime = useRuntime();
   const [settings, setSettings] = useState<NewSessionSettings>({
-    cwd: '',
+    workingDirectory: '',
     profile: '',
     permission: '',
     approvals: '',
@@ -43,7 +43,9 @@ export function useNewConversation(onCreated: (id: string) => void) {
     let session: Schema['SessionResponse'];
     try {
       session = await api.mutate<Schema['SessionResponse']>('POST', '/v1/sessions', {
-        ...(settings.cwd.trim() ? { cwd: settings.cwd.trim() } : {}),
+        ...(settings.workingDirectory.trim()
+          ? { working_directory: settings.workingDirectory.trim() }
+          : {}),
         ...(settings.profile ? { profile: settings.profile } : {}),
         ...(settings.permission ? { permission: settings.permission } : {}),
         ...(settings.approvals ? { approvals: settings.approvals === 'true' } : {}),

@@ -54,9 +54,17 @@ export function groupToolResults(messages: readonly Schema['MessageView'][]) {
 
 export type HistoryMessage = ReturnType<typeof groupToolResults>['messages'][number];
 
-/** A message meka wrote to send the model back to work, rather than someone's words. */
-export function isNudge(message: Schema['MessageView']) {
-  return message.role === 'user' && message.content[0]?.type === 'nudge';
+/** Whether a block holds someone's words: typed here, or an inbox item they sent. */
+function spoken(block: Schema['ContentBlockView']) {
+  return block.type === 'text' || block.type === 'inbox';
+}
+
+/** A message someone sent, rather than one meka or a tool wrote into the conversation. */
+export function isInput(message: Schema['MessageView']) {
+  return (
+    message.role === 'user' &&
+    message.content.some((block) => spoken(block) || block.type === 'image')
+  );
 }
 
 export function groupAgentMessages(messages: HistoryMessage[]) {
@@ -68,10 +76,15 @@ export function groupAgentMessages(messages: HistoryMessage[]) {
       group?.[0]?.message.role === 'assistant' &&
       !group[0].message.compaction &&
       !message.message.compaction &&
-      // A nudge stays in the turn it answers, unless a steer rides it and so speaks for someone.
+      // What meka writes into a turn stays in it, a nudge or the report of background work
+      // behind a round's results, unless a steer rides it and so speaks for someone. Context and
+      // a scheduled fire only open a turn.
       (message.message.role === 'assistant' ||
-        (isNudge(message.message) &&
-          !message.message.content.some((block) => block.type === 'text'))) &&
+        (message.message.role === 'user' &&
+          message.blocks.length > 0 &&
+          message.blocks.every(
+            ({ block }) => block.type === 'nudge' || block.type === 'background_report',
+          ))) &&
       // Every message a turn added names it, results included. Rows saved before meka recorded
       // turns name none; adjacent ones still belong together, with only matched results between.
       previous?.message.turn_id === message.message.turn_id
@@ -98,11 +111,22 @@ export function turnIndex(messages: readonly Schema['MessageView'][], offset: nu
   if (offset > 0 && first) turns.delete(first);
   return turns;
 }
-/** What the messages say, as written: their text, without thinking, tools, or meka's context. */
+/**
+ * What the messages say, as written: their text, the inbox items someone sent, and a scheduled
+ * job's words, without thinking, tools, or what meka wrote around them.
+ */
 export function messageText(messages: readonly Schema['MessageView'][]) {
   return messages
     .flatMap((message) =>
-      message.content.flatMap((block) => (block.type === 'text' ? [block.text.trim()] : [])),
+      message.content.flatMap((block) =>
+        block.type === 'text'
+          ? [block.text.trim()]
+          : block.type === 'inbox'
+            ? [block.body.trim()]
+            : block.type === 'scheduled'
+              ? [block.prompt.trim()]
+              : [],
+      ),
     )
     .filter(Boolean)
     .join('\n\n');
@@ -120,6 +144,11 @@ export function resendable(message: Schema['MessageView']) {
     text,
     images: images.map((image, index) => ({ name: `Image ${index + 1}`, hash: image.hash! })),
   };
+}
+
+/** The sub-agent a spawn's result names: `Agent: <id>`, or `agent: <id>` before meka 0.76.0. */
+export function spawnedAgent(result: string) {
+  return /^agent: (\S+)/i.exec(result)?.[1];
 }
 
 type AgentBlock = Exclude<LiveBlock, { kind: 'submission' }>;

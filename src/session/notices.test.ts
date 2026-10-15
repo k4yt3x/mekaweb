@@ -57,8 +57,8 @@ it('passes every notice the agent raises through, nudges included', () => {
   expect(
     sessionNotice('notice', {
       level: 'info',
-      text: 'checklist: 2 open items, continuing, nudge 1 of 3',
+      text: 'Checklist: 2 open items, continuing, nudge 1 of 3',
       turn_id: 'turn',
     }),
-  ).toMatchObject({ level: 'info', text: 'checklist: 2 open items, continuing, nudge 1 of 3' });
+  ).toMatchObject({ level: 'info', text: 'Checklist: 2 open items, continuing, nudge 1 of 3' });
 });

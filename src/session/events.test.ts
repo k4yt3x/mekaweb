@@ -29,6 +29,15 @@ it('rejects malformed approval payloads and ignores unknown events', () => {
   expect(parseEvent({ event: 'future.event', data: '{}' })).toBeUndefined();
 });
 
+it('takes a background report only with the tasks it names', () => {
+  const report = { task_ids: ['7f3a1c22-0000-4000-8000-000000000000'], text: 'ok' };
+  expect(parseEvent({ event: 'task.reported', data: JSON.stringify(report) })).toEqual(report);
+  expect(() =>
+    parseEvent({ event: 'task.reported', data: '{"task_ids":[1],"text":"ok"}' }),
+  ).toThrow();
+  expect(() => parseEvent({ event: 'task.reported', data: '{"text":"ok"}' })).toThrow();
+});
+
 it('does not treat inherited object names as registered event types', () => {
   expect(parseEvent({ event: 'constructor', data: '{}' })).toBeUndefined();
   expect(parseEvent({ event: '__proto__', data: '{}' })).toBeUndefined();

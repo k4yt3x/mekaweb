@@ -52,10 +52,12 @@ import {
   groupAgentMessages,
   groupLiveMessages,
   groupToolResults,
+  isInput,
   messageText,
   pendingInboxMessages,
   resendable,
   responseActivityIndicator,
+  spawnedAgent,
   turnIndex,
   type HistoryMessage,
   type ToolResultBlock,
@@ -450,6 +452,8 @@ export function Conversation({ state }: { state: SessionState }) {
                               <Thinking key={index} text={block.text} />
                             ) : block.kind === 'nudge' ? (
                               <Nudge key={index} kind={block.nudge} text={block.text} />
+                            ) : block.kind === 'report' ? (
+                              <BackgroundReport key={index} tasks={block.tasks} text={block.text} />
                             ) : block.kind === 'notice' ? (
                               <TurnNotice key={index} notice={block} />
                             ) : (
@@ -605,6 +609,44 @@ function Nudge({ kind, text }: { kind: string; text: string }) {
     </details>
   );
 }
+/** meka's short form of a task or job id, as its own screen says it. */
+const shortId = (id: string) => id.slice(0, 8);
+/** Background work that finished, reported to the agent by meka rather than written by anyone. */
+function BackgroundReport({ tasks, text }: { tasks: readonly string[]; text: string }) {
+  return (
+    <details className="injected">
+      <summary>
+        {tasks.length === 1
+          ? `Background task ${shortId(tasks[0]!)} reported`
+          : tasks.length
+            ? `${tasks.length} background tasks reported: ${tasks.map(shortId).join(', ')}`
+            : 'Background tasks reported'}
+      </summary>
+      <pre className="plain-text">{text}</pre>
+    </details>
+  );
+}
+/** A scheduled job's fire, which meka wrote in the job's name rather than anyone typing it. */
+function ScheduledFire({ job, prompt, text }: { job: string; prompt: string; text: string }) {
+  return (
+    <details className="injected scheduled-fire">
+      <summary>
+        Scheduled job {shortId(job)} fired: {prompt.replace(/\s+/g, ' ').trim()}
+      </summary>
+      <pre className="plain-text">{text}</pre>
+    </details>
+  );
+}
+/** Who sent a message: the source its inbox items named, when every word came from that one. */
+function sender(message: Schema['MessageView']) {
+  const sources = new Set(
+    message.content.flatMap((block) =>
+      block.type === 'text' ? [''] : block.type === 'inbox' ? [block.source ?? ''] : [],
+    ),
+  );
+  const [source] = sources;
+  return (sources.size === 1 && source) || 'You';
+}
 function Thinking({ text }: { text: string }) {
   const [open, setOpen] = useState(false);
   return (
@@ -627,10 +669,9 @@ function turnKind(group: HistoryMessage[]) {
   const message = group[0]?.message;
   if (!message || message.compaction) return;
   if (message.role === 'assistant') return 'reply';
-  if (
-    message.role === 'user' &&
-    message.content.some((block) => block.type === 'text' || block.type === 'image')
-  )
+  // A scheduled fire opens its turn with the job's words, which meka wrote but which are copied,
+  // edited, and deleted like a message's.
+  if (isInput(message) || message.content.some((block) => block.type === 'scheduled'))
     return 'input';
 }
 function Message({
@@ -702,9 +743,7 @@ function Message({
       </article>
     );
   if (!content.length && message.content.length > 0) return null;
-  const isUserInput =
-    message.role === 'user' &&
-    message.content.some((block) => block.type === 'text' || block.type === 'image');
+  const isUserInput = isInput(message);
   return (
     <article className={`message message-${message.role}${isUserInput ? ' message-input' : ''}`}>
       <MessageHeader
@@ -713,7 +752,9 @@ function Message({
           message.content.every((block) => block.type === 'tool_result')
             ? 'Tool'
             : message.role === 'user'
-              ? 'You'
+              ? isUserInput
+                ? sender(message)
+                : 'meka'
               : message.role === 'assistant'
                 ? 'Agent'
                 : message.role
@@ -928,6 +969,12 @@ function ContentBlock({
       return <Thinking text={block.thinking} />;
     case 'nudge':
       return <Nudge kind={block.kind} text={block.text} />;
+    case 'inbox':
+      return <Markdown text={block.body} />;
+    case 'scheduled':
+      return <ScheduledFire job={block.job_id} prompt={block.prompt} text={block.text} />;
+    case 'background_report':
+      return <BackgroundReport tasks={block.task_ids} text={block.text} />;
     case 'redacted_thinking':
       return <p className="muted small">Thinking unavailable.</p>;
     case 'image':
@@ -1090,7 +1137,7 @@ function SubagentSection({
   const named =
     name === 'agent_followup'
       ? (input as { id?: unknown } | null)?.id
-      : /^agent: (\S+)/.exec(result?.find((item) => item.type === 'text')?.text ?? '')?.[1];
+      : spawnedAgent(result?.find((item) => item.type === 'text')?.text ?? '');
   const matches =
     typeof named === 'string' ? (children ?? []).filter(({ id }) => id.startsWith(named)) : [];
   const id =

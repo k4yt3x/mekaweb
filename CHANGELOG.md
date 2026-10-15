@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-10-15
+
+### Added
+
+- Scheduled fires and background task reports show as notes from meka, expanding to what was sent.
+- A background task that finishes during a turn shows its report in that turn as it arrives.
+
+### Changed
+
+- mekaweb requires meka 0.76.0 or newer, which renames the session working directory field.
+- Inbox messages show their sender's words without meka's header, named by any source they give.
+
 ## [0.16.0] - 2026-10-14
 
 ### Changed
@@ -311,7 +323,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Light and dark themes, narrow layouts, and collapsible, resizable session panels.
 - Hosting at the root or a subpath, with GitHub Pages deployment on version tags.
 
-[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.16.0...HEAD
+[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.17.0...HEAD
+[0.17.0]: https://github.com/k4yt3x/mekaweb/compare/0.16.0...0.17.0
 [0.16.0]: https://github.com/k4yt3x/mekaweb/compare/0.15.2...0.16.0
 [0.15.2]: https://github.com/k4yt3x/mekaweb/compare/0.15.1...0.15.2
 [0.15.1]: https://github.com/k4yt3x/mekaweb/compare/0.15.0...0.15.1

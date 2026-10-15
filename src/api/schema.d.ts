@@ -910,6 +910,29 @@ export interface components {
           type: 'nudge';
         }
       | {
+          body: string;
+          class?: string | null;
+          /** Format: uuid */
+          item_id?: string | null;
+          source?: string | null;
+          text: string;
+          /** @enum {string} */
+          type: 'inbox';
+        }
+      | {
+          job_id: string;
+          prompt: string;
+          text: string;
+          /** @enum {string} */
+          type: 'scheduled';
+        }
+      | {
+          task_ids: string[];
+          text: string;
+          /** @enum {string} */
+          type: 'background_report';
+        }
+      | {
           /**
            * @description Content hash of the stored bytes; `GET /v1/sessions/{id}/blobs/{hash}` returns them.
            *     Absent only for an image the store never externalized.
@@ -1037,8 +1060,6 @@ export interface components {
       approvals?: boolean | null;
       /** @description Per-session capability flags. See the HTTP API docs § "Capabilities". */
       capabilities?: components['schemas']['CapabilitiesBody'];
-      /** @description Absolute path. Defaults to the server process's `current_dir` if omitted. */
-      cwd?: string | null;
       /**
        * @description Permission level the session starts in. Defaults to the server's configured default
        *     from `[permissions].default` (typically `read`). Must be in the enabled set.
@@ -1050,6 +1071,8 @@ export interface components {
        *     `GET /v1/profiles` lists them.
        */
       profile?: string | null;
+      /** @description Absolute path. Defaults to the server process's `current_dir` if omitted. */
+      working_directory?: string | null;
     };
     /**
      * @description Body for `POST /v1/sessions/{id}/fork`. Every field is optional; omitted means "inherit from
@@ -1061,7 +1084,7 @@ export interface components {
      */
     ForkSessionBody: {
       /** @description Absolute path for the forked session. Absent → inherit the source's. */
-      cwd?: string | null;
+      working_directory?: string | null;
     };
     /** @description A job's gate: what it runs and when the result fires the job. */
     GateView: {
@@ -1363,8 +1386,6 @@ export interface components {
     PatchSessionRequest: {
       /** @description Whether calls above the level are submitted for approval. Absent → keep current. */
       approvals?: boolean | null;
-      /** @description New working directory. Must be absolute. Absent → keep current. */
-      cwd?: string | null;
       /**
        * @description New permission level (`none` / `read` / `workspace` / `unrestricted`). Must be in the
        *     server's enabled set. Absent → keep current.
@@ -1389,6 +1410,8 @@ export interface components {
        *     by its first words again. Absent → keep current. Does not move `updated_at`.
        */
       title?: string | null;
+      /** @description New working directory. Must be absolute. Absent → keep current. */
+      working_directory?: string | null;
     };
     /** @enum {string} */
     PermissionDecision: 'allow' | 'deny' | 'allow_always' | 'deny_always';
@@ -1665,11 +1688,6 @@ export interface components {
       approvals: boolean;
       /** @description RFC 3339, when the row was made. */
       created_at: string;
-      /**
-       * @description Omitted when the row recorded none: an archive that carried no working directory is
-       *     imported as it was written.
-       */
-      cwd?: string | null;
       /** Format: uuid */
       id: string;
       last_turn?: components['schemas']['TurnRecord'] | null;
@@ -1698,6 +1716,11 @@ export interface components {
       title: string;
       /** @description RFC 3339, moved by any session-level change, a `PATCH` included. */
       updated_at: string;
+      /**
+       * @description Omitted when the row recorded none: an archive that carried no working directory is
+       *     imported as it was written.
+       */
+      working_directory?: string | null;
     };
     /**
      * @description One skill in full: what `GET /v1/skills/{name}` answers with, and the core of what `meka skill
@@ -2731,7 +2754,7 @@ export interface operations {
          * @description Only list sessions whose working directory is this one, compared in the canonical spelling
          *     every session records.
          */
-        cwd?: string | null;
+        working_directory?: string | null;
         /**
          * @description Only the sub-agents this session spawned, its direct children. A tree view expands one
          *     node with one call and recurses for depth. Names sub-agents by definition, so
@@ -4839,7 +4862,7 @@ export interface operations {
           'application/json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description The skill lives in a read-only root from `[skills] extra_paths` */
+      /** @description The skill lives in a read-only root from `[skills] additional_directories` */
       409: {
         headers: {
           [name: string]: unknown;
@@ -4923,7 +4946,7 @@ export interface operations {
           'application/json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description The skill lives in a read-only root from `[skills] extra_paths` */
+      /** @description The skill lives in a read-only root from `[skills] additional_directories` */
       409: {
         headers: {
           [name: string]: unknown;

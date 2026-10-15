@@ -251,7 +251,9 @@ export function SessionsPage({ id }: { id?: string | undefined }) {
                 ) : (
                   <>
                     <Folder size={12} aria-hidden="true" />
-                    <span>{selected?.session?.cwd ?? 'Working directory not recorded'}</span>
+                    <span>
+                      {selected?.session?.working_directory ?? 'Working directory not recorded'}
+                    </span>
                   </>
                 )}
               </p>
@@ -387,7 +389,7 @@ function SessionActions({
   const [dialog, setDialog] = useState('');
   const dialogIntent = useRef('');
   const trigger = useRef<HTMLButtonElement>(null);
-  const [cwd, setCwd] = useState('');
+  const [workingDirectory, setWorkingDirectory] = useState('');
   const [turns, setTurns] = useState(1);
   const [instructions, setInstructions] = useState('');
   const [keep, setKeep] = useState('');
@@ -446,7 +448,9 @@ function SessionActions({
         const result = await api.mutate<Schema['SessionResponse']>(
           'POST',
           sessionPath(session.id) + '/fork',
-          cwd ? { cwd } : {},
+          (workingDirectory
+            ? { working_directory: workingDirectory }
+            : {}) satisfies Schema['ForkSessionBody'],
         );
         location.hash = '/sessions/' + result.id;
         closeAction();
@@ -607,9 +611,9 @@ function SessionActions({
             {dialog === 'fork' && (
               <Field label="Working directory override">
                 <input
-                  value={cwd}
+                  value={workingDirectory}
                   placeholder="Inherit source directory"
-                  onChange={(event) => setCwd(event.target.value)}
+                  onChange={(event) => setWorkingDirectory(event.target.value)}
                 />
               </Field>
             )}

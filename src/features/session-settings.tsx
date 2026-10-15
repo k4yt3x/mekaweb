@@ -119,14 +119,16 @@ function SessionForm({
   const [initial] = useState(session);
   const canWrite = useCan('sessions:w') && !session?.parent_id;
   const activeTurn = running || session?.turn_in_flight;
-  const [cwd, setCwd] = useState(session?.cwd ?? '');
+  const [workingDirectory, setWorkingDirectory] = useState(session?.working_directory ?? '');
   const [approvals, setApprovals] = useState(String(session.approvals));
   const action = useAction();
   async function submit(event: FormEvent) {
     event.preventDefault();
     await action.run(async () => {
       const body: Schema['PatchSessionRequest'] = {
-        ...(cwd !== (initial.cwd ?? '') ? { cwd } : {}),
+        ...(workingDirectory !== (initial.working_directory ?? '')
+          ? { working_directory: workingDirectory }
+          : {}),
         ...(approvals !== String(initial.approvals) ? { approvals: approvals === 'true' } : {}),
       };
       if (!controller) throw new Error('Reconnect before changing session settings.');
@@ -144,9 +146,9 @@ function SessionForm({
           hint={activeTurn ? 'Directory is locked during a turn.' : undefined}
         >
           <input
-            value={cwd}
+            value={workingDirectory}
             disabled={!canWrite || activeTurn}
-            onChange={(event) => setCwd(event.target.value)}
+            onChange={(event) => setWorkingDirectory(event.target.value)}
             placeholder="Server default"
           />
         </Field>

@@ -224,6 +224,27 @@ it('loads a remote input when its first output arrives during an idle history re
   expect(f.state().running).toBe(true);
 });
 
+it.each<[string, Schema['ContentBlockView']]>([
+  [
+    'an inbox item',
+    { type: 'inbox', class: 'followup', body: 'Queued', text: '[Message]\nQueued' },
+  ],
+  ['a scheduled fire', { type: 'scheduled', job_id: 'job', prompt: 'Stretch', text: 'Stretch' }],
+  ['a background report', { type: 'background_report', task_ids: ['task'], text: 'Done' }],
+])('loads a remote turn that %s opens', async (_, block) => {
+  const f = await fixture();
+  f.session.turn_in_flight = true;
+  await f.event('turn.started', { turn_id: 'remote' });
+  const opening: Schema['MessageView'] = {
+    role: 'user',
+    content: [{ type: 'turn_context', text: 'Context' }, block],
+  };
+  f.saved.messages = [opening];
+  f.saved.total = 1;
+  await f.event('assistant_text.delta', { turn_id: 'remote', text: 'Answer' });
+  await vi.waitFor(() => expect(f.state().saved?.messages).toEqual([opening]));
+});
+
 it('does not mistake an unreconciled previous turn’s input for a new turn’s input', async () => {
   const f = await fixture();
   await f.event('turn.started', { turn_id: 'old' });
@@ -563,7 +584,7 @@ it('reads the conversation again when another client rewinds it', async () => {
   );
 });
 
-it('shows a nudge in the live turn, and reads the conversation again after a feed gap', async () => {
+it('shows a nudge and a background report in the live turn, and reads the conversation again after a feed gap', async () => {
   const f = await fixture();
   await f.event('turn.started', { turn_id: 'turn' });
   await f.event('assistant_text.delta', { turn_id: 'turn', text: 'Done.' });
@@ -572,6 +593,12 @@ it('shows a nudge in the live turn, and reads the conversation again after a fee
     kind: 'nudge',
     nudge: 'checklist',
     text: 'One item is open.',
+  });
+  await f.event('task.reported', { turn_id: 'turn', task_ids: ['task'], text: 'Tests passed.' });
+  expect(f.state().blocks.at(-1)).toEqual({
+    kind: 'report',
+    tasks: ['task'],
+    text: 'Tests passed.',
   });
   // A notice is what the agent or a provider said, never a hole in the feed.
   await f.event('notice', { level: 'warn', text: 'Provider advisory' });
@@ -596,11 +623,11 @@ it('shows a running turn’s notices where they arrived, keeping warnings below 
   await f.event('notice', {
     turn_id: 'turn',
     level: 'info',
-    text: 'checklist: 1 open item, continuing, nudge 1 of 3',
+    text: 'Checklist: 1 open item, continuing, nudge 1 of 3',
   });
   await f.event('notice', { turn_id: 'turn', level: 'warn', text: 'Provider advisory' });
   expect(f.state().blocks).toEqual([
-    { kind: 'notice', level: 'info', text: 'checklist: 1 open item, continuing, nudge 1 of 3' },
+    { kind: 'notice', level: 'info', text: 'Checklist: 1 open item, continuing, nudge 1 of 3' },
     { kind: 'notice', level: 'warning', text: 'Provider advisory' },
   ]);
   expect(f.state().notices.map((notice) => notice.text)).toEqual(['Provider advisory']);
