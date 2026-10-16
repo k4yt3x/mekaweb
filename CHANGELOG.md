@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-10-16
+
+### Added
+
+- The MCP tool list marks the tools meka defers until the agent loads them, or hides from it.
+
+### Changed
+
+- Recognize meka 0.77.0 as a verified server version; meka 0.76.0 and newer still connect.
+
+### Fixed
+
+- On meka 0.77.0, a call that loads tools completes and shows their names, not stuck running.
+
 ## [0.18.2] - 2026-10-16
 
 ### Fixed
@@ -352,7 +366,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Light and dark themes, narrow layouts, and collapsible, resizable session panels.
 - Hosting at the root or a subpath, with GitHub Pages deployment on version tags.
 
-[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.18.2...HEAD
+[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.19.0...HEAD
+[0.19.0]: https://github.com/k4yt3x/mekaweb/compare/0.18.2...0.19.0
 [0.18.2]: https://github.com/k4yt3x/mekaweb/compare/0.18.1...0.18.2
 [0.18.1]: https://github.com/k4yt3x/mekaweb/compare/0.18.0...0.18.1
 [0.18.0]: https://github.com/k4yt3x/mekaweb/compare/0.17.0...0.18.0

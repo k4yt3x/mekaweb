@@ -223,7 +223,8 @@ export function parseEvent(
         (item) =>
           record(item) &&
           ((item.type === 'text' && typeof item.text === 'string') ||
-            (item.type === 'image' && typeof item.media_type === 'string')),
+            (item.type === 'image' && typeof item.media_type === 'string') ||
+            (item.type === 'tool_reference' && typeof item.tool_name === 'string')),
       ))
   )
     throw new Error('Invalid tool result event.');

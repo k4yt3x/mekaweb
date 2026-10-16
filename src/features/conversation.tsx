@@ -1030,11 +1030,21 @@ function ToolResultContent({
           <pre className="plain-text" key={index}>
             {block.text}
           </pre>
+        ) : block.type === 'tool_reference' ? (
+          <LoadedTool key={index} name={block.tool_name} />
         ) : (
           <Attachment key={index} sessionId={sessionId} hash={block.hash} />
         ),
       )}
     </ToolOutput>
+  );
+}
+/** A deferred tool the result made callable, which meka names in place of its schema. */
+function LoadedTool({ name }: { name: string }) {
+  return (
+    <p className="plain-text">
+      Loaded <code>{name}</code>
+    </p>
   );
 }
 function ToolOutput({ children, label = 'Tool result' }: { children: ReactNode; label?: string }) {
@@ -1093,11 +1103,13 @@ function Tool({ tool, sessionId }: { tool: LiveTool | undefined; sessionId: stri
           <h4>Result</h4>
           <ToolOutput>
             {Array.isArray(tool.content) &&
-              tool.content.map((content: { type: string; text?: string }, index: number) =>
+              tool.content.map((content: Schema['ToolResultContentView'], index: number) =>
                 content.type === 'text' ? (
                   <pre className="plain-text" key={index}>
                     {content.text}
                   </pre>
+                ) : content.type === 'tool_reference' ? (
+                  <LoadedTool key={index} name={content.tool_name} />
                 ) : (
                   <p className="muted small" key={index}>
                     Image preview available after this turn finishes.

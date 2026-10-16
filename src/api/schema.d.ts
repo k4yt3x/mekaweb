@@ -1263,6 +1263,11 @@ export interface components {
       allowed: boolean;
       description: string;
       /**
+       * @description How the tool ships when allowed: `eager` (declared from the first request), `deferred`
+       *     (loaded on demand) or `hidden` (not registered), per `deferral` and `eager_load_tools`.
+       */
+      loading: string;
+      /**
        * @description Which step of that chain decided it, so a misclassified tool can be traced to the rule that
        *     classified it rather than guessed at.
        */
@@ -1778,6 +1783,11 @@ export interface components {
           media_type: string;
           /** @enum {string} */
           type: 'image';
+        }
+      | {
+          tool_name: string;
+          /** @enum {string} */
+          type: 'tool_reference';
         };
     /**
      * @description One entry of a tool catalog: what `GET /v1/sessions/{id}/tools` answers with, and the core of

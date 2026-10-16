@@ -111,6 +111,11 @@ export function McpPage() {
               <h3>
                 {tool.raw_name} <span className="badge">{tool.required_permission}</span>
                 {!tool.allowed && <span className="badge">Filtered out</span>}
+                {/* How an allowed tool reaches the agent, unless declared from the first request. */}
+                {tool.allowed && tool.loading === 'deferred' && (
+                  <span className="badge">Deferred</span>
+                )}
+                {tool.allowed && tool.loading === 'hidden' && <span className="badge">Hidden</span>}
               </h3>
               <p>{tool.description}</p>
               <details>

@@ -38,6 +38,23 @@ it('takes a background report only with the tasks it names', () => {
   expect(() => parseEvent({ event: 'task.reported', data: '{"text":"ok"}' })).toThrow();
 });
 
+it('takes a tool result that loads deferred tools by reference, but only by name', () => {
+  const completed = {
+    id: 'toolu_1',
+    is_error: false,
+    content: [{ type: 'tool_reference', tool_name: 'mcp__docs__search' }],
+  };
+  expect(parseEvent({ event: 'tool_call.completed', data: JSON.stringify(completed) })).toEqual(
+    completed,
+  );
+  expect(() =>
+    parseEvent({
+      event: 'tool_call.completed',
+      data: '{"id":"toolu_1","is_error":false,"content":[{"type":"tool_reference"}]}',
+    }),
+  ).toThrow('Invalid tool result event.');
+});
+
 it('does not treat inherited object names as registered event types', () => {
   expect(parseEvent({ event: 'constructor', data: '{}' })).toBeUndefined();
   expect(parseEvent({ event: '__proto__', data: '{}' })).toBeUndefined();

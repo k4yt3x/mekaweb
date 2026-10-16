@@ -1,6 +1,6 @@
 # API schema maintenance
 
-`meka-0.76.0.json` was captured from meka tag `0.76.0`, commit `813d54d41ea5a31c56dd0af58678c8cc0d4754ea`, through `/v1/openapi.json` with `[serve].docs = true`. The generated REST types are committed in `src/api/schema.d.ts`; runtime connections do not require schema access.
+`meka-0.77.0.json` was captured from meka `0.77.0`, commit `77ae53667c0a25f7b3d8c0b6fda010b893a4b55c`, through `/v1/openapi.json` with `[serve].docs = true`. The generated REST types are committed in `src/api/schema.d.ts`; runtime connections do not require schema access.
 
 mekaweb requires meka 0.76.0 or newer and refuses older servers during connection discovery. Compared with 0.68.0, the 0.70.0 and 0.71.0 APIs change these shapes the client used:
 
@@ -24,17 +24,23 @@ mekaweb requires meka 0.76.0 or newer and refuses older servers during connectio
 - An `agent_spawn` or `agent_followup` result opens `Agent: <id>`, then the sub-agent's permission and directories, where it opened `agent: <id>` and a blank line. The client reads the id from either, since saved results keep the old form.
 - The export archive is format 11, naming a session's `working_directory` and `additional_workspace_directories` where it named `cwd` and `additional_roots`.
 
+0.77.0 changes no request, so 0.76.0 remains the minimum. It adds these:
+
+- A tool result may carry a `tool_reference` item, `{type, tool_name}`, in history and in `tool_call.completed`: a deferred tool that `tool_load` or `tool_search` made callable on a profile whose `deferred_tools` is `native`, the default on the official Anthropic and OpenAI endpoints and both subscriptions. Such a result is references alone, since the endpoint refuses text beside one. The client shows each as the tool it loaded.
+- Each `GET /v1/mcp/{name}/tools` entry states `loading`: `eager`, `deferred`, or `hidden`, by `deferral` and the server's `eager_load_tools`. A hidden tool is not registered, so the agent never sees it.
+- The export archive is format 12, whose thinking blocks may carry a Chat Completions endpoint's reasoning. meka reads a format 11 archive as it is.
+
 0.70.0 also adds turn records, the `/v1/stream` server feed, conditional rewind and fork through `ETag` and `If-Match`, `conversation.rewound`, `permission_resolved`, `approvals_pending`, the `parent` list filter, and the session's open `checklist` with `checklist.updated`. The client shows the open checklist above the message input. Notices are ephemeral: a running turn's show inline where they arrived, warnings and errors also stay below the conversation, and none survives a reload. The session feed parser ignores events it does not handle.
 
 A shell command may print 64 MiB, all of which `tool_call.completed` carries, while the saved result stays a bounded preview. The SSE parser therefore skips data past 2,000,000 characters and keeps the frame's id, so a reconnect cannot replay it. A skipped tool completion keeps its call, outcome, and correlation from the ends of its JSON, and other skipped events become a notice.
 
 The feed's 409 covers `session-not-loaded`: a token with only `sessions:r` does not load a session by attaching. The client then shows the saved conversation and retries the feed until the server loads the session. `POST /compact` runs as a turn on the feed, with `source: "compaction"` on `turn.started`; the client shows it as compacting and does not notify when it ends.
 
-Schema capture is a manual maintenance step. Choose a disposable meka instance with `[serve].docs = true`, confirm its version, and download its schema. For a 0.76.0 instance listening on port 8081:
+Schema capture is a manual maintenance step. Choose a disposable meka instance with `[serve].docs = true`, confirm its version, and download its schema. For a 0.77.0 instance listening on port 8081:
 
 ```sh
-curl --fail --silent --show-error http://127.0.0.1:8081/v1/openapi.json --output docs/api/meka-0.76.0.json
-npx prettier --write docs/api/meka-0.76.0.json
+curl --fail --silent --show-error http://127.0.0.1:8081/v1/openapi.json --output docs/api/meka-0.77.0.json
+npx prettier --write docs/api/meka-0.77.0.json
 npm run api:generate
 ```
 

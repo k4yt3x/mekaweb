@@ -4,7 +4,7 @@
     "title": "meka HTTP API",
     "description": "Service-to-service API for driving meka agent turns programmatically. Mirrors the wire format described in the HTTP API docs. A field that has no value is omitted from every response and event, never sent as `null`.",
     "license": { "name": "AGPL-3.0-or-later" },
-    "version": "0.76.0"
+    "version": "0.77.0"
   },
   "paths": {
     "/v1/health/live": {
@@ -3218,6 +3218,7 @@
           "required_permission",
           "permission_source",
           "allowed",
+          "loading",
           "read_only_hint_declined"
         ],
         "properties": {
@@ -3226,6 +3227,10 @@
             "description": "`false` when `allowed_tools` or `disabled_tools` filters this tool out, so the agent never\nsees it. Listed anyway: \"configured away\" and \"not advertised\" are different problems."
           },
           "description": { "type": "string" },
+          "loading": {
+            "type": "string",
+            "description": "How the tool ships when allowed: `eager` (declared from the first request), `deferred`\n(loaded on demand) or `hidden` (not registered), per `deferral` and `eager_load_tools`."
+          },
           "permission_source": {
             "type": "string",
             "description": "Which step of that chain decided it, so a misclassified tool can be traced to the rule that\nclassified it rather than guessed at."
@@ -3788,6 +3793,15 @@
               },
               "media_type": { "type": "string" },
               "type": { "type": "string", "enum": ["image"] }
+            }
+          },
+          {
+            "type": "object",
+            "description": "A deferred tool the result made callable, by name.",
+            "required": ["tool_name", "type"],
+            "properties": {
+              "tool_name": { "type": "string" },
+              "type": { "type": "string", "enum": ["tool_reference"] }
             }
           }
         ]
