@@ -1884,3 +1884,28 @@ it('reconciles a finished preview even when a later history fetch supersedes the
   await Promise.resolve();
   expect(f.state().blocks).toEqual([]);
 });
+
+it('keeps a running session’s feed when parked, until its turn ends', async () => {
+  const f = await fixture();
+  await f.event('turn.started', {
+    turn_id: 'live',
+    started_at: new Date(Date.now() + 1000).toISOString(),
+  });
+  f.controller.park();
+  expect(f.state().feed).toBe('connected');
+  expect(f.controller.working).toBe(true);
+  await f.event('turn.finished', { turn_id: 'live' });
+  await vi.waitFor(() => expect(f.state().feed).toBe('closed'));
+  expect(f.controller.working).toBe(false);
+  expect(f.api.stream).toHaveBeenCalledTimes(1);
+});
+
+it.each([
+  ['an idle session', {}],
+  ['a running sub-agent', { parent_id: 'parent', turn_in_flight: true }],
+])('closes %s’s feed when parked', async (_, record) => {
+  const f = await fixture(true, undefined, record);
+  f.controller.park();
+  expect(f.state().feed).toBe('closed');
+  expect(f.controller.working).toBe(false);
+});

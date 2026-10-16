@@ -1829,6 +1829,29 @@ export class SessionController {
   watch(id: string) {
     void this.ensure(id).catch(() => {});
   }
+  /**
+   * Leaves the selection for another connection. Feeds stay open only for work in flight, since
+   * meka stops a streaming turn nobody reads; a sub-agent's feed is read only, so it goes too.
+   */
+  park() {
+    this.select(undefined);
+    for (const entry of this.entries.values())
+      if (entry.state.session?.parent_id && !entry.abort.signal.aborted) {
+        entry.abort.abort();
+        this.publish(entry, { feed: 'closed' });
+      }
+  }
+  /** Whether an open feed still carries a running turn, a submission, or a prompt to answer. */
+  get working() {
+    return [...this.entries.values()].some(
+      (entry) =>
+        !entry.abort.signal.aborted &&
+        entry.state.feed !== 'unavailable' &&
+        (isSessionRunning(entry.state) ||
+          entry.state.approvals.length > 0 ||
+          entry.state.submissions.some((submission) => submission.state === 'sending')),
+    );
+  }
   async reconnect(id: string) {
     const entry = this.entries.get(id);
     entry?.abort.abort();

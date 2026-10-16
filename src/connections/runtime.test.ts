@@ -2,6 +2,8 @@ import { QueryClient } from '@tanstack/react-query';
 import { afterEach, expect, it, vi } from 'vitest';
 import { ApiClient, ConnectionError, type Schema } from '../api/client';
 import { ConnectionRuntime } from './runtime';
+import { SessionController } from '../session/controller';
+import { emptyComposerOptions } from '../session/composer-options';
 import { BrowserStorage } from './storage';
 
 const info: Schema['InfoResponse'] = {
@@ -415,6 +417,46 @@ it('leaves the open session when switching to another server, and only then', as
     await runtime.connect(alpha);
     expect(address).toMatchObject({ hash: '#/schedules' });
     expect(address.replace).toHaveBeenCalledOnce();
+  } finally {
+    stop();
+  }
+});
+
+it('parks a connection’s work in flight on a switch, and resumes it on the way back', async () => {
+  vi.stubGlobal('window', new EventTarget());
+  vi.stubGlobal('BroadcastChannel', undefined);
+  const { runtime, storage } = fixture();
+  const alpha = storage.saveConnection('Alpha', 'https://alpha.example', 'synthetic-token', true);
+  const beta = storage.saveConnection('Beta', 'https://beta.example', 'synthetic-token', true);
+  vi.spyOn(globalThis, 'fetch').mockImplementation(() => Promise.resolve(Response.json(info)));
+  const working = vi.spyOn(SessionController.prototype, 'working', 'get').mockReturnValue(true);
+  const dispose = vi.spyOn(SessionController.prototype, 'dispose');
+  const stop = runtime.start();
+  try {
+    await runtime.connect(alpha);
+    const { api, controller } = runtime.getSnapshot();
+    await runtime.connect(beta);
+    expect(dispose).not.toHaveBeenCalled();
+    // Coming back takes the parked instance as it stands.
+    await runtime.connect(alpha);
+    expect(runtime.getSnapshot()).toMatchObject({ api, controller });
+    await runtime.connect(beta);
+    working.mockReturnValue(false);
+    controller!.saveDraft('s', emptyComposerOptions);
+    expect(dispose.mock.contexts).toEqual([controller]);
+    // Changed credentials end parked work at once.
+    await runtime.connect(alpha);
+    working.mockReturnValue(true);
+    const parked = runtime.getSnapshot().controller;
+    await runtime.connect(beta);
+    storage.forget(alpha.id);
+    expect(dispose.mock.contexts).toContain(parked);
+    // Idle work is not parked.
+    working.mockReturnValue(false);
+    const idle = runtime.getSnapshot().controller;
+    storage.saveConnection('Alpha', 'https://alpha.example', 'synthetic-token', true, alpha.id);
+    await runtime.connect(storage.getSnapshot().connections.find((c) => c.id === alpha.id)!);
+    expect(dispose.mock.contexts).toContain(idle);
   } finally {
     stop();
   }

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.2] - 2026-10-16
+
+### Fixed
+
+- Switching connections no longer stops a running turn; mekaweb follows it until it ends.
+
 ## [0.18.1] - 2026-10-16
 
 ### Fixed
@@ -346,7 +352,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Light and dark themes, narrow layouts, and collapsible, resizable session panels.
 - Hosting at the root or a subpath, with GitHub Pages deployment on version tags.
 
-[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.18.1...HEAD
+[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.18.2...HEAD
+[0.18.2]: https://github.com/k4yt3x/mekaweb/compare/0.18.1...0.18.2
 [0.18.1]: https://github.com/k4yt3x/mekaweb/compare/0.18.0...0.18.1
 [0.18.0]: https://github.com/k4yt3x/mekaweb/compare/0.17.0...0.18.0
 [0.17.0]: https://github.com/k4yt3x/mekaweb/compare/0.16.0...0.17.0

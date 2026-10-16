@@ -13,6 +13,12 @@ export interface RuntimeState {
   error?: string;
   connectionIssue?: 'offline' | 'checking';
 }
+interface Parked {
+  connection: Connection;
+  api: ApiClient;
+  controller: SessionController;
+  stop: () => void;
+}
 export class ConnectionRuntime {
   readonly notifications: BrowserNotifications;
   private state: RuntimeState = { busy: false };
@@ -25,6 +31,8 @@ export class ConnectionRuntime {
   private recoveryPromise: Promise<void> | undefined;
   // The server the address's session belongs to; session ids mean nothing on another server.
   private routeServer: string | undefined;
+  // Connections switched away from while work was in flight, followed until it ends.
+  private parked = new Set<Parked>();
   constructor(
     readonly storage: BrowserStorage,
     readonly queries: QueryClient,
@@ -42,16 +50,39 @@ export class ConnectionRuntime {
     this.state = state;
     for (const listener of this.listeners) listener();
   }
-  private releaseAuthority() {
+  /** Retires the open connection; a switch parks its work in flight rather than ending it. */
+  private releaseAuthority(park = false) {
     this.generation++;
     clearTimeout(this.recoveryTimer);
     this.recoveryTimer = undefined;
     this.recoveryAbort?.abort();
     this.recoveryAbort = undefined;
     this.recoveryPromise = undefined;
-    this.state.controller?.dispose();
-    this.state.api?.dispose();
+    const { connection, api, controller } = this.state;
+    if (park) controller?.park();
+    if (park && connection && api && controller?.working) {
+      const parked: Parked = {
+        connection,
+        api,
+        controller,
+        stop: controller.subscribe(() => {
+          if (!controller.working) this.unpark(parked, true);
+        }),
+      };
+      this.parked.add(parked);
+    } else {
+      controller?.dispose();
+      api?.dispose();
+    }
     this.queries.clear();
+  }
+  private unpark(parked: Parked, dispose: boolean) {
+    parked.stop();
+    this.parked.delete(parked);
+    if (dispose) {
+      parked.controller.dispose();
+      parked.api.dispose();
+    }
   }
   private connectionChanged(reachable: boolean) {
     if (!this.state.api) return;
@@ -140,6 +171,8 @@ export class ConnectionRuntime {
   start() {
     const detach = this.storage.attach();
     const invalidate = this.storage.onInvalidation((id) => {
+      // Changed credentials end parked work too; it must not continue under the old authority.
+      for (const parked of this.parked) if (parked.connection.id === id) this.unpark(parked, true);
       if (this.state.connection?.id === id || this.pending?.id === id)
         this.disconnect(
           'This connection’s credentials changed. Reconnect to use its current authority.',
@@ -176,6 +209,7 @@ export class ConnectionRuntime {
       sync();
       notifications.stop();
       this.disconnect();
+      for (const parked of this.parked) this.unpark(parked, true);
     };
   }
   async connect(connection: Connection) {
@@ -257,7 +291,7 @@ export class ConnectionRuntime {
       this.pending = undefined;
       candidate.dispose();
       // Retire the old authority without canceling this connection attempt's error handling.
-      this.releaseAuthority();
+      this.releaseAuthority(pendingId !== this.state.connection?.id);
       this.publish({ busy: true });
       const connection = save();
       // Leave another server's session before the workspace renders, so it never requests it.
@@ -270,22 +304,34 @@ export class ConnectionRuntime {
       )
         location.replace('#/sessions');
       this.routeServer = connection.endpoint;
-      const generation = this.generation;
-      const api = new ApiClient(
-        endpoint,
-        token,
-        () => {
-          if (generation === this.generation)
-            this.disconnect('The token was rejected. Enter a valid token to reconnect.');
-        },
-        (reachable) => {
-          if (generation === this.generation && this.state.api === api)
-            this.connectionChanged(reachable);
-        },
+      const canWrite = info.scopes.includes('sessions:w');
+      // Coming back resumes parked work as it stands, rather than opening its feeds a second time.
+      const parked = [...this.parked].find(
+        (p) =>
+          p.connection.id === connection.id &&
+          p.connection.authority === connection.authority &&
+          p.controller.canWrite === canWrite,
       );
-      const controller = new SessionController(api, info.scopes.includes('sessions:w'), () => {
-        void this.queries.invalidateQueries();
-      });
+      if (parked) this.unpark(parked, false);
+      // Callbacks ask whether their instance is the open one, so parked instances stay quiet.
+      const api: ApiClient =
+        parked?.api ??
+        new ApiClient(
+          endpoint,
+          token,
+          () => {
+            if (this.state.api === api)
+              this.disconnect('The token was rejected. Enter a valid token to reconnect.');
+          },
+          (reachable) => {
+            if (this.state.api === api) this.connectionChanged(reachable);
+          },
+        );
+      const controller: SessionController =
+        parked?.controller ??
+        new SessionController(api, canWrite, () => {
+          if (this.state.controller === controller) void this.queries.invalidateQueries();
+        });
       this.publish({ connection, api, controller, info, busy: false });
       return true;
     } catch (error) {
