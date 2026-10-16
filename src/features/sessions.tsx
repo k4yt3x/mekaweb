@@ -806,5 +806,14 @@ function SessionDetails({ session }: { session: Schema['SessionResponse'] }) {
 
 export function SessionRoute() {
   const { sessionId } = useParams({ strict: false });
-  return <SessionsPage id={sessionId} />;
+  // Switching servers leaves the address's session before the router follows. Mounted for the
+  // new connection, never open a session the address no longer names; it belongs elsewhere.
+  const [left, setLeft] = useState(() =>
+    sessionId &&
+    window.location.hash.split('?')[0] !== '#/sessions/' + encodeURIComponent(sessionId)
+      ? sessionId
+      : undefined,
+  );
+  if (left && sessionId !== left) setLeft(undefined);
+  return <SessionsPage id={sessionId === left ? undefined : sessionId} />;
 }

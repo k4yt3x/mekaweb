@@ -23,6 +23,8 @@ export class ConnectionRuntime {
   private recoveryTimer: ReturnType<typeof setTimeout> | undefined;
   private recoveryAbort: AbortController | undefined;
   private recoveryPromise: Promise<void> | undefined;
+  // The server the address's session belongs to; session ids mean nothing on another server.
+  private routeServer: string | undefined;
   constructor(
     readonly storage: BrowserStorage,
     readonly queries: QueryClient,
@@ -156,9 +158,11 @@ export class ConnectionRuntime {
       )
         this.publish({ ...this.state, connection: record });
     });
-    const notifications = this.notifications.start();
     const settings = this.storage.getSnapshot();
     const connection = settings.connections.find((c) => c.id === settings.lastConnection);
+    // A loaded address names a session on the connection this browser last used.
+    this.routeServer = connection?.endpoint;
+    const notifications = this.notifications.start();
     if (
       !notifications.opened &&
       connection &&
@@ -256,6 +260,16 @@ export class ConnectionRuntime {
       this.releaseAuthority();
       this.publish({ busy: true });
       const connection = save();
+      // Leave another server's session before the workspace renders, so it never requests it.
+      // A notification opening its session navigates after this connection is established.
+      if (
+        this.routeServer &&
+        this.routeServer !== connection.endpoint &&
+        typeof location !== 'undefined' &&
+        location.hash.startsWith('#/sessions/')
+      )
+        location.replace('#/sessions');
+      this.routeServer = connection.endpoint;
       const generation = this.generation;
       const api = new ApiClient(
         endpoint,

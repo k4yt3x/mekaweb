@@ -387,3 +387,35 @@ it('takes a rename of the open connection in place, without reconnecting', async
     stop();
   }
 });
+
+it('leaves the open session when switching to another server, and only then', async () => {
+  vi.stubGlobal('window', new EventTarget());
+  vi.stubGlobal('BroadcastChannel', undefined);
+  const address = {
+    hash: '#/sessions/alpha-session',
+    replace: vi.fn((url: string) => {
+      address.hash = url;
+    }),
+  };
+  vi.stubGlobal('location', address);
+  const { runtime, storage } = fixture();
+  const beta = storage.saveConnection('Beta', 'https://beta.example', 'synthetic-token', true);
+  const also = storage.saveConnection('Alpha too', 'https://alpha.example', 'other-token', true);
+  const alpha = storage.saveConnection('Alpha', 'https://alpha.example', 'synthetic-token', true);
+  vi.spyOn(globalThis, 'fetch').mockImplementation(() => Promise.resolve(Response.json(info)));
+  const stop = runtime.start();
+  try {
+    // The loaded address belongs to the last connection, and another to the same server keeps it.
+    await vi.waitFor(() => expect(runtime.getSnapshot().connection?.id).toBe(alpha.id));
+    await runtime.connect(also);
+    expect(address.replace).not.toHaveBeenCalled();
+    await runtime.connect(beta);
+    expect(address.replace).toHaveBeenCalledExactlyOnceWith('#/sessions');
+    address.hash = '#/schedules';
+    await runtime.connect(alpha);
+    expect(address).toMatchObject({ hash: '#/schedules' });
+    expect(address.replace).toHaveBeenCalledOnce();
+  } finally {
+    stop();
+  }
+});
