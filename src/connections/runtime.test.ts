@@ -353,3 +353,37 @@ it('refuses meka older than 0.76.0 before saving a connection', async () => {
   );
   expect(storage.getSnapshot().connections).toEqual([]);
 });
+
+it('leaves a suspended last connection unconnected on load', () => {
+  vi.stubGlobal('window', new EventTarget());
+  vi.stubGlobal('BroadcastChannel', undefined);
+  const { runtime, storage } = fixture();
+  const saved = storage.saveConnection('Away', 'https://away.example', 'synthetic-token', true);
+  storage.suspend(saved.id, true);
+  const fetcher = vi.spyOn(globalThis, 'fetch');
+  const stop = runtime.start();
+  try {
+    expect(runtime.getSnapshot().busy).toBe(false);
+    expect(fetcher).not.toHaveBeenCalled();
+  } finally {
+    stop();
+  }
+});
+
+it('takes a rename of the open connection in place, without reconnecting', async () => {
+  vi.stubGlobal('window', new EventTarget());
+  vi.stubGlobal('BroadcastChannel', undefined);
+  const { runtime, storage } = fixture();
+  const stop = runtime.start();
+  try {
+    const fetcher = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(Response.json(info));
+    await runtime.save('Before', 'https://rename.example', 'synthetic-token', true);
+    const { api, connection } = runtime.getSnapshot();
+    storage.rename(connection!.id, 'After');
+    expect(runtime.getSnapshot()).toMatchObject({ api, connection: { name: 'After' } });
+    expect(runtime.getSnapshot().connection?.authority).toBe(connection?.authority);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  } finally {
+    stop();
+  }
+});

@@ -414,14 +414,19 @@ progress {
 .navigation-shortcuts {
   margin-top: auto;
   justify-content: flex-start;
-  padding: 11px 4px;
-  gap: 8px;
-  font-size: 0.75rem;
+  padding: 11px var(--navigation-inset);
+  border: 0;
+  gap: 11px;
+  font-size: 0.8rem;
+  font-weight: 500;
   text-align: left;
   white-space: normal;
 }
 .navigation-shortcuts svg {
   flex-shrink: 0;
+}
+.navigation-shortcuts:hover:not(:disabled) {
+  background: var(--border);
 }
 .shortcuts-restore {
   position: fixed;
@@ -489,24 +494,50 @@ progress {
 .brand:hover {
   text-decoration: none;
 }
+/* Shares the navigation's type and icon column, like the shortcuts row above it. */
 .connection-switcher {
-  position: relative;
-  margin-bottom: 29px;
-}
-.connection-switcher select {
-  appearance: none;
-  background: var(--bg);
-  padding-left: calc(var(--navigation-inset) - 1px);
-  padding-right: 26px;
-  font-weight: 550;
-  font-size: 0.76rem;
-}
-.connection-switcher svg {
-  position: absolute;
-  right: var(--navigation-inset);
-  top: 13px;
-  pointer-events: none;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  margin-top: 4px;
+  padding: 11px var(--navigation-inset);
+  border: 0;
+  border-radius: 7px;
+  background: none;
   color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 500;
+  text-align: left;
+}
+.connection-switcher:hover,
+.connection-switcher[data-state='open'] {
+  background: var(--border);
+  color: var(--text);
+}
+.connection-switcher > svg {
+  flex-shrink: 0;
+}
+.connection-switcher[data-status='checking'] > svg:first-child {
+  color: var(--warning);
+}
+.connection-switcher[data-status='offline'] > svg:first-child {
+  color: var(--danger);
+}
+.connection-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.menu-panel.connection-menu {
+  width: max(200px, var(--radix-dropdown-menu-trigger-width));
+}
+.connection-option-check {
+  display: flex;
+  flex-shrink: 0;
+  color: var(--accent);
 }
 nav {
   display: flex;
@@ -622,6 +653,67 @@ nav a.active {
 }
 .setting-row p {
   margin: 5px 0;
+}
+.connection-row.orderable {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  column-gap: 12px;
+  row-gap: 10px;
+}
+.connection-order {
+  display: flex;
+  flex-direction: column;
+  margin-left: -8px;
+}
+.connection-order > .button {
+  min-height: 0;
+  width: 28px;
+  height: 24px;
+  padding: 0;
+}
+.connection-row.suspended .connection-details > :not(.badge) {
+  color: var(--muted);
+}
+.suspended-connections {
+  margin: -8px 0 20px;
+  font-size: 0.78rem;
+}
+.suspended-connections > summary {
+  color: var(--muted);
+  padding: 4px 0;
+}
+.suspended-connections > .saved-connections {
+  margin: 8px 0 0;
+}
+.welcome-import {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-top: 14px;
+}
+/* A full line of its own, below the buttons in a row and as wide as the welcome card. */
+.transfer-error {
+  width: 100%;
+}
+.import-list {
+  list-style: none;
+  margin: 0 0 14px;
+  padding: 0;
+  font-size: 0.8rem;
+}
+.import-list > li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+.import-list > li > span:first-child {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .facts {
   display: grid;
@@ -3157,6 +3249,12 @@ select option {
   .setting-row .actions {
     justify-content: flex-start;
   }
+  .connection-row.orderable {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .connection-row.orderable > .actions {
+    grid-column: 2;
+  }
   .welcome {
     --welcome-block-padding: 60px;
     --welcome-inline-padding: 32px;
@@ -3322,6 +3420,10 @@ select option {
     ) {
     font-size: max(16px, 1rem);
   }
+  .connection-order > .button {
+    width: 36px;
+    height: 34px;
+  }
 }
 @media (prefers-reduced-motion: reduce) {
   *,
@@ -3359,7 +3461,7 @@ select option {
   left: auto;
   right: var(--safe-right);
 }
-:root:not([data-focus-input='pointer']) .list-footer label:has(:focus-visible) {
+:root:not([data-focus-input='pointer']) :is(.list-footer label, label.button):has(:focus-visible) {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }

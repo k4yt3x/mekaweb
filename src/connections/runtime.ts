@@ -143,14 +143,33 @@ export class ConnectionRuntime {
           'This connection’s credentials changed. Reconnect to use its current authority.',
         );
     });
+    // Renames and suspension keep the authority, so the open connection takes them in place.
+    const sync = this.storage.subscribe(() => {
+      const current = this.state.connection;
+      const record = this.storage
+        .getSnapshot()
+        .connections.find((c) => c.id === current?.id && c.authority === current.authority);
+      if (
+        current &&
+        record &&
+        (record.name !== current.name || record.suspended !== current.suspended)
+      )
+        this.publish({ ...this.state, connection: record });
+    });
     const notifications = this.notifications.start();
     const settings = this.storage.getSnapshot();
     const connection = settings.connections.find((c) => c.id === settings.lastConnection);
-    if (!notifications.opened && connection && this.storage.token(connection))
+    if (
+      !notifications.opened &&
+      connection &&
+      !connection.suspended &&
+      this.storage.token(connection)
+    )
       void this.connect(connection);
     return () => {
       detach();
       invalidate();
+      sync();
       notifications.stop();
       this.disconnect();
     };

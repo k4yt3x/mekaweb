@@ -67,7 +67,7 @@ In-app alerts work independently of browser notification permission and service 
 
 In Safari, use **Share → Add to Home Screen**. Leave **Open as Web App** enabled if shown. Mekaweb opens with the meka icon and its own app window. It still needs a network connection to load and reach meka.
 
-Connect to your meka instance inside the installed app. Its browser storage is separate from Safari, so saved connections and tokens do not carry over. If an older installation still shows a letter icon after updating, remove it and add it again; you may need to enter your connection details again.
+Connect to your meka instance inside the installed app. Its browser storage is separate from Safari, so saved connections and tokens do not carry over; import a settings file to bring them across. If an older installation still shows a letter icon after updating, remove it and add it again; you may need to enter your connection details again.
 
 On iOS, browser notifications require opening the Home Screen app. They are not a reliable background completion alert: iOS can suspend the app and its live connection when you switch away or lock the screen. Delivery while suspended would require server-side Web Push, which mekaweb does not use. See [WebKit’s Home Screen documentation](https://webkit.org/blog/13878/web-push-for-web-apps-on-ios-and-ipados/) and [storage behavior](https://webkit.org/blog/14787/webkit-features-in-safari-17-2/).
 
@@ -75,10 +75,14 @@ On iOS, browser notifications require opening the Home Screen app. They are not 
 
 New connections default to **Local storage (persistent)**, which uses `localStorage` to keep the API token across browser restarts. Choose **Session storage (this tab)** in the **Token storage** selector to use `sessionStorage` for the current tab's session instead. Existing connections retain their saved choice. Use persistent storage only on a trusted browser profile and hosting origin.
 
+Switch connections from the menu at the bottom of the navigation. In **Settings → Connections**, the arrows set the order that menu uses. **Suspend** hides a connection, such as one that is down for maintenance, without forgetting its token, and mekaweb won't reconnect to it on load. Suspending the connection in use disconnects it. **Resume** brings it back; the welcome page lists suspended connections under a fold.
+
+**Settings → Import and export** saves your connections, their order, and your preferences to a file, and adds a file's connections in another browser; the welcome page can import too. Window layout and browser notification permission stay with each browser. Tokens are left out unless you include them; a file with tokens grants their access to anyone who has it. Importing skips connections already saved under the same name and endpoint, and never connects on its own.
+
 Connection settings, appearance, layout, and text drafts are saved in browser storage. File attachments are kept in memory and are lost on reload. Clearing browser data removes local settings and drafts, but does not delete server sessions.
 
 If the active endpoint becomes unreachable, one banner appears above the workspace. Mekaweb checks for recovery automatically; **Retry** checks immediately. Recovery preserves your open view and drafts and does not repeat submissions. Warnings about uncertain actions remain with those actions.
 
-Forgetting or replacing a token disconnects open tabs that used it. Forgetting a token does not revoke it on the server. Removing a connection, or replacing its endpoint URL, also removes that connection's local drafts. Provider credentials remain on the meka server. Disconnecting does not necessarily stop accepted work; use Stop first if you want to cancel the current turn.
+When editing a connection, leave the token blank to keep the saved one; a new URL needs it entered again. A rename alone doesn't reconnect. Forgetting or replacing a token disconnects open tabs that used it. Forgetting a token does not revoke it on the server. Removing a connection, or replacing its endpoint URL, also removes that connection's local drafts. Provider credentials remain on the meka server. Disconnecting does not necessarily stop accepted work; use Stop first if you want to cancel the current turn.
 
 Token scopes determine which controls are available. Tokens access the server's shared session namespace; they do not create separate user accounts. A token without `sessions:w` cannot load a session into the server, so a session the server hasn't loaded shows its saved conversation. Live updates start once the server loads it, such as when a client with write access opens it.

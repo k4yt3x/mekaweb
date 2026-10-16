@@ -1,6 +1,16 @@
 import { useAction } from '../components/actions';
 import { useRef, useState, type FormEvent } from 'react';
-import { ArrowRight, Plus, Unplug, KeyRound, RotateCcw } from 'lucide-react';
+import {
+  ArrowRight,
+  ChevronDown,
+  ChevronUp,
+  KeyRound,
+  Pause,
+  Play,
+  Plus,
+  RotateCcw,
+  Unplug,
+} from 'lucide-react';
 import { useConnection, useResource, useRuntime, useSettings } from '../connections/context';
 import type { Connection } from '../connections/storage';
 import { CONVERSATION_FONT, CONVERSATION_OFFSET, CONVERSATION_WIDTH } from '../connections/storage';
@@ -13,6 +23,7 @@ import { MekawebLink } from '../components/layout';
 import { PixelInput } from '../components/pixel-input';
 import { verifiedVersions } from '../api/version';
 import { NotificationSettings } from '../notifications/settings';
+import { ImportSettingsButton, SettingsTransferPanel } from './settings-transfer';
 
 export function ConnectionForm({
   existing,
@@ -28,19 +39,32 @@ export function ConnectionForm({
   const [token, setToken] = useState('');
   const [remember, setRemember] = useState(existing?.remember ?? true);
   const connectButton = useRef<HTMLButtonElement>(null);
-  let endpointChanged = false;
-  if (existing) {
-    try {
-      endpointChanged = normalizeEndpoint(endpoint) !== existing.endpoint;
-    } catch {
-      // A partially entered URL is not a new endpoint yet.
-    }
+  let normalized: string | undefined;
+  try {
+    normalized = normalizeEndpoint(endpoint);
+  } catch {
+    // A partially entered URL is not a new endpoint yet.
   }
+  const endpointChanged = Boolean(existing && normalized && normalized !== existing.endpoint);
+  // A saved token can stay for the same endpoint, but is never sent to a new one unasked.
+  const saved = existing && normalized === existing.endpoint ? runtime.storage.token(existing) : '';
+  const renaming = Boolean(saved) && !token.trim() && remember === existing?.remember;
   const action = useAction();
   async function submit(event: FormEvent) {
     event.preventDefault();
+    if (existing && renaming) {
+      runtime.storage.rename(existing.id, name);
+      onConnected?.();
+      return;
+    }
     await action.run(async () => {
-      const ok = await runtime.save(name, endpoint, token, remember, existing?.id);
+      const ok = await runtime.save(
+        name,
+        endpoint,
+        token.trim() || saved || '',
+        remember,
+        existing?.id,
+      );
       if (ok) {
         setToken('');
         onConnected?.();
@@ -77,7 +101,14 @@ export function ConnectionForm({
       <Field label="API token">
         <input
           type="password"
-          required
+          required={!saved}
+          placeholder={
+            saved
+              ? 'Leave blank to keep the saved token'
+              : endpointChanged
+                ? 'Enter the token again for the new URL'
+                : undefined
+          }
           value={token}
           onChange={(event) => setToken(event.target.value)}
           autoComplete="off"
@@ -98,6 +129,8 @@ export function ConnectionForm({
         <Button ref={connectButton} type="submit" disabled={state.busy || action.busy}>
           {state.busy ? (
             <Loading label="Connecting…" />
+          ) : renaming ? (
+            'Save'
           ) : (
             <>
               Connect <ArrowRight size={16} />
@@ -125,30 +158,54 @@ export function Welcome() {
   const settings = useSettings();
   const runtime = useRuntime();
   const [existing, setExisting] = useState<Connection>();
+  const available = settings.connections.filter((c) => !c.suspended);
+  const suspended = settings.connections.filter((c) => c.suspended);
+  function open(c: Connection) {
+    if (runtime.storage.token(c)) void runtime.connect(c);
+    else {
+      runtime.cancelConnect();
+      setExisting(c);
+    }
+  }
   return (
     <main className="welcome">
       <section className="connection-card" aria-label="Connect to meka">
         <h1>meka</h1>
-        {settings.connections.length > 0 && (
+        {available.length > 0 && (
           <div className="saved-connections">
-            {settings.connections.map((c) => (
-              <Button
-                key={c.id}
-                variant="secondary"
-                onClick={() => {
-                  if (runtime.storage.token(c)) void runtime.connect(c);
-                  else {
-                    runtime.cancelConnect();
-                    setExisting(c);
-                  }
-                }}
-              >
+            {available.map((c) => (
+              <Button key={c.id} variant="secondary" onClick={() => open(c)}>
                 {c.name} <span className="muted small">{new URL(c.endpoint).host}</span>
               </Button>
             ))}
           </div>
         )}
+        {suspended.length > 0 && (
+          <details className="suspended-connections">
+            <summary>
+              {suspended.length} suspended connection{suspended.length === 1 ? '' : 's'}
+            </summary>
+            <div className="saved-connections">
+              {suspended.map((c) => (
+                <Button
+                  key={c.id}
+                  variant="ghost"
+                  title="Resume this connection and connect to it"
+                  onClick={() => {
+                    runtime.storage.suspend(c.id, false);
+                    open(runtime.storage.getSnapshot().connections.find((r) => r.id === c.id) ?? c);
+                  }}
+                >
+                  {c.name} <span className="muted small">{new URL(c.endpoint).host}</span>
+                </Button>
+              ))}
+            </div>
+          </details>
+        )}
         <ConnectionForm key={existing?.id ?? 'new'} existing={existing} />
+        <div className="welcome-import">
+          <ImportSettingsButton />
+        </div>
       </section>
       <footer className="app-version">
         <MekawebLink /> version {__MEKAWEB_VERSION__}
@@ -161,7 +218,22 @@ export function SettingsPage() {
   const runtime = useRuntime();
   const state = useConnection();
   const [edit, setEdit] = useState<Connection | 'new'>();
+  const [moved, setMoved] = useState('');
   const action = useAction();
+  function move(c: Connection, offset: -1 | 1) {
+    runtime.storage.moveConnection(c.id, offset);
+    const { connections } = runtime.storage.getSnapshot();
+    const position = connections.findIndex((other) => other.id === c.id);
+    setMoved(`Moved ${c.name} to position ${position + 1} of ${connections.length}.`);
+    // Keep focus on the moved row, on the other arrow once this one reaches an end.
+    requestAnimationFrame(() => {
+      const buttons = ['up', 'down'].map((direction) =>
+        document.querySelector<HTMLButtonElement>(`[data-move="${c.id}:${direction}"]`),
+      );
+      const [preferred, other] = offset < 0 ? buttons : buttons.reverse();
+      (preferred && !preferred.disabled ? preferred : other)?.focus();
+    });
+  }
   const live = useResource<Schema['LiveResponse']>('/v1/health/live');
   const ready = useResource<Schema['ReadyResponse']>('/v1/health/ready');
   const profiles = useResource<Schema['ProfilesResponse']>('/v1/profiles');
@@ -183,13 +255,43 @@ export function SettingsPage() {
       </header>
       <section className="panel">
         <h2>Connections</h2>
-        {settings.connections.map((c) => (
-          <div className="setting-row" key={c.id}>
-            <div>
+        {settings.connections.map((c, index) => (
+          <div
+            className={`setting-row connection-row ${settings.connections.length > 1 ? 'orderable' : ''} ${c.suspended ? 'suspended' : ''}`}
+            key={c.id}
+          >
+            {settings.connections.length > 1 && (
+              <div className="connection-order">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  data-move={`${c.id}:up`}
+                  aria-label={`Move ${c.name} up`}
+                  title="Move up"
+                  disabled={index === 0}
+                  onClick={() => move(c, -1)}
+                >
+                  <ChevronUp size={16} />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  data-move={`${c.id}:down`}
+                  aria-label={`Move ${c.name} down`}
+                  title="Move down"
+                  disabled={index === settings.connections.length - 1}
+                  onClick={() => move(c, 1)}
+                >
+                  <ChevronDown size={16} />
+                </Button>
+              </div>
+            )}
+            <div className="connection-details">
               <strong>{c.name}</strong>
               {state.connection?.id === c.id && (
                 <span className="badge">{state.connectionIssue ? 'Active' : 'Connected'}</span>
               )}
+              {c.suspended && <span className="badge">Suspended</span>}
               <p className="muted small break">{c.endpoint}</p>
               <small className="muted">
                 Token storage:{' '}
@@ -205,6 +307,24 @@ export function SettingsPage() {
               >
                 <KeyRound size={14} />
                 Edit
+              </Button>
+              <Button
+                variant="ghost"
+                aria-label={`${c.suspended ? 'Resume' : 'Suspend'} ${c.name}`}
+                title={
+                  c.suspended
+                    ? 'Show this connection in the switcher again'
+                    : state.connection?.id === c.id
+                      ? 'Disconnect and hide this connection from the switcher until you resume it'
+                      : 'Hide this connection from the switcher until you resume it'
+                }
+                onClick={() => {
+                  runtime.storage.suspend(c.id, !c.suspended);
+                  if (!c.suspended && state.connection?.id === c.id) runtime.disconnect();
+                }}
+              >
+                {c.suspended ? <Play size={14} /> : <Pause size={14} />}
+                {c.suspended ? 'Resume' : 'Suspend'}
               </Button>
               <Button
                 variant="ghost"
@@ -227,6 +347,9 @@ export function SettingsPage() {
             </div>
           </div>
         ))}
+        <span className="sr-only" aria-live="polite">
+          {moved}
+        </span>
         <div className="panel-footer">
           <Button variant="secondary" tone="danger" onClick={() => runtime.disconnect()}>
             <Unplug size={16} />
@@ -310,6 +433,7 @@ export function SettingsPage() {
         </div>
       </section>
       <NotificationSettings />
+      <SettingsTransferPanel />
       <section className="panel">
         <h2>Diagnostics</h2>
         <dl className="facts">

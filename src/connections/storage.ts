@@ -37,6 +37,28 @@ export interface Connection {
   endpoint: string;
   authority: string;
   remember: boolean;
+  /** Kept with its token but left out of the switcher and never connected to on load. */
+  suspended?: boolean;
+}
+export const CONNECTION_LIMIT = 40;
+/** Preferences an export carries; layout and browser notification permission stay with a device. */
+export const PORTABLE_PREFERENCES = [
+  'theme',
+  'conversationFontSize',
+  'conversationMaxWidth',
+  'conversationAnchor',
+  'conversationOffset',
+  'showTurnContext',
+  'inAppNotifications',
+  'completionSound',
+] as const;
+export type PortablePreferences = Pick<Settings, (typeof PORTABLE_PREFERENCES)[number]>;
+export interface ImportedConnection {
+  name: string;
+  endpoint: string;
+  remember: boolean;
+  suspended?: boolean;
+  token?: string;
 }
 export interface Settings {
   version: 1;
@@ -119,7 +141,8 @@ function connection(value: unknown): value is Connection {
     !['id', 'name', 'endpoint', 'authority'].every(
       (key) => typeof value[key] === 'string' && value[key].length > 0 && value[key].length < 4096,
     ) ||
-    typeof value.remember !== 'boolean'
+    typeof value.remember !== 'boolean' ||
+    (value.suspended !== undefined && typeof value.suspended !== 'boolean')
   )
     return false;
   try {
@@ -127,6 +150,38 @@ function connection(value: unknown): value is Connection {
   } catch {
     return false;
   }
+}
+function normalizeSettings(value: unknown): Settings {
+  if (!object(value) || value.version !== 1 || !Array.isArray(value.connections)) return defaults();
+  return {
+    version: 1,
+    connections: value.connections.filter(connection).slice(0, CONNECTION_LIMIT),
+    theme: value.theme === 'light' || value.theme === 'dark' ? value.theme : 'system',
+    conversationFontSize: normalizeConversationFontSize(value.conversationFontSize),
+    conversationMaxWidth: normalizeConversationMaxWidth(value.conversationMaxWidth),
+    conversationAnchor: normalizeConversationAnchor(value.conversationAnchor),
+    conversationOffset: normalizeConversationOffset(value.conversationOffset),
+    showTurnContext: value.showTurnContext === true,
+    turnNotifications: value.turnNotifications === true,
+    inAppNotifications: value.inAppNotifications !== false,
+    completionSound: value.completionSound === true,
+    layout: {
+      navigationCollapsed: object(value.layout) && value.layout.navigationCollapsed === true,
+      sessionsCollapsed: object(value.layout) && value.layout.sessionsCollapsed === true,
+      detailsOpen: object(value.layout) && value.layout.detailsOpen === true,
+      ...(object(value.layout) &&
+      typeof value.layout.sessionsWidth === 'number' &&
+      Number.isFinite(value.layout.sessionsWidth)
+        ? { sessionsWidth: Math.round(Math.max(180, Math.min(480, value.layout.sessionsWidth))) }
+        : {}),
+      ...(object(value.layout) &&
+      typeof value.layout.detailsWidth === 'number' &&
+      Number.isFinite(value.layout.detailsWidth)
+        ? { detailsWidth: Math.round(Math.max(280, Math.min(600, value.layout.detailsWidth))) }
+        : {}),
+    },
+    ...(typeof value.lastConnection === 'string' ? { lastConnection: value.lastConnection } : {}),
+  };
 }
 export class BrowserStorage {
   private memory = new Map<string, string>();
@@ -175,38 +230,7 @@ export class BrowserStorage {
     }
   }
   private readSettings(): Settings {
-    const value = parse(this.read(SETTINGS));
-    if (!object(value) || value.version !== 1 || !Array.isArray(value.connections))
-      return defaults();
-    return {
-      version: 1,
-      connections: value.connections.filter(connection).slice(0, 40),
-      theme: value.theme === 'light' || value.theme === 'dark' ? value.theme : 'system',
-      conversationFontSize: normalizeConversationFontSize(value.conversationFontSize),
-      conversationMaxWidth: normalizeConversationMaxWidth(value.conversationMaxWidth),
-      conversationAnchor: normalizeConversationAnchor(value.conversationAnchor),
-      conversationOffset: normalizeConversationOffset(value.conversationOffset),
-      showTurnContext: value.showTurnContext === true,
-      turnNotifications: value.turnNotifications === true,
-      inAppNotifications: value.inAppNotifications !== false,
-      completionSound: value.completionSound === true,
-      layout: {
-        navigationCollapsed: object(value.layout) && value.layout.navigationCollapsed === true,
-        sessionsCollapsed: object(value.layout) && value.layout.sessionsCollapsed === true,
-        detailsOpen: object(value.layout) && value.layout.detailsOpen === true,
-        ...(object(value.layout) &&
-        typeof value.layout.sessionsWidth === 'number' &&
-        Number.isFinite(value.layout.sessionsWidth)
-          ? { sessionsWidth: Math.round(Math.max(180, Math.min(480, value.layout.sessionsWidth))) }
-          : {}),
-        ...(object(value.layout) &&
-        typeof value.layout.detailsWidth === 'number' &&
-        Number.isFinite(value.layout.detailsWidth)
-          ? { detailsWidth: Math.round(Math.max(280, Math.min(600, value.layout.detailsWidth))) }
-          : {}),
-      },
-      ...(typeof value.lastConnection === 'string' ? { lastConnection: value.lastConnection } : {}),
-    };
+    return normalizeSettings(parse(this.read(SETTINGS)));
   }
   getSnapshot = () => this.state;
   subscribe = (listener: () => void) => {
@@ -285,6 +309,7 @@ export class BrowserStorage {
     let settings = this.readSettings();
     const normalized = normalizeEndpoint(endpoint);
     const old = settings.connections.find((c) => c.id === existingId);
+    const position = old ? settings.connections.indexOf(old) : settings.connections.length;
     // Endpoint edits have a fresh identity so old drafts never move to another server.
     const id = old?.endpoint === normalized ? old.id : createId();
     const record: Connection = {
@@ -305,13 +330,95 @@ export class BrowserStorage {
       JSON.stringify({ authority: record.authority, token }),
       remember,
     );
+    const others = settings.connections.filter((c) => c.id !== id);
     this.save({
       ...settings,
-      connections: [...settings.connections.filter((c) => c.id !== id), record],
+      // An edit keeps the connection's place in the list.
+      connections: [...others.slice(0, position), record, ...others.slice(position)],
       lastConnection: id,
     });
     this.invalidate(id);
     return record;
+  }
+  /** Stores exported connections without connecting; `remember` decides where a token goes. */
+  importSettings(
+    connections: ImportedConnection[],
+    preferences?: Readonly<Record<string, unknown>>,
+  ) {
+    const settings = this.readSettings();
+    const added = connections
+      .slice(0, CONNECTION_LIMIT - settings.connections.length)
+      .map((imported): Connection => {
+        const record: Connection = {
+          id: createId(),
+          name: imported.name.trim() || new URL(normalizeEndpoint(imported.endpoint)).host,
+          endpoint: normalizeEndpoint(imported.endpoint),
+          authority: createId(),
+          remember: imported.remember,
+          ...(imported.suspended ? { suspended: true } : {}),
+        };
+        if (imported.token)
+          this.write(
+            PREFIX + 'token:' + record.id,
+            JSON.stringify({ authority: record.authority, token: imported.token }),
+            record.remember,
+          );
+        return record;
+      });
+    this.save(
+      normalizeSettings({
+        ...settings,
+        // Only portable keys apply, each checked as if read from storage.
+        ...Object.fromEntries(
+          PORTABLE_PREFERENCES.filter((key) => preferences && key in preferences).map((key) => [
+            key,
+            preferences?.[key],
+          ]),
+        ),
+        connections: [...settings.connections, ...added],
+      }),
+    );
+    return added;
+  }
+  preferences(): PortablePreferences {
+    const settings = this.readSettings();
+    return Object.fromEntries(
+      PORTABLE_PREFERENCES.map((key) => [key, settings[key]]),
+    ) as PortablePreferences;
+  }
+  /** Renames in place; the token and its authority are unchanged, so nothing reconnects. */
+  rename(id: string, name: string) {
+    const settings = this.readSettings();
+    this.save({
+      ...settings,
+      connections: settings.connections.map((c) =>
+        c.id === id ? { ...c, name: name.trim() || new URL(c.endpoint).host } : c,
+      ),
+    });
+  }
+  suspend(id: string, suspended: boolean) {
+    const settings = this.readSettings();
+    this.save({
+      ...settings,
+      connections: settings.connections.map((c) => {
+        if (c.id !== id) return c;
+        const record = { ...c };
+        if (suspended) record.suspended = true;
+        else delete record.suspended;
+        return record;
+      }),
+    });
+  }
+  /** Moves a connection `offset` places through the list, stopping at either end. */
+  moveConnection(id: string, offset: number) {
+    const settings = this.readSettings();
+    const connections = [...settings.connections];
+    const from = connections.findIndex((c) => c.id === id);
+    if (from < 0) return;
+    const to = Math.max(0, Math.min(connections.length - 1, from + offset));
+    if (to === from) return;
+    connections.splice(to, 0, ...connections.splice(from, 1));
+    this.save({ ...settings, connections });
   }
   forget(id: string) {
     this.write(PREFIX + 'token:' + id, null, true);

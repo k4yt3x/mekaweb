@@ -462,3 +462,86 @@ it('bounds seen sessions and raises the baseline past dropped entries', () => {
   expect(seen.sessions.s1).toBeUndefined();
   expect(seen.baseline).toBe(at(1));
 });
+it('reorders connections and keeps an edited connection in its place', () => {
+  const a = new BrowserStorage(storage(), storage());
+  const [first, second, third] = ['a', 'b', 'c'].map((name) =>
+    a.saveConnection(name, `https://${name}.example`, 'token', true),
+  );
+  const names = () => a.getSnapshot().connections.map((c) => c.name);
+  a.moveConnection(third!.id, -1);
+  expect(names()).toEqual(['a', 'c', 'b']);
+  a.moveConnection(third!.id, -5);
+  expect(names()).toEqual(['c', 'a', 'b']);
+  a.moveConnection(second!.id, 1);
+  expect(names()).toEqual(['c', 'a', 'b']);
+  a.saveConnection('renamed', first!.endpoint, 'token', true, first!.id);
+  expect(names()).toEqual(['c', 'renamed', 'b']);
+  // A new endpoint is a new identity, still in the old one's place.
+  const moved = a.saveConnection('moved', 'https://elsewhere.example', 'token', true, first!.id);
+  expect(moved.id).not.toBe(first!.id);
+  expect(names()).toEqual(['c', 'moved', 'b']);
+});
+it('suspends a connection without touching its token, and resumes it', () => {
+  const local = storage();
+  const a = new BrowserStorage(local, storage()),
+    b = new BrowserStorage(local, storage());
+  const record = a.saveConnection('away', 'https://away.example', 'kept-token', true);
+  a.suspend(record.id, true);
+  b.refresh();
+  const suspended = b.getSnapshot().connections[0]!;
+  expect(suspended).toMatchObject({ id: record.id, suspended: true });
+  expect(b.token(suspended)).toBe('kept-token');
+  a.suspend(record.id, false);
+  expect(a.getSnapshot().connections[0]).toEqual(record);
+});
+it('imports connections with their tokens and only the portable preferences', () => {
+  const tab = storage();
+  const a = new BrowserStorage(storage(), tab);
+  a.saveConnection('existing', 'https://existing.example', 'token', true);
+  const added = a.importSettings(
+    [
+      { name: 'kept', endpoint: 'https://kept.example', remember: true, token: 'kept-token' },
+      { name: 'tab', endpoint: 'https://tab.example', remember: false, token: 'tab-token' },
+      { name: '', endpoint: 'https://away.example/base', remember: true, suspended: true },
+    ],
+    {
+      theme: 'dark',
+      conversationFontSize: -3,
+      completionSound: true,
+      turnNotifications: true,
+      layout: { navigationCollapsed: true },
+      lastConnection: 'elsewhere',
+    },
+  );
+  const settings = a.getSnapshot();
+  expect(settings.connections.map((c) => c.name)).toEqual([
+    'existing',
+    'kept',
+    'tab',
+    'away.example',
+  ]);
+  expect(added[2]).toMatchObject({ endpoint: 'https://away.example/base/', suspended: true });
+  expect(a.token(added[0]!)).toBe('kept-token');
+  expect(a.token(added[1]!)).toBe('tab-token');
+  expect(tab.getItem('mekaweb:v1:token:' + added[1]!.id)).toContain('tab-token');
+  expect(a.token(added[2]!)).toBeUndefined();
+  expect(settings).toMatchObject({
+    theme: 'dark',
+    conversationFontSize: CONVERSATION_FONT.default,
+    completionSound: true,
+    turnNotifications: false,
+    layout: { navigationCollapsed: false },
+  });
+  expect(settings.lastConnection).toBe(settings.connections[0]!.id);
+});
+it('renames a connection in place without touching its token', () => {
+  const a = new BrowserStorage(storage(), storage());
+  const first = a.saveConnection('first', 'https://first.example', 'first-token', true);
+  a.saveConnection('second', 'https://second.example', 'second-token', true);
+  a.rename(first.id, '  renamed  ');
+  const renamed = a.getSnapshot().connections[0]!;
+  expect(renamed).toEqual({ ...first, name: 'renamed' });
+  expect(a.token(renamed)).toBe('first-token');
+  a.rename(first.id, ' ');
+  expect(a.getSnapshot().connections[0]!.name).toBe('first.example');
+});

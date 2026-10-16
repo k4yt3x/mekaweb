@@ -4,7 +4,6 @@ import { Outlet, useLocation } from '@tanstack/react-router';
 import {
   BookOpen,
   CalendarClock,
-  ChevronDown,
   Menu,
   MessageSquare,
   Plug,
@@ -23,6 +22,7 @@ import { Dialog } from './components/ui/dialog';
 import { ErrorNotice, Json, Loading } from './components/common';
 import { NavigationToggle } from './components/layout';
 import { ConnectionBanner } from './components/connection-banner';
+import { ConnectionSwitcher } from './components/connection-switcher';
 import { trackFocusInput } from './components/focus-input';
 import { NotificationToasts } from './notifications/toasts';
 import { useVisualViewport } from './components/visual-viewport';
@@ -286,8 +286,6 @@ function Navigation({
   onShortcuts: () => void;
 }) {
   const state = useConnection();
-  const runtime = useRuntime();
-  const settings = useSettings();
   const location = useLocation();
   const entries = [
     { name: 'Sessions', path: '/sessions', icon: MessageSquare, scope: 'sessions:r' },
@@ -305,29 +303,6 @@ function Navigation({
         </a>
         {!onNavigate && <NavigationToggle />}
       </div>
-      {settings.connections.length > 1 && (
-        <div className="connection-switcher">
-          <label className="sr-only" htmlFor={onNavigate ? 'mobile-connection' : 'connection'}>
-            Active connection
-          </label>
-          <select
-            id={onNavigate ? 'mobile-connection' : 'connection'}
-            value={state.connection?.id ?? ''}
-            onChange={(event) => {
-              const record = settings.connections.find((c) => c.id === event.target.value);
-              if (record) void runtime.connect(record);
-              onNavigate?.();
-            }}
-          >
-            {settings.connections.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
-          <ChevronDown size={14} />
-        </div>
-      )}
       <nav aria-label="Main navigation">
         {entries
           .filter((entry) => !entry.scope || state.info?.scopes.includes(entry.scope))
@@ -350,6 +325,7 @@ function Navigation({
           })}
       </nav>
       <KeyboardShortcutsButton onClick={onShortcuts} />
+      <ConnectionSwitcher onNavigate={onNavigate} />
     </>
   );
 }
