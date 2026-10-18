@@ -2888,15 +2888,18 @@ progress::-moz-progress-bar {
   background: var(--bg);
   box-shadow: 0 3px 14px #0001;
 }
+/* Inside the input's top edge, in the editor's padding; it reaches past the border so the edge
+   itself can be grabbed. */
 .composer-resize-handle {
   position: absolute;
-  top: -14px;
+  top: -6px;
   left: 50%;
   transform: translateX(-50%);
   width: 48px;
-  height: 14px;
+  height: 20px;
+  padding-top: 11px;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
   cursor: ns-resize;
   touch-action: none;
@@ -2916,9 +2919,16 @@ progress::-moz-progress-bar {
   background: var(--accent);
   opacity: 1;
 }
+/* The ring goes round the grip rather than the grab area, which crosses the input's border. */
 .composer-resize-handle:focus-visible {
+  outline: none;
+}
+.composer-resize-handle:focus-visible::before {
   outline: 2px solid var(--accent);
-  outline-offset: 1px;
+  outline-offset: 3px;
+}
+:root[data-focus-input='pointer'] .composer-resize-handle:focus::before {
+  outline: none;
 }
 .composer:has(textarea:focus) {
   border-color: color-mix(in srgb, var(--accent) 45%, var(--border));

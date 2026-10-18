@@ -518,7 +518,8 @@ export function Conversation({ state }: { state: SessionState }) {
             </div>
           </div>
           <div className="composer-dock" ref={dock} data-content-below={contentBelow}>
-            {showLatest && (
+            {/* Folding a block can leave nothing below without a scroll that resumes following. */}
+            {showLatest && contentBelow && (
               <Button className="jump-latest" variant="secondary" size="sm" onClick={jumpToLatest}>
                 <ArrowDown size={14} />
                 Latest
