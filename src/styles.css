@@ -1440,6 +1440,10 @@ progress::-moz-progress-bar {
   display: flex;
   gap: 2px;
 }
+.session-list-actions [aria-expanded='true'] {
+  color: var(--text);
+  background: var(--surface);
+}
 .session-search {
   position: relative;
   display: flex;

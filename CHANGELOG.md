@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-10-18
+
+### Changed
+
+- Session search stays hidden until opened from the search button beside New session, or Ctrl+K.
+
 ## [0.20.0] - 2026-10-18
 
 ### Added
@@ -391,7 +397,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Light and dark themes, narrow layouts, and collapsible, resizable session panels.
 - Hosting at the root or a subpath, with GitHub Pages deployment on version tags.
 
-[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.20.0...HEAD
+[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.21.0...HEAD
+[0.21.0]: https://github.com/k4yt3x/mekaweb/compare/0.20.0...0.21.0
 [0.20.0]: https://github.com/k4yt3x/mekaweb/compare/0.19.1...0.20.0
 [0.19.1]: https://github.com/k4yt3x/mekaweb/compare/0.19.0...0.19.1
 [0.19.0]: https://github.com/k4yt3x/mekaweb/compare/0.18.2...0.19.0

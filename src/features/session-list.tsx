@@ -19,11 +19,15 @@ export function SessionList({
   selectedId,
   onCreate,
   searchInput,
+  searchOpen,
+  onSearchOpen,
   onOpen,
 }: {
   selectedId: string | undefined;
   onCreate: () => void;
   searchInput: RefObject<HTMLInputElement | null>;
+  searchOpen: boolean;
+  onSearchOpen: (open: boolean) => void;
   onOpen: () => void;
 }) {
   const { api, connection } = useConnection();
@@ -33,6 +37,7 @@ export function SessionList({
   const sessions = useSessionStates();
   const action = useAction();
   const sessionItems = useRef<HTMLDivElement>(null);
+  const searchToggle = useRef<HTMLButtonElement>(null);
   // The sessions whose sub-agents were shown from their row; every other session's stay hidden.
   const [folds, setFolds] = useState<ReadonlySet<string>>(() => new Set());
   const [search, setSearch] = useState('');
@@ -43,6 +48,11 @@ export function SessionList({
     return () => clearTimeout(timer);
   }, [query]);
   const searching = Boolean(query);
+  // A closed search finds nothing, so closing it lists every session again.
+  function closeSearch() {
+    setSearch('');
+    onSearchOpen(false);
+  }
   const waiting = searching && query !== debounced;
   const list = useInfiniteQuery({
     queryKey: [connection?.id, authority, 'session-list', 'roots'],
@@ -189,6 +199,19 @@ export function SessionList({
         <h2>Sessions</h2>
         <div className="session-list-actions">
           <Button
+            ref={searchToggle}
+            variant="ghost"
+            size="icon"
+            aria-label="Search sessions"
+            title={`Search sessions (${shortcutHint('searchSessions')})`}
+            aria-keyshortcuts={shortcutAttribute('searchSessions')}
+            aria-expanded={searchOpen}
+            aria-controls="session-search"
+            onClick={() => (searchOpen ? closeSearch() : onSearchOpen(true))}
+          >
+            <Search size={16} />
+          </Button>
+          <Button
             variant="ghost"
             size="icon"
             aria-label="New session"
@@ -201,34 +224,37 @@ export function SessionList({
           </Button>
         </div>
       </header>
-      <div className="session-search">
-        <Search size={15} aria-hidden="true" />
-        <input
-          ref={searchInput}
-          aria-label="Search sessions"
-          title={`Search sessions (${shortcutHint('searchSessions')})`}
-          aria-keyshortcuts={shortcutAttribute('searchSessions')}
-          placeholder="Search sessions…"
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Escape') setSearch('');
-          }}
-        />
-        {search && (
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label="Clear search"
-            onClick={(event) => {
-              setSearch('');
-              event.currentTarget.parentElement?.querySelector('input')?.focus();
+      {searchOpen && (
+        <div id="session-search" className="session-search">
+          <Search size={15} aria-hidden="true" />
+          <input
+            ref={searchInput}
+            aria-label="Search sessions"
+            placeholder="Search sessions…"
+            value={search}
+            autoFocus
+            onChange={(event) => setSearch(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key !== 'Escape') return;
+              closeSearch();
+              searchToggle.current?.focus();
             }}
-          >
-            <X size={14} />
-          </Button>
-        )}
-      </div>
+          />
+          {search && (
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="Clear search"
+              onClick={(event) => {
+                setSearch('');
+                event.currentTarget.parentElement?.querySelector('input')?.focus();
+              }}
+            >
+              <X size={14} />
+            </Button>
+          )}
+        </div>
+      )}
       <div className="session-items" aria-busy={pending} ref={sessionItems}>
         <ErrorNotice error={error} />
         {pending && <Loading label={searching ? 'Searching…' : 'Loading…'} />}

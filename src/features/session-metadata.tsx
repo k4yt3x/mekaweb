@@ -127,7 +127,9 @@ export function SessionRenameDialog({
           if (document.activeElement === document.body) {
             if (trigger.current?.isConnected) trigger.current.focus();
             else
-              document.querySelector<HTMLInputElement>('[aria-label="Search sessions"]')?.focus();
+              document
+                .querySelector<HTMLInputElement>('input[aria-label="Search sessions"]')
+                ?.focus();
           }
         });
       }}

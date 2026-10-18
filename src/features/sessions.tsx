@@ -57,6 +57,7 @@ export function SessionsPage({ id }: { id?: string | undefined }) {
   const { newSession, searchRequested, finishSearch, mobileSessionsOpen, setMobileSessionsOpen } =
     useSessionNavigation();
   const searchInput = useRef<HTMLInputElement>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
   const [mobileDetails, setMobileDetails] = useState(false);
   const { layout } = useSettings();
   const desktop = useMediaQuery(DESKTOP_LAYOUT_QUERY);
@@ -123,6 +124,8 @@ export function SessionsPage({ id }: { id?: string | undefined }) {
     [headingKey],
   );
   const selectedRunning = selected ? isSessionRunning(selected) : false;
+  // The search bar is hidden until it is asked for.
+  if (searchRequested && canRead && !searchOpen) setSearchOpen(true);
   useLayoutEffect(() => {
     if (!searchRequested || !canRead || !searchInput.current) return;
     if (!desktop && !mobileSessionsOpen) return;
@@ -186,6 +189,8 @@ export function SessionsPage({ id }: { id?: string | undefined }) {
           selectedId={id}
           onCreate={newSession}
           searchInput={searchInput}
+          searchOpen={searchOpen}
+          onSearchOpen={setSearchOpen}
           onOpen={() => setMobileSessionsOpen(false)}
         />
         {desktop && (
