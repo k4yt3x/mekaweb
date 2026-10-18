@@ -7,22 +7,36 @@ export interface EventPayloads {
     started_at?: string;
     resumed?: boolean;
     // 0.68 runs `POST /compact` as a turn with `source: "compaction"`.
-    source?: 'client' | 'inbox' | 'schedule' | 'background' | 'compaction';
+    source?: 'client' | 'inbox' | 'schedule' | 'background' | 'compaction' | 'parent';
     item_ids?: string[];
     job_id?: string;
   };
+  // `profile` names the fallback profile that served the turn, when the session's own could not.
   'turn.finished': Correlation & {
     turn_id: string;
     stop_reason?: string;
     usage?: Schema['UsageView'];
     refusal_text?: string;
+    profile?: string;
   };
   'turn.failed': Correlation & {
     turn_id: string;
     error?: Schema['ProblemDetail'];
     message_withdrawn?: boolean;
+    profile?: string;
   };
-  'turn.canceled': Correlation & { turn_id: string; reason?: string; message_withdrawn?: boolean };
+  'turn.canceled': Correlation & {
+    turn_id: string;
+    reason?: string;
+    message_withdrawn?: boolean;
+    profile?: string;
+  };
+  /** A user-role message carrying words entered the conversation, typed as history types it. */
+  'message.appended': Correlation & {
+    role: string;
+    content: Schema['ContentBlockView'][];
+    resumed?: boolean;
+  };
   'assistant_text.delta': Correlation & { text: string };
   'thinking.delta': Correlation & { text: string };
   'tool_call.composing': Correlation & { id: string; name: string };
@@ -49,7 +63,16 @@ export interface EventPayloads {
   permission_resolved: Correlation & { request_id: string; outcome: string };
   notice: Correlation & { text: string; level?: string };
   'inbox.delivered': Correlation & { item_ids: string[] };
-  'inbox.failed': Correlation & { item_id: string; reason?: string };
+  'inbox.deferred': Correlation & {
+    item_ids: string[];
+    not_before?: string;
+    error?: Schema['ProblemDetail'];
+  };
+  'inbox.failed': Correlation & {
+    item_id: string;
+    reason?: string;
+    error?: Schema['ProblemDetail'];
+  };
   'inbox.withdrawn': Correlation & { item_id: string };
   'session.updated': Schema['SessionResponse'];
   'conversation.rewound': { revision: number; total: number; turns_removed: number };

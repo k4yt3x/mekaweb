@@ -14,6 +14,18 @@ const options = (mode = 'steer'): ComposerOptions => ({
   source: '',
   mode,
 });
+const record = (id = 'turn', ending: Partial<Schema['TurnRecord']> = {}): Schema['TurnRecord'] => ({
+  id,
+  source: 'client',
+  started_at: '2026-09-23T00:00:01Z',
+  usage: {
+    input_tokens: 0,
+    output_tokens: 0,
+    cache_creation_input_tokens: 0,
+    cache_read_input_tokens: 0,
+  },
+  ...ending,
+});
 function channel() {
   let writer!: ReadableStreamDefaultController<Uint8Array>;
   let cursor = 0;
@@ -32,8 +44,6 @@ function channel() {
   return {
     response,
     canceled: () => canceled,
-    close: () => writer.close(),
-    fail: () => writer.error(new TypeError('Connection lost')),
     event: async (name: string, data: Record<string, unknown> = {}) => {
       writer.enqueue(
         new TextEncoder().encode(
@@ -56,7 +66,11 @@ async function fixture(open = true) {
     turn_in_flight: false,
     created_at: '2026-09-23T00:00:00Z',
     updated_at: '2026-09-23T00:00:00Z',
-    capabilities: { supports_permission_prompts: true, supports_reasoning_stream: true },
+    capabilities: {
+      supports_permission_prompts: true,
+      supports_reasoning_stream: true,
+      answers_prompts_on_return: true,
+    },
   };
   const saved: Schema['MessagesResponse'] = {
     session_id: 's',
@@ -65,17 +79,42 @@ async function fixture(open = true) {
     revision: 0,
   };
   const inbox: Schema['InboxListResponse'] = { session_id: 's', items: [] };
-  vi.spyOn(api, 'get').mockImplementation(
-    async <T>(path: string) =>
-      structuredClone(
-        path.endsWith('/messages') ? saved : path.endsWith('/inbox') ? inbox : session,
-      ) as T,
-  );
+  // The records `GET /turns/{turn_id}` reads; a turn missing here is a 404.
+  const turns = new Map<string, Schema['TurnRecord']>();
+  vi.spyOn(api, 'get').mockImplementation(async <T>(path: string) => {
+    const turn = /\/turns\/([^/]+)$/.exec(path)?.[1];
+    if (turn) {
+      const found = turns.get(decodeURIComponent(turn));
+      if (!found) throw new ApiError(404, { type: 'https://meka.run/errors/not-found' });
+      return structuredClone(found) as T;
+    }
+    return structuredClone(
+      path.endsWith('/messages') ? saved : path.endsWith('/inbox') ? inbox : session,
+    ) as T;
+  });
   const feed = channel();
-  const post = channel();
   vi.spyOn(api, 'stream').mockResolvedValue(feed.response);
-  const request = vi.spyOn(api, 'response').mockResolvedValue(post.response);
-  const mutate = vi.spyOn(api, 'mutate').mockResolvedValue({ item_id: 'item', state: 'pending' });
+  // A turn request waits for the test to answer it; an inbox request is accepted at once.
+  const admissions: { resolve: (value: unknown) => void; reject: (error: unknown) => void }[] = [];
+  const mutate = vi
+    .spyOn(api, 'mutate')
+    .mockImplementation((_method, path) =>
+      path.endsWith('/turn')
+        ? new Promise((resolve, reject) => admissions.push({ resolve, reject }))
+        : Promise.resolve({ item_id: 'item', state: 'pending' }),
+    );
+  const calls = (suffix: string) => mutate.mock.calls.filter(([, path]) => path.endsWith(suffix));
+  async function pending() {
+    await vi.waitFor(() => expect(admissions.length).toBeGreaterThan(0));
+    return admissions.shift()!;
+  }
+  const answer = async (value: unknown) => (await pending()).resolve(value);
+  // meka answers for a turn it admitted, from the live turn until its row is written.
+  const admit = (id = 'turn') => {
+    if (!turns.has(id)) turns.set(id, record(id));
+    return answer(record(id));
+  };
+  const refuse = async (error: unknown) => (await pending()).reject(error);
   const invalidated = vi.fn();
   const controller = new SessionController(api, true, invalidated);
   controllers.push(controller);
@@ -84,9 +123,8 @@ async function fixture(open = true) {
   if (open) await vi.waitFor(() => expect(state().saved).toBeDefined());
   async function start() {
     const sending = controller.submitMessage('s', 'Hello.', options());
-    await vi.waitFor(() => expect(request).toHaveBeenCalledOnce());
     session.turn_in_flight = true;
-    await post.event('turn.started');
+    await admit();
     expect(await sending).toBe(true);
   }
   return {
@@ -94,10 +132,13 @@ async function fixture(open = true) {
     session,
     saved,
     inbox,
+    turns,
     feed,
-    post,
-    request,
     mutate,
+    calls,
+    answer,
+    admit,
+    refuse,
     controller,
     state,
     invalidated,
@@ -105,54 +146,49 @@ async function fixture(open = true) {
   };
 }
 
-it('notifies once when the feed finishes before POST admission reaches the client', async () => {
+it('notifies once when the feed finishes before admission reaches the client', async () => {
   const f = await fixture();
   const completed = vi.fn();
   f.controller.onCompletion(completed);
   const sending = f.controller.submitMessage('s', 'Hello.', options());
-  await vi.waitFor(() => expect(f.request).toHaveBeenCalledOnce());
+  await vi.waitFor(() => expect(f.calls('/turn')).toHaveLength(1));
   await f.feed.event('turn.started');
   await f.feed.event('turn.finished');
-  await f.post.event('turn.started');
-  await sending;
-  await f.post.event('turn.finished');
+  await f.admit();
+  expect(await sending).toBe(true);
   expect(completed).toHaveBeenCalledExactlyOnceWith(
     expect.objectContaining({ turnId: 'turn', outcome: 'completed' }),
   );
 });
 
-it('notifies once for an owned turn despite terminals on both streams', async () => {
+it('notifies once for an owned turn despite a repeated terminal', async () => {
   const f = await fixture();
   const completed = vi.fn();
   f.controller.onCompletion(completed);
   await f.start();
-  await f.post.event('turn.finished');
+  await f.feed.event('turn.finished');
   await f.feed.event('turn.finished');
   expect(completed).toHaveBeenCalledTimes(1);
 });
 
 it.each(['steer', 'followup', 'interrupt'])(
-  'starts an idle streaming turn even when the busy mode is %s',
+  'starts an idle detached turn under its key even when the busy mode is %s',
   async (mode) => {
     const f = await fixture();
     const sending = f.controller.submitMessage('s', 'Plain user input', {
       ...options(mode),
       source: 'not a relay',
     });
-    await vi.waitFor(() => expect(f.request).toHaveBeenCalledOnce());
-    expect(f.request).toHaveBeenCalledWith(
+    await vi.waitFor(() => expect(f.calls('/turn')).toHaveLength(1));
+    expect(f.mutate).toHaveBeenCalledWith(
       'POST',
       '/v1/sessions/s/turn',
-      expect.objectContaining({
-        body: { message: 'Plain user input', stream: true },
-        accept: 'text/event-stream',
-        signal: expect.any(AbortSignal),
-      }),
+      { message: 'Plain user input', detach: true },
+      f.state().submissions[0]?.key,
     );
-    expect(f.request.mock.calls[0]?.[2]).not.toHaveProperty('idempotencyKey');
     expect(f.state().submissions[0]?.state).toBe('sending');
     f.session.turn_in_flight = true;
-    await f.post.event('turn.started');
+    await f.admit();
     expect(await sending).toBe(true);
     expect(f.state().submissions[0]).toMatchObject({
       kind: 'turn',
@@ -160,20 +196,38 @@ it.each(['steer', 'followup', 'interrupt'])(
       turnId: 'turn',
     });
     expect(isSessionRunning(f.state())).toBe(true);
-    expect(f.mutate).not.toHaveBeenCalled();
+    expect(f.calls('/inbox')).toHaveLength(0);
   },
 );
 
-it('refreshes metadata again on first progress when admission preceded input persistence', async () => {
+it('reads the session again once a turn’s opening is saved, but not when it is handed over again', async () => {
   const f = await fixture();
   await f.start();
+  await f.feed.event('turn.started');
   f.invalidated.mockClear();
-  f.session.title = 'Hello.';
-  await f.post.event('thinking.delta', { text: 'Considering' });
+  const content = [{ type: 'text', text: 'Hello.' }];
+  await f.feed.event('message.appended', { role: 'user', content });
   expect(f.invalidated).toHaveBeenCalledExactlyOnceWith('s');
   await f.feed.event('thinking.delta', { text: 'Considering' });
-  await f.post.event('assistant_text.delta', { text: 'Answer' });
+  await f.feed.event('message.appended', { role: 'user', content, resumed: true });
   expect(f.invalidated).toHaveBeenCalledTimes(1);
+});
+
+it('reads the history a send put off once its turn makes progress', async () => {
+  const f = await fixture();
+  const sending = f.controller.submitMessage('s', 'Hello.', options());
+  await vi.waitFor(() => expect(f.calls('/turn')).toHaveLength(1));
+  f.saved.messages = [{ role: 'assistant', content: [{ type: 'text', text: 'Earlier answer.' }] }];
+  f.saved.total = 1;
+  // The previous turn's refresh lands while this send awaits admission, so it waits.
+  await f.controller.refresh('s');
+  expect(f.state().saved?.total).toBe(0);
+  f.session.turn_in_flight = true;
+  await f.admit();
+  expect(await sending).toBe(true);
+  await f.feed.event('turn.started');
+  await f.feed.event('thinking.delta', { text: 'Considering' });
+  await vi.waitFor(() => expect(f.state().saved?.total).toBe(1));
 });
 
 it.each(['steer', 'followup', 'interrupt'])(
@@ -182,7 +236,7 @@ it.each(['steer', 'followup', 'interrupt'])(
     const f = await fixture();
     await f.start();
     expect(await f.controller.submitMessage('s', 'Additional input', options(mode))).toBe(true);
-    expect(f.mutate).toHaveBeenCalledWith(
+    expect(f.mutate).toHaveBeenLastCalledWith(
       'POST',
       '/v1/sessions/s/inbox',
       {
@@ -191,62 +245,17 @@ it.each(['steer', 'followup', 'interrupt'])(
       },
       expect.any(String),
     );
-    expect(f.request).toHaveBeenCalledOnce();
+    expect(f.calls('/turn')).toHaveLength(1);
   },
 );
 
-it('renders content and approvals once when both streams carry the same events', async () => {
-  const f = await fixture();
-  await f.start();
-  await f.feed.event('turn.started');
-  await f.post.event('thinking.delta', { text: 'Considering ' });
-  await f.feed.event('thinking.delta', { text: 'Considering ' });
-  expect(f.state().blocks.at(-1)).toEqual({ kind: 'thinking', text: 'Considering ' });
-  await f.feed.event('thinking.delta', { text: 'the request.' });
-  await f.post.event('thinking.delta', { text: 'the request.' });
-  expect(f.state().blocks.filter((block) => block.kind === 'thinking')).toEqual([
-    { kind: 'thinking', text: 'Considering the request.' },
-  ]);
-  expect(f.state().running).toBe(true);
-  await f.post.event('assistant_text.delta', { text: 'Hello ' });
-  await f.feed.event('assistant_text.delta', { text: 'Hello ' });
-  await f.feed.event('assistant_text.delta', { text: 'world' });
-  await f.post.event('assistant_text.delta', { text: 'world' });
-  const tool = { id: 'call', name: 'shell_execute', input: { command: 'pwd' } };
-  await f.post.event('tool_call.executing', tool);
-  await f.feed.event('tool_call.executing', tool);
-  const approval = {
-    request_id: 'permission',
-    tool_name: 'shell_execute',
-    input: tool.input,
-    expires_in_seconds: 30,
-  };
-  await f.post.event('permission_required', approval);
-  await f.feed.event('permission_required', approval);
-  expect(f.state().blocks.filter((block) => block.kind === 'text')).toEqual([
-    { kind: 'text', text: 'Hello world' },
-  ]);
-  expect(f.state().blocks.filter((block) => block.kind === 'tool')).toEqual([
-    { kind: 'tool', id: 'call' },
-  ]);
-  expect(f.state().approvals).toHaveLength(1);
-  f.controller.select(undefined);
-  expect(f.state().feed).toBe('connected');
-  await f.controller.respond(f.state().approvals[0]!, 'allow');
-  expect(f.mutate.mock.calls.at(-1)?.[1]).toBe('/v1/sessions/s/responses/permission');
-  expect(f.state().approvals).toHaveLength(0);
-});
-
 it('routes text through the inbox only after a definitive busy rejection', async () => {
   const f = await fixture();
-  f.request.mockRejectedValueOnce(
-    new ApiError(409, { type: 'https://meka.run/errors/turn-in-flight' }),
-  );
-  expect(await f.controller.submitMessage('s', 'Keep this exact text', options('interrupt'))).toBe(
-    true,
-  );
-  expect(f.request).toHaveBeenCalledOnce();
-  expect(f.mutate).toHaveBeenCalledWith(
+  const sending = f.controller.submitMessage('s', 'Keep this exact text', options('interrupt'));
+  await f.refuse(new ApiError(409, { type: 'https://meka.run/errors/turn-in-flight' }));
+  expect(await sending).toBe(true);
+  expect(f.calls('/turn')).toHaveLength(1);
+  expect(f.mutate).toHaveBeenLastCalledWith(
     'POST',
     '/v1/sessions/s/inbox',
     {
@@ -263,9 +272,10 @@ it.each(['session-locked', 'idempotency'])(
   'does not convert an unrelated %s conflict into an inbox send',
   async (kind) => {
     const f = await fixture();
-    f.request.mockRejectedValueOnce(new ApiError(409, { type: 'https://meka.run/errors/' + kind }));
-    expect(await f.controller.submitMessage('s', 'Hello.', options())).toBe(false);
-    expect(f.mutate).not.toHaveBeenCalled();
+    const sending = f.controller.submitMessage('s', 'Hello.', options());
+    await f.refuse(new ApiError(409, { type: 'https://meka.run/errors/' + kind }));
+    expect(await sending).toBe(false);
+    expect(f.calls('/inbox')).toHaveLength(0);
     expect(f.state().submissions[0]?.state).toBe('failed');
   },
 );
@@ -276,11 +286,10 @@ it.each([
   { retention: 'withdraw' },
 ])('preserves direct-only options on a racing busy rejection: %s', async (extra) => {
   const f = await fixture();
-  f.request.mockRejectedValueOnce(
-    new ApiError(409, { type: 'https://meka.run/errors/turn-in-flight' }),
-  );
-  expect(await f.controller.submitMessage('s', 'Hello.', { ...options(), ...extra })).toBe(false);
-  expect(f.mutate).not.toHaveBeenCalled();
+  const sending = f.controller.submitMessage('s', 'Hello.', { ...options(), ...extra });
+  await f.refuse(new ApiError(409, { type: 'https://meka.run/errors/turn-in-flight' }));
+  expect(await sending).toBe(false);
+  expect(f.calls('/inbox')).toHaveLength(0);
   expect(f.state().submissions[0]).toMatchObject({ kind: 'turn', state: 'failed', preview: false });
 });
 
@@ -290,11 +299,11 @@ it('rejects direct-only options while busy before dispatching another request', 
   await expect(
     f.controller.submitMessage('s', 'Hello.', { ...options(), skill: 'review' }),
   ).rejects.toThrow('idle session');
-  expect(f.request).toHaveBeenCalledOnce();
-  expect(f.mutate).not.toHaveBeenCalled();
+  expect(f.calls('/turn')).toHaveLength(1);
+  expect(f.calls('/inbox')).toHaveLength(0);
 });
 
-it('passes images, skill activation, and retention through the streaming turn', async () => {
+it('passes images, skill activation, and retention through the detached turn', async () => {
   const f = await fixture();
   const sending = f.controller.submitMessage('s', 'Inspect this.', {
     ...options(),
@@ -302,66 +311,246 @@ it('passes images, skill activation, and retention through the streaming turn', 
     skill: 'review',
     retention: 'withdraw',
   });
-  await vi.waitFor(() => expect(f.request).toHaveBeenCalledOnce());
-  expect(f.request.mock.calls[0]?.[2]?.body).toEqual({
+  await vi.waitFor(() => expect(f.calls('/turn')).toHaveLength(1));
+  expect(f.calls('/turn')[0]?.[2]).toEqual({
     message: 'Inspect this.',
-    stream: true,
+    detach: true,
     images: [{ media_type: 'image/png', data: 'synthetic' }],
     options: { skill: 'review', unanswered_message: 'withdraw' },
   });
-  await f.post.event('turn.started');
+  await f.admit();
   expect(await sending).toBe(true);
 });
 
-it.each(['network', 'empty stream', 'wrong response'])(
-  'keeps a lost %s admission uncertain without resending or falling back',
+it.each(['network', 'wrong response'])(
+  'keeps a lost %s admission uncertain until it is retried under the same key',
   async (failure) => {
     const f = await fixture();
-    if (failure === 'network') f.request.mockRejectedValueOnce(new UncertainMutationError());
-    if (failure === 'wrong response') f.request.mockResolvedValueOnce(Response.json({ ok: true }));
     const sending = f.controller.submitMessage('s', 'Only once.', options());
-    if (failure === 'empty stream') {
-      await vi.waitFor(() => expect(f.request).toHaveBeenCalledOnce());
-      f.post.close();
-    }
+    if (failure === 'network') await f.refuse(new UncertainMutationError());
+    else await f.answer({ ok: true });
     expect(await sending).toBe(false);
     expect(f.state().submissions[0]).toMatchObject({ kind: 'turn', state: 'uncertain' });
-    expect(f.request).toHaveBeenCalledOnce();
-    expect(f.mutate).not.toHaveBeenCalled();
-    await expect(f.controller.retryInbox('s', f.state().submissions[0]!.key)).rejects.toThrow(
-      'Only inbox',
-    );
+    expect(f.calls('/turn')).toHaveLength(1);
+    expect(f.calls('/inbox')).toHaveLength(0);
+    // meka answers a repeated key with the turn the first request started, or starts it now.
+    f.session.turn_in_flight = true;
+    const retry = f.controller.retrySubmission('s', f.state().submissions[0]!.key);
+    await f.admit();
+    expect(await retry).toBe(true);
+    const [first, second] = f.calls('/turn');
+    expect(second).toEqual(first);
+    expect(f.state().submissions[0]).toMatchObject({ state: 'running', turnId: 'turn' });
   },
 );
 
-it('keeps following an admitted turn after its POST stream drops', async () => {
+it('settles a retried turn that ended while its admission was lost', async () => {
+  const f = await fixture();
+  const sending = f.controller.submitMessage('s', 'Only once.', options());
+  await f.refuse(new UncertainMutationError());
+  expect(await sending).toBe(false);
+  // It ran and ended while this tab was away, and the feed has moved past its terminal.
+  f.turns.set('turn', record('turn', { ended_at: '2026-09-23T00:01:00Z', status: 'succeeded' }));
+  const retry = f.controller.retrySubmission('s', f.state().submissions[0]!.key);
+  await f.admit();
+  expect(await retry).toBe(true);
+  await vi.waitFor(() => expect(f.state().submissions[0]?.state).toBe('completed'));
+});
+
+it('follows an admitted turn on the feed to its end', async () => {
   const f = await fixture();
   await f.start();
   await f.feed.event('turn.started');
-  f.post.fail();
   await f.feed.event('assistant_text.delta', { text: 'Still working.' });
   expect(f.state().submissions[0]?.state).toBe('running');
   expect(f.state().blocks).toContainEqual({ kind: 'text', text: 'Still working.' });
   f.session.turn_in_flight = false;
   await f.feed.event('turn.finished');
   await vi.waitFor(() => expect(f.state().submissions[0]?.state).toBe('completed'));
-  expect(f.request).toHaveBeenCalledOnce();
-  expect(f.mutate).not.toHaveBeenCalled();
+  expect(f.calls('/turn')).toHaveLength(1);
 });
 
-it('requires outcome review when a broken turn stream ended without a terminal on either channel', async () => {
+it.each([
+  ['succeeded', 'completed'],
+  ['failed', 'failed'],
+  ['canceled', 'canceled'],
+] as const)(
+  'settles a turn that %s from its record when the feed lost its end',
+  async (status, outcome) => {
+    const f = await fixture();
+    await f.start();
+    await f.feed.event('turn.started');
+    f.session.turn_in_flight = false;
+    f.turns.set(
+      'turn',
+      record('turn', {
+        ended_at: '2026-09-23T00:01:00Z',
+        status,
+        ...(status === 'failed'
+          ? { error: { type: 'https://meka.run/errors/provider', detail: 'Provider refused.' } }
+          : {}),
+        ...(status === 'canceled' ? { reason: 'abandoned' } : {}),
+      }),
+    );
+    // A hole in the feed is where a terminal can go missing.
+    await f.feed.event('feed.gap');
+    await vi.waitFor(() => expect(f.state().submissions[0]?.state).toBe(outcome));
+    expect(isSessionRunning(f.state())).toBe(false);
+    if (status === 'failed') expect(f.state().submissions[0]?.error).toBe('Provider refused.');
+    if (status === 'canceled')
+      expect(f.state().notices[0]?.text).toContain('nobody was following it');
+  },
+);
+
+it('asks for review when a turn no longer runs but its record has no ending', async () => {
   const f = await fixture();
   await f.start();
+  await f.feed.event('turn.started');
   f.session.turn_in_flight = false;
-  f.post.close();
+  f.turns.set('turn', record('turn'));
+  await f.feed.event('feed.gap');
   await vi.waitFor(() => expect(f.state().submissions[0]?.state).toBe('uncertain'));
   expect(f.state().submissions[0]?.error).toContain('turn started');
-  expect(f.request).toHaveBeenCalledOnce();
-  expect(f.mutate).not.toHaveBeenCalled();
+  // meka holds a turn's key in memory, so a process that died with it would run it again.
+  await expect(f.controller.retrySubmission('s', f.state().submissions[0]!.key)).rejects.toThrow(
+    'This turn started',
+  );
+  expect(f.calls('/turn')).toHaveLength(1);
+});
+
+it('does not notify or warn for each attempt of a queued message meka will retry', async () => {
+  const f = await fixture();
+  const completed = vi.fn();
+  f.controller.onCompletion(completed);
+  const attempt = async (turnId: string, withdrawn: boolean) => {
+    await f.feed.event('turn.started', {
+      turn_id: turnId,
+      source: 'inbox',
+      item_ids: ['item'],
+      started_at: '2026-09-23T00:05:00Z',
+    });
+    await f.feed.event('turn.failed', {
+      turn_id: turnId,
+      error: { detail: 'The account is out of quota.' },
+      ...(withdrawn ? { message_withdrawn: true } : {}),
+    });
+  };
+  await attempt('first', true);
+  await attempt('second', true);
+  expect(completed).not.toHaveBeenCalled();
+  expect(f.state().notices).toEqual([]);
+  // A failure the model's reply reached is the turn's own, and is reported as such.
+  await attempt('third', false);
+  expect(completed).toHaveBeenCalledOnce();
+  expect(f.state().notices).toHaveLength(1);
+});
+
+it('tells this tab when meka gives up on its queued message, once', async () => {
+  const f = await fixture();
+  const completed = vi.fn();
+  f.controller.onCompletion(completed);
+  expect(await f.controller.submit('s', { message: 'A', class: 'followup' }, 'inbox')).toBe(true);
+  await f.feed.event('turn.started', {
+    turn_id: 'attempt',
+    source: 'inbox',
+    item_ids: ['item'],
+    started_at: '2026-09-23T00:05:00Z',
+  });
+  await f.feed.event('turn.failed', {
+    turn_id: 'attempt',
+    error: { detail: 'The credential was rejected.' },
+    message_withdrawn: true,
+  });
+  expect(completed).not.toHaveBeenCalled();
+  // Waiting would not change a rejected credential, so meka gives the item up at once.
+  await f.feed.event('inbox.failed', {
+    item_id: 'item',
+    reason: 'the turn opened on it failed, and waiting would not change that',
+    error: { detail: 'The credential was rejected.' },
+  });
+  expect(completed).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({ turnId: 'attempt', outcome: 'failed' }),
+  );
+  expect(f.state().notices).toEqual([
+    expect.objectContaining({
+      event: 'inbox.failed',
+      text: 'meka gave up on a queued message: The credential was rejected.',
+    }),
+  ]);
+});
+
+it('does not show a retried message again below what ran since', async () => {
+  const f = await fixture();
+  const sending = f.controller.submitMessage('s', 'Only once.', options());
+  await f.refuse(new UncertainMutationError());
+  expect(await sending).toBe(false);
+  // The read that follows moves the unsettled message back to its recovery controls.
+  await vi.waitFor(() => expect(f.state().submissions[0]?.preview).toBe(false));
+  f.session.turn_in_flight = true;
+  const retry = f.controller.retrySubmission('s', f.state().submissions[0]!.key);
+  await f.admit();
+  expect(await retry).toBe(true);
+  expect(f.state().submissions[0]).toMatchObject({ state: 'running', preview: false });
+  expect(f.state().blocks).toEqual([]);
+});
+
+it('leaves a turn running while its record has no ending and the session runs a turn', async () => {
+  const f = await fixture();
+  const sending = f.controller.submitMessage('s', 'Only once.', options());
+  await f.refuse(new UncertainMutationError());
+  expect(await sending).toBe(false);
+  f.session.turn_in_flight = true;
+  const retry = f.controller.retrySubmission('s', f.state().submissions[0]!.key);
+  await f.admit();
+  expect(await retry).toBe(true);
+  // The retry settles by the record, which has no ending, then by the session, which is busy,
+  // and stops there: the record is not read again, and the turn is left to the feed.
+  const paths = () => vi.mocked(f.api.get).mock.calls.map(([path]) => path);
+  await vi.waitFor(() =>
+    expect(paths().slice(paths().lastIndexOf('/v1/sessions/s/turns/turn') + 1)).toContain(
+      '/v1/sessions/s',
+    ),
+  );
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(paths().filter((path) => path.endsWith('/turns/turn'))).toHaveLength(1);
+  expect(f.state().submissions[0]?.state).toBe('running');
+});
+
+it('asks for review when meka has no record of a turn it no longer runs', async () => {
+  const f = await fixture();
+  await f.start();
+  await f.feed.event('turn.started');
+  f.session.turn_in_flight = false;
+  f.turns.delete('turn');
+  await f.feed.event('feed.gap');
+  await vi.waitFor(() => expect(f.state().submissions[0]?.state).toBe('uncertain'));
+});
+
+it('settles a turn that ended between reading its record and the session', async () => {
+  const f = await fixture();
+  await f.start();
+  await f.feed.event('turn.started');
+  f.session.turn_in_flight = false;
+  const get = vi.mocked(f.api.get);
+  const read = get.getMockImplementation()!;
+  let reads = 0;
+  get.mockImplementation((async (path: string, ...rest: unknown[]) => {
+    const answer = await (read as (...args: unknown[]) => Promise<unknown>)(path, ...rest);
+    // The turn ends just after its first record read, before the session is read.
+    if (path.endsWith('/turns/turn') && reads++ === 0)
+      f.turns.set(
+        'turn',
+        record('turn', { ended_at: '2026-09-23T00:01:00Z', status: 'succeeded' }),
+      );
+    return answer;
+  }) as typeof read);
+  await f.feed.event('feed.gap');
+  await vi.waitFor(() => expect(f.state().submissions[0]?.state).toBe('completed'));
+  expect(f.state().submissions[0]?.error).toBeUndefined();
 });
 
 it.each(['turn.finished', 'turn.failed', 'turn.canceled'])(
-  'records %s even when the POST terminal arrives first',
+  'records %s from the feed',
   async (terminal) => {
     const f = await fixture();
     await f.start();
@@ -369,14 +558,6 @@ it.each(['turn.finished', 'turn.failed', 'turn.canceled'])(
     f.session.turn_in_flight = false;
     const data =
       terminal === 'turn.failed' ? { error: { detail: 'Provider refused the request.' } } : {};
-    await f.post.event(terminal, data);
-    await vi.waitFor(() => expect(isSessionRunning(f.state())).toBe(false));
-    if (terminal === 'turn.failed')
-      expect(f.state().notices[0]).toMatchObject({
-        event: 'turn.failed',
-        level: 'error',
-        text: 'Provider refused the request.',
-      });
     await f.feed.event(terminal, data);
     const outcome =
       terminal === 'turn.finished'
@@ -399,13 +580,14 @@ it.each(['turn.finished', 'turn.failed', 'turn.canceled'])(
   },
 );
 
-it('ignores delayed feed replay after the POST completion has reconciled saved history', async () => {
+it('ignores delayed feed replay after the turn has reconciled saved history', async () => {
   const f = await fixture();
   await f.start();
+  await f.feed.event('turn.started');
   f.session.turn_in_flight = false;
   f.saved.messages = [{ role: 'assistant', content: [{ type: 'text', text: 'Saved answer.' }] }];
   f.saved.total = 1;
-  await f.post.event('turn.finished');
+  await f.feed.event('turn.finished');
   await vi.waitFor(() => expect(f.state().saved?.total).toBe(1));
   await f.feed.event('turn.started');
   await f.feed.event('assistant_text.delta', { text: 'Saved answer.' });
@@ -414,20 +596,22 @@ it('ignores delayed feed replay after the POST completion has reconciled saved h
   expect(f.state().blocks).toEqual([]);
 });
 
-it('does not end a newer turn when the older POST completion arrives late', async () => {
+it('settles an older turn whose end went by unseen without ending the newer one', async () => {
   const f = await fixture();
   await f.start();
   await f.feed.event('turn.started');
-  await f.feed.event('turn.finished');
+  f.turns.set('turn', record('turn', { ended_at: '2026-09-23T00:01:00Z', status: 'succeeded' }));
   await f.feed.event('turn.started', { turn_id: 'new-turn' });
   await f.feed.event('assistant_text.delta', { turn_id: 'new-turn', text: 'New work.' });
-  await f.post.event('turn.finished');
+  await vi.waitFor(() => expect(f.state().submissions[0]?.state).toBe('completed'));
   await vi.waitFor(() => expect(f.state().loading).toBe(false));
   expect(isSessionRunning(f.state())).toBe(true);
   expect(f.state().turnId).toBe('new-turn');
   expect(f.state().blocks).toContainEqual({ kind: 'text', text: 'New work.' });
   await f.controller.cancel('s');
-  expect(f.mutate).toHaveBeenCalledWith('POST', '/v1/sessions/s/cancel', { turn_id: 'new-turn' });
+  expect(f.mutate).toHaveBeenLastCalledWith('POST', '/v1/sessions/s/cancel', {
+    turn_id: 'new-turn',
+  });
 });
 
 it('can cancel an externally started turn when replay lost its start event', async () => {
@@ -463,41 +647,36 @@ it('observes a new turn after the preceding turn finished even when the new star
   expect(f.mutate).toHaveBeenCalledWith('POST', '/v1/sessions/s/cancel', { turn_id: 'turn' });
 });
 
-it('does not reopen completed work when the entire feed arrives before POST admission', async () => {
+it('does not reopen completed work when the entire feed arrives before admission', async () => {
   const f = await fixture();
   const sending = f.controller.submitMessage('s', 'Hello.', options());
-  await vi.waitFor(() => expect(f.request).toHaveBeenCalledOnce());
+  await vi.waitFor(() => expect(f.calls('/turn')).toHaveLength(1));
   await f.feed.event('turn.started');
   await f.feed.event('assistant_text.delta', { text: 'Done.' });
   await f.feed.event('turn.finished');
-  await f.post.event('turn.started');
+  await f.admit();
   expect(await sending).toBe(true);
   expect(f.state().submissions[0]?.state).toBe('completed');
   expect(isSessionRunning(f.state())).toBe(false);
-  await f.post.event('turn.finished');
 });
 
-it('keeps the POST attached across navigation and feed reconnection, but aborts it on disposal', async () => {
+it('keeps following an admitted turn across navigation and feed reconnection', async () => {
   const f = await fixture();
   await f.start();
   f.controller.select(undefined);
-  expect(f.post.canceled()).toBe(false);
   f.controller.select('s');
   const replacement = channel();
   vi.mocked(f.api.stream).mockResolvedValueOnce(replacement.response);
   await f.controller.reconnect('s');
-  expect(f.post.canceled()).toBe(false);
-  await f.post.event('assistant_text.delta', { text: 'Only the feed renders me.' });
-  await replacement.event('turn.started');
+  await replacement.event('turn.started', { resumed: true });
   await replacement.event('assistant_text.delta', { text: 'Only the feed renders me.' });
   expect(f.state().blocks.filter((block) => block.kind === 'text')).toEqual([
     { kind: 'text', text: 'Only the feed renders me.' },
   ]);
-  f.controller.dispose();
-  await vi.waitFor(() => expect(f.post.canceled()).toBe(true));
+  expect(f.state().submissions[0]).toMatchObject({ state: 'running', turnId: 'turn' });
 });
 
-it('cancels the observed POST turn ID before the feed catches up', async () => {
+it('cancels the admitted turn ID before the feed catches up', async () => {
   const f = await fixture();
   await f.start();
   await f.controller.cancel('s');
@@ -505,26 +684,16 @@ it('cancels the observed POST turn ID before the feed catches up', async () => {
   await expect(f.controller.deleteSession('s')).rejects.toThrow('Stop the current turn');
 });
 
-it('settles a pending admission and closes its reader when the connection is disposed', async () => {
+it('settles a pending admission when the connection is disposed', async () => {
   const f = await fixture();
   const sending = f.controller.submitMessage('s', 'Hello.', options());
-  await vi.waitFor(() => expect(f.request).toHaveBeenCalledOnce());
+  await vi.waitFor(() => expect(f.calls('/turn')).toHaveLength(1));
   f.controller.dispose();
+  // Disposing the connection's client aborts the request in flight.
+  await f.refuse(new DOMException('The operation was aborted.', 'AbortError'));
   expect(await sending).toBe(false);
-  expect(f.post.canceled()).toBe(true);
   expect(f.controller.getSnapshot()).toEqual([]);
-  expect(f.mutate).not.toHaveBeenCalled();
-});
-
-it('does not accept a turn response identifying a different session', async () => {
-  const f = await fixture();
-  const sending = f.controller.submitMessage('s', 'Hello.', options());
-  await vi.waitFor(() => expect(f.request).toHaveBeenCalledOnce());
-  await f.post.event('turn.started', { session_id: 'another-session' });
-  expect(await sending).toBe(false);
-  expect(f.state().submissions[0]?.state).toBe('uncertain');
-  expect(f.post.canceled()).toBe(true);
-  expect(f.mutate).not.toHaveBeenCalled();
+  expect(f.calls('/inbox')).toHaveLength(0);
 });
 
 it('previews a first message while opening its feed and keeps it through route changes', async () => {
@@ -545,23 +714,24 @@ it('previews a first message while opening its feed and keeps it through route c
   });
   f.controller.select(undefined);
   await vi.waitFor(() => expect(connect).toBeDefined());
-  expect(f.request).not.toHaveBeenCalled();
+  expect(f.calls('/turn')).toHaveLength(0);
   connect(f.feed.response);
-  await vi.waitFor(() => expect(f.request).toHaveBeenCalledOnce());
+  await vi.waitFor(() => expect(f.calls('/turn')).toHaveLength(1));
   expect(f.feed.canceled()).toBe(false);
   expect(f.state().saved?.total).toBe(0);
   await f.feed.event('turn.started');
   expect(f.state().partial).toBe(false);
-  await f.post.event('turn.started');
+  await f.admit();
   expect(await sending).toBe(true);
   expect(f.state().submissions).toHaveLength(1);
-  expect(f.mutate).not.toHaveBeenCalled();
+  expect(f.calls('/inbox')).toHaveLength(0);
 });
 
 it('retains a failed first message for retry within its created session', async () => {
   const f = await fixture(false);
-  f.request.mockRejectedValueOnce(new ApiError(422, { detail: 'Rejected input' }));
-  expect(await f.controller.submitInitialMessage(f.session, 'Retry this', options())).toBe(false);
+  const sending = f.controller.submitInitialMessage(f.session, 'Retry this', options());
+  await f.refuse(new ApiError(422, { detail: 'Rejected input' }));
+  expect(await sending).toBe(false);
   expect(f.state().submissions[0]).toMatchObject({
     state: 'failed',
     body: { message: 'Retry this' },
@@ -570,30 +740,31 @@ it('retains a failed first message for retry within its created session', async 
     f.controller.submitInitialMessage(f.session, 'Retry this', options()),
   ).rejects.toThrow('already started');
   const retry = f.controller.submitMessage('s', 'Retry this', options());
-  await vi.waitFor(() => expect(f.request).toHaveBeenCalledTimes(2));
-  await f.post.event('turn.started');
+  await f.admit();
   expect(await retry).toBe(true);
-  expect(f.mutate).not.toHaveBeenCalled();
+  expect(f.calls('/turn')).toHaveLength(2);
+  expect(f.calls('/inbox')).toHaveLength(0);
 });
 
 it('does not send a first turn when its attending feed could not open', async () => {
   const f = await fixture(false);
   vi.mocked(f.api.stream).mockRejectedValueOnce(new Error('Feed unavailable'));
   expect(await f.controller.submitInitialMessage(f.session, 'Keep draft', options())).toBe(false);
-  expect(f.request).not.toHaveBeenCalled();
+  expect(f.calls('/turn')).toHaveLength(0);
   expect(f.state().submissions[0]).toMatchObject({ state: 'failed', preview: false });
   expect(f.state().error?.message).toBe('Feed unavailable');
 });
 
-it('does not replay an uncertain first turn', async () => {
+it('does not send an uncertain first turn again on its own', async () => {
   const f = await fixture(false);
-  f.request.mockRejectedValueOnce(new UncertainMutationError());
-  expect(await f.controller.submitInitialMessage(f.session, 'Only once', options())).toBe(false);
+  const sending = f.controller.submitInitialMessage(f.session, 'Only once', options());
+  await f.refuse(new UncertainMutationError());
+  expect(await sending).toBe(false);
   expect(f.state().submissions[0]?.state).toBe('uncertain');
   await expect(f.controller.submitMessage('s', 'Only once', options())).rejects.toThrow(
     'pending submission',
   );
-  expect(f.request).toHaveBeenCalledOnce();
+  expect(f.calls('/turn')).toHaveLength(1);
 });
 
 it('abandons a first-turn handoff when the connection is retired', async () => {
@@ -610,7 +781,7 @@ it('abandons a first-turn handoff when the connection is retired', async () => {
   f.controller.dispose();
   connect(f.feed.response);
   expect(await sending).toBe(false);
-  expect(f.request).not.toHaveBeenCalled();
+  expect(f.calls('/turn')).toHaveLength(0);
 });
 
 it('fails a first turn whose feed restarts before sending, so it can be sent again', async () => {
@@ -628,7 +799,7 @@ it('fails a first turn whose feed restarts before sending, so it can be sent aga
   connect(channel().response);
   await reconnecting;
   expect(await sending).toBe(false);
-  expect(f.request).not.toHaveBeenCalled();
+  expect(f.calls('/turn')).toHaveLength(0);
   await vi.waitFor(() =>
     expect(f.state().submissions[0]).toMatchObject({
       state: 'failed',
@@ -638,7 +809,6 @@ it('fails a first turn whose feed restarts before sending, so it can be sent aga
   );
   expect(f.state().saved?.total).toBe(0);
   const retry = f.controller.submitMessage('s', 'Interrupted', options());
-  await vi.waitFor(() => expect(f.request).toHaveBeenCalledOnce());
-  await f.post.event('turn.started');
+  await f.admit();
   expect(await retry).toBe(true);
 });

@@ -161,6 +161,7 @@ const required: Record<keyof EventPayloads, string[]> = {
   'turn.finished': ['turn_id'],
   'turn.failed': ['turn_id'],
   'turn.canceled': ['turn_id'],
+  'message.appended': ['role'],
   'assistant_text.delta': ['text'],
   'thinking.delta': ['text'],
   'tool_call.composing': ['id', 'name'],
@@ -171,6 +172,7 @@ const required: Record<keyof EventPayloads, string[]> = {
   permission_resolved: ['request_id', 'outcome'],
   notice: ['text'],
   'inbox.delivered': [],
+  'inbox.deferred': [],
   'inbox.failed': ['item_id'],
   'inbox.withdrawn': ['item_id'],
   'session.updated': ['id', 'updated_at'],
@@ -198,10 +200,16 @@ export function parseEvent(
   )
     throw new Error('Invalid approval event. Reconnect before submitting work.');
   if (
-    frame.event === 'inbox.delivered' &&
+    (frame.event === 'inbox.delivered' || frame.event === 'inbox.deferred') &&
     (!Array.isArray(value.item_ids) || !value.item_ids.every((id) => typeof id === 'string'))
   )
     throw new Error('Invalid delivery event.');
+  if (
+    frame.event === 'message.appended' &&
+    (!Array.isArray(value.content) ||
+      !value.content.every((block) => record(block) && typeof block.type === 'string'))
+  )
+    throw new Error('Invalid message event.');
   if (
     frame.event === 'task.reported' &&
     (!Array.isArray(value.task_ids) || !value.task_ids.every((id) => typeof id === 'string'))

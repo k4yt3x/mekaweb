@@ -38,6 +38,7 @@ import type {
 import { isSessionRunning, UnsentMessage } from '../session/controller';
 import { useTextDraft } from '../session/drafts';
 import { subagentsQuery, useSessionStates } from '../session/hooks';
+import { problemText } from '../session/notices';
 import { useMarkSeen } from '../session/unread';
 import { Button } from '../components/ui/button';
 import { Empty, ErrorNotice, Loading } from '../components/common';
@@ -55,6 +56,7 @@ import {
   isInput,
   messageText,
   pendingInboxMessages,
+  recoverableSubmissions,
   resendable,
   responseActivityIndicator,
   spawnedAgent,
@@ -131,15 +133,12 @@ export function Conversation({ state }: { state: SessionState }) {
     ['connecting', 'reconnecting', 'disconnected'].includes(activity.status)
       ? undefined
       : activity;
-  const problems = state.submissions.filter(
-    (submission) =>
-      submission.state === 'uncertain' ||
-      (submission === state.submissions.at(-1) &&
-        submission.state === 'failed' &&
-        !state.notices.some(
-          (notice) =>
-            notice.event === 'turn.failed' && notice.turnId && notice.turnId === submission.turnId,
-        )),
+  const problems = recoverableSubmissions(state.submissions, state.notices);
+  // A give-up reported below keeps its words on the message without saying why twice.
+  const reported = new Set(
+    state.notices.flatMap((notice) =>
+      notice.event === 'inbox.failed' && notice.itemId ? [notice.itemId] : [],
+    ),
   );
   const problemKeys = new Set(problems.map((submission) => submission.key));
   const liveKeys = new Set(live.flatMap((group) => (group.kind === 'user' ? [group.key] : [])));
@@ -156,7 +155,9 @@ export function Conversation({ state }: { state: SessionState }) {
       sessionId={state.id}
       pending={pending ?? inbox.data?.items.find((item) => item.id === submission.itemId)}
       canWithdraw={canWithdraw}
-      recoverable={problemKeys.has(submission.key)}
+      recoverable={
+        problemKeys.has(submission.key) && !(submission.itemId && reported.has(submission.itemId))
+      }
       onAccepted={() => acceptDraft(submission.body.message)}
       onError={setFeedbackError}
     />
@@ -435,6 +436,14 @@ export function Conversation({ state }: { state: SessionState }) {
                       )}
                       {group.kind === 'user' ? (
                         sentMessage(group.submission)
+                      ) : group.kind === 'message' ? (
+                        <Message
+                          sessionId={state.id}
+                          messages={groupToolResults([group.message]).messages}
+                          offset={0}
+                          toolResults={noToolResults}
+                          showTurnContext={showTurnContext}
+                        />
                       ) : (
                         <article className="message message-assistant">
                           <MessageHeader
@@ -675,6 +684,8 @@ function turnKind(group: HistoryMessage[]) {
   if (isInput(message) || message.content.some((block) => block.type === 'scheduled'))
     return 'input';
 }
+/** For a message the feed delivered whole, which answers no tool call. */
+const noToolResults: ReadonlyMap<ToolUseBlock, ToolResultBlock> = new Map();
 function Message({
   messages,
   sessionId,
@@ -880,6 +891,7 @@ function SentMessage({
         ) : null,
       )}
       {skill && <p className="muted small">Skill: {skill}</p>}
+      {submission.state === 'accepted' && <InboxRetry item={pending} />}
       {recoverable && (
         <SubmissionRecovery
           submission={submission}
@@ -918,7 +930,23 @@ function InboxMessage({
         }
       />
       <p className="muted">Queued message · text unavailable</p>
+      <InboxRetry item={item} />
     </article>
+  );
+}
+/** Why meka holds a queued message back after its turn failed, and when it runs it again. */
+function InboxRetry({ item }: { item: Schema['InboxItemView'] | undefined }) {
+  // A session another process holds sets a time too, with no error: nothing failed then.
+  const problem = problemText(item?.last_error);
+  if (item?.state !== 'pending' || !item.not_before || !problem) return null;
+  const at = new Date(item.not_before).toLocaleTimeString([], {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+  return (
+    <p className="muted small">
+      Next attempt at {at} · {problem}
+    </p>
   );
 }
 function WithdrawMessage({
@@ -1396,14 +1424,15 @@ function SubmissionRecovery({
       )}
       {submission.state === 'uncertain' && (
         <div className="message-actions">
-          {submission.kind === 'inbox' && (
+          {/* A turn known to have started is reviewed, never sent again. */}
+          {!submission.turnId && (
             <Button
               size="sm"
               variant="secondary"
               disabled={!canWrite || action.busy}
               onClick={() =>
                 void action.run(async () => {
-                  if (await controller?.retryInbox(sessionId, submission.key)) onAccepted();
+                  if (await controller?.retrySubmission(sessionId, submission.key)) onAccepted();
                 })
               }
             >
@@ -1420,12 +1449,6 @@ function SubmissionRecovery({
           >
             I reviewed the outcome
           </Button>
-          {submission.kind === 'turn' && (
-            <p className="muted small">
-              Review the saved conversation before sending again. Streaming turns cannot be safely
-              retried automatically.
-            </p>
-          )}
         </div>
       )}
     </div>

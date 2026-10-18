@@ -27,7 +27,11 @@ async function fixture(
     approvals: true,
     profile: 'mock',
     title: '',
-    capabilities: { supports_permission_prompts: true, supports_reasoning_stream: false },
+    capabilities: {
+      supports_permission_prompts: true,
+      supports_reasoning_stream: false,
+      answers_prompts_on_return: false,
+    },
     turn_in_flight: false,
     ...record,
   };
@@ -80,148 +84,42 @@ async function fixture(
   };
 }
 
-it.each(['assistant_text.delta', 'thinking.delta', 'tool_call.composing'])(
-  'loads another client’s user message during %s without copying its saved response',
-  async (event) => {
-    const f = await fixture(false);
-    f.session.turn_in_flight = true;
-    await f.event('turn.started', { turn_id: 'remote' });
-    // Admission can precede persistence; the provider event is the first safe read point.
-    expect(f.state().saved?.messages).toEqual([]);
-    const input: Schema['MessageView'] = {
-      role: 'user',
-      content: [
-        { type: 'turn_context', text: 'Environment' },
-        { type: 'text', text: 'Sent from another client' },
-        { type: 'image', media_type: 'image/png', hash: 'image-hash' },
-      ],
-    };
-    f.saved.messages = [
-      input,
-      { role: 'assistant', content: [{ type: 'text', text: 'Already persisted response' }] },
-    ];
-    f.saved.total = 2;
-    vi.mocked(f.api.get).mockClear();
-    await f.event(event, {
-      turn_id: 'remote',
-      text: 'Live output',
-      id: 'tool',
-      name: 'shell_execute',
-    });
-    await vi.waitFor(() => expect(f.state().saved?.messages).toEqual([input]));
-    expect(f.state().running).toBe(true);
-    expect(f.state().partial).toBe(false);
-    expect(f.state().blocks).toHaveLength(1);
-    const reads = vi.mocked(f.api.get).mock.calls.length;
-    await f.event('assistant_text.delta', { turn_id: 'remote', text: 'More output' });
-    expect(f.api.get).toHaveBeenCalledTimes(reads);
-    f.session.turn_in_flight = false;
-    await f.event('turn.finished', { turn_id: 'remote' });
-    await vi.waitFor(() => expect(f.state().blocks).toEqual([]));
-    expect(f.state().saved?.messages).toEqual(f.saved.messages);
-  },
-);
+const remoteOpening: Schema['MessageView'] = {
+  role: 'user',
+  content: [
+    { type: 'turn_context', text: 'Environment' },
+    { type: 'text', text: 'Sent from another client' },
+    { type: 'image', media_type: 'image/png', hash: 'image-hash' },
+  ],
+  turn_id: 'remote',
+};
 
-it('appends a remote input after the loaded history by position, even when its text repeats', async () => {
-  const f = await fixture();
-  const input: Schema['MessageView'] = {
-    role: 'user',
-    content: [{ type: 'text', text: 'Again' }],
-  };
-  const answer: Schema['MessageView'] = {
-    role: 'assistant',
-    content: [{ type: 'text', text: 'Done' }],
-  };
-  f.saved.messages = [input, answer];
-  f.saved.total = 2;
-  await f.controller.refresh('s');
+it('shows another client’s opening from the feed without reading the history again', async () => {
+  const f = await fixture(false);
   f.session.turn_in_flight = true;
   await f.event('turn.started', { turn_id: 'remote' });
-  const result: Schema['MessageView'] = {
-    role: 'user',
-    content: [{ type: 'tool_result', tool_use_id: 'previous-tool', is_error: false, content: [] }],
-  };
-  f.saved.messages.push(result, input, answer);
-  f.saved.total = 5;
-  const get = vi.mocked(f.api.get).getMockImplementation()!;
-  vi.mocked(f.api.get).mockImplementation(
-    async <T>(path: string, query?: Query, signal?: AbortSignal) => {
-      if (path.endsWith('/messages'))
-        return {
-          ...f.saved,
-          messages: f.saved.messages.slice(
-            Number(query?.offset),
-            Number(query?.offset) + Number(query?.limit),
-          ),
-        } as T;
-      return (await get(path, query, signal)) as T;
-    },
-  );
   vi.mocked(f.api.get).mockClear();
-  await f.event('assistant_text.delta', { turn_id: 'remote', text: 'Done' });
-  await vi.waitFor(() => expect(f.state().saved?.messages).toEqual([input, answer, result, input]));
-  expect(f.api.get).toHaveBeenCalledExactlyOnceWith(
-    '/v1/sessions/s/messages',
-    { offset: 2, limit: 100 },
-    expect.any(AbortSignal),
-  );
-  expect(f.state().blocks).toEqual([{ kind: 'text', text: 'Done' }]);
-});
-
-it.each(['new turn', 'refresh', 'rewrite', 'disconnect'])(
-  'discards an opening input read overtaken by a %s',
-  async (change) => {
-    const f = await fixture();
-    f.session.turn_in_flight = true;
-    await f.event('turn.started', { turn_id: 'remote' });
-    let complete!: (response: Schema['MessagesResponse']) => void;
-    vi.mocked(f.api.get).mockImplementationOnce(
-      () =>
-        new Promise((resolve) => {
-          complete = resolve;
-        }),
-    );
-    await f.event('assistant_text.delta', { turn_id: 'remote', text: 'Live' });
-    await vi.waitFor(() => expect(complete).toBeDefined());
-    const response: Schema['MessagesResponse'] = {
-      ...f.saved,
-      total: 1,
-      messages: [{ role: 'user', content: [{ type: 'text', text: 'Stale input' }] }],
-    };
-    if (change === 'new turn') await f.event('turn.started', { turn_id: 'new' });
-    if (change === 'refresh') await f.controller.refresh('s');
-    if (change === 'rewrite') response.revision++;
-    if (change === 'disconnect') f.controller.dispose();
-    const before = f.controller.getSnapshot();
-    complete(response);
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(f.controller.getSnapshot()).toBe(before);
-  },
-);
-
-it('loads a remote input when its first output arrives during an idle history refresh', async () => {
-  const f = await fixture();
-  const before = structuredClone(f.saved);
-  let complete!: (response: Schema['MessagesResponse']) => void;
-  vi.mocked(f.api.get).mockImplementationOnce(
-    () =>
-      new Promise((resolve) => {
-        complete = resolve;
-      }),
-  );
-  const reading = f.controller.refresh('s');
-  await vi.waitFor(() => expect(complete).toBeDefined());
-  f.session.turn_in_flight = true;
-  await f.event('turn.started', { turn_id: 'remote' });
-  f.saved.messages = [{ role: 'user', content: [{ type: 'text', text: 'Remote input' }] }];
-  f.saved.total = 1;
-  await f.event('thinking.delta', { turn_id: 'remote', text: 'Thinking while history loads' });
-  complete(before);
-  await reading;
-  await vi.waitFor(() => expect(f.state().saved?.messages).toEqual(f.saved.messages));
-  expect(f.state().blocks).toEqual([{ kind: 'thinking', text: 'Thinking while history loads' }]);
-  expect(f.state().running).toBe(true);
+  await f.event('message.appended', {
+    turn_id: 'remote',
+    role: 'user',
+    content: remoteOpening.content,
+  });
+  await f.event('assistant_text.delta', { turn_id: 'remote', text: 'Live output' });
+  expect(f.state().blocks).toEqual([
+    { kind: 'message', message: remoteOpening, opening: true },
+    { kind: 'text', text: 'Live output' },
+  ]);
+  expect(f.api.get).not.toHaveBeenCalled();
+  expect(f.state().saved?.messages).toEqual([]);
+  f.session.turn_in_flight = false;
+  f.saved.messages = [
+    remoteOpening,
+    { role: 'assistant', content: [{ type: 'text', text: 'Live output' }], turn_id: 'remote' },
+  ];
+  f.saved.total = 2;
+  await f.event('turn.finished', { turn_id: 'remote' });
+  await vi.waitFor(() => expect(f.state().blocks).toEqual([]));
+  expect(f.state().saved?.messages).toEqual(f.saved.messages);
 });
 
 it.each<[string, Schema['ContentBlockView']]>([
@@ -231,87 +129,191 @@ it.each<[string, Schema['ContentBlockView']]>([
   ],
   ['a scheduled fire', { type: 'scheduled', job_id: 'job', prompt: 'Stretch', text: 'Stretch' }],
   ['a background report', { type: 'background_report', task_ids: ['task'], text: 'Done' }],
-])('loads a remote turn that %s opens', async (_, block) => {
+])('shows a turn that %s opens, once announced as a notice', async (_, block) => {
   const f = await fixture();
   f.session.turn_in_flight = true;
   await f.event('turn.started', { turn_id: 'remote' });
-  const opening: Schema['MessageView'] = {
+  const content = [{ type: 'turn_context', text: 'Context' }, block];
+  await f.event('message.appended', { turn_id: 'remote', role: 'user', content });
+  expect(f.state().blocks).toEqual([
+    { kind: 'message', message: { role: 'user', content, turn_id: 'remote' }, opening: true },
+  ]);
+});
+
+it('takes a message as the turn’s opening though a fallback’s notice came first', async () => {
+  const f = await fixture();
+  f.session.turn_in_flight = true;
+  await f.event('turn.started', { turn_id: 'remote' });
+  await f.event('notice', {
+    turn_id: 'remote',
+    level: 'warning',
+    text: "Profile 'main' is unavailable; this turn runs on 'backup'.",
+  });
+  await f.event('message.appended', {
+    turn_id: 'remote',
     role: 'user',
-    content: [{ type: 'turn_context', text: 'Context' }, block],
+    content: remoteOpening.content,
+  });
+  expect(f.state().blocks.at(-1)).toMatchObject({ kind: 'message', opening: true });
+});
+
+it('places a message an interrupt appends after the answer it cut', async () => {
+  const f = await fixture();
+  f.session.turn_in_flight = true;
+  await f.event('turn.started', { turn_id: 'remote' });
+  await f.event('message.appended', {
+    turn_id: 'remote',
+    role: 'user',
+    content: remoteOpening.content,
+  });
+  await f.event('assistant_text.delta', { turn_id: 'remote', text: 'Partial answer' });
+  await f.event('notice', { turn_id: 'remote', level: 'info', text: 'Interrupted.' });
+  const interrupt: Schema['ContentBlockView'] = {
+    type: 'inbox',
+    class: 'interrupt',
+    body: 'Stop there',
+    text: '[Message]\nStop there',
+    item_id: 'item',
   };
-  f.saved.messages = [opening];
+  await f.event('message.appended', { turn_id: 'remote', role: 'user', content: [interrupt] });
+  expect(f.state().blocks.map((block) => block.kind)).toEqual([
+    'message',
+    'text',
+    'notice',
+    'message',
+  ]);
+  expect(f.state().blocks.at(-1)).toMatchObject({ kind: 'message', opening: false });
+});
+
+it('does not repeat an opening the saved conversation already holds when joining mid-turn', async () => {
+  const f = await fixture();
+  f.saved.messages = [remoteOpening];
   f.saved.total = 1;
-  await f.event('assistant_text.delta', { turn_id: 'remote', text: 'Answer' });
-  await vi.waitFor(() => expect(f.state().saved?.messages).toEqual([opening]));
-});
-
-it('does not mistake an unreconciled previous turn’s input for a new turn’s input', async () => {
-  const f = await fixture();
-  await f.event('turn.started', { turn_id: 'old' });
-  vi.mocked(f.api.get).mockRejectedValueOnce(new Error('History temporarily unavailable'));
-  await f.event('turn.finished', { turn_id: 'old' });
-  await vi.waitFor(() => expect(f.state().error?.message).toBe('History temporarily unavailable'));
-  f.saved.messages = [
-    { role: 'user', content: [{ type: 'text', text: 'Old input' }] },
-    { role: 'assistant', content: [{ type: 'text', text: 'Old response' }] },
-    { role: 'user', content: [{ type: 'text', text: 'New input' }] },
-  ];
-  f.saved.total = 3;
   f.session.turn_in_flight = true;
-  vi.mocked(f.api.get).mockClear();
-  await f.event('turn.started', { turn_id: 'new' });
-  await f.event('thinking.delta', { turn_id: 'new', text: 'New thinking' });
-  expect(f.api.get).not.toHaveBeenCalled();
-  expect(f.state().saved?.messages).toEqual([]);
+  await f.controller.refresh('s');
+  await f.event('turn.started', { turn_id: 'remote', resumed: true }, true);
+  await f.event(
+    'message.appended',
+    { turn_id: 'remote', role: 'user', content: remoteOpening.content, resumed: true },
+    true,
+  );
+  expect(f.state().blocks).toEqual([]);
 });
 
-it('preserves earlier pages when they overtake a remote-input read', async () => {
+it('knows an opening an interrupt rewrote in place by its turn', async () => {
   const f = await fixture();
-  f.saved.revision = 1;
-  f.saved.messages = Array.from({ length: 200 }, (_, index) => ({
-    role: 'user',
-    content: [{ type: 'text', text: `Earlier input ${index}` }],
-  }));
-  f.saved.total = 200;
-  const get = vi.mocked(f.api.get).getMockImplementation()!;
-  let complete: ((response: Schema['MessagesResponse']) => void) | undefined;
-  let hold = false;
-  vi.mocked(f.api.get).mockImplementation(
-    async <T>(path: string, query?: Query, signal?: AbortSignal) => {
-      if (!path.endsWith('/messages')) return (await get(path, query, signal)) as T;
-      if (hold && Number(query?.offset) === 200 && !complete)
-        return (await new Promise<Schema['MessagesResponse']>((resolve) => {
-          complete = resolve;
-        })) as T;
-      return {
-        ...f.saved,
-        messages: f.saved.messages.slice(
-          Number(query?.offset),
-          Number(query?.offset) + Number(query?.limit),
-        ),
-      } as T;
+  // An interrupt joined onto an opening nothing answered adds its item to the saved opening.
+  f.saved.messages = [
+    {
+      ...remoteOpening,
+      content: [
+        ...remoteOpening.content,
+        { type: 'inbox', class: 'interrupt', body: 'Stop', text: 'Stop', item_id: 'item' },
+      ],
     },
-  );
+  ];
+  f.saved.total = 1;
+  f.session.turn_in_flight = true;
   await f.controller.refresh('s');
-  expect(f.state().offset).toBe(100);
+  await f.event('turn.started', { turn_id: 'remote', resumed: true }, true);
+  // The feed hands over the opening as first announced.
+  await f.event(
+    'message.appended',
+    { turn_id: 'remote', role: 'user', content: remoteOpening.content, resumed: true },
+    true,
+  );
+  expect(f.state().blocks).toEqual([]);
+});
+
+it('does not take a later message for the opening of a turn whose opening it skipped', async () => {
+  const f = await fixture();
+  f.saved.messages = [remoteOpening];
+  f.saved.total = 1;
+  f.session.turn_in_flight = true;
+  await f.controller.refresh('s');
+  await f.event('turn.started', { turn_id: 'remote', resumed: true }, true);
+  await f.event(
+    'message.appended',
+    { turn_id: 'remote', role: 'user', content: remoteOpening.content, resumed: true },
+    true,
+  );
+  // The answer it cut was saved before this tab joined, so nothing of the turn is live yet.
+  const interrupt: Schema['ContentBlockView'] = {
+    type: 'inbox',
+    class: 'interrupt',
+    body: 'Stop there',
+    text: 'Stop there',
+    item_id: 'item',
+  };
+  await f.event('message.appended', { turn_id: 'remote', role: 'user', content: [interrupt] });
+  expect(f.state().blocks).toEqual([
+    {
+      kind: 'message',
+      message: { role: 'user', content: [interrupt], turn_id: 'remote' },
+      opening: false,
+    },
+  ]);
+});
+
+it('does not show an opening again when the feed hands it over again on rejoining', async () => {
+  const f = await fixture();
   f.session.turn_in_flight = true;
   await f.event('turn.started', { turn_id: 'remote' });
-  const input: Schema['MessageView'] = {
+  await f.event('message.appended', {
+    turn_id: 'remote',
     role: 'user',
-    content: [{ type: 'text', text: 'New input' }],
+    content: remoteOpening.content,
+  });
+  await f.event('turn.started', { turn_id: 'remote', resumed: true }, true);
+  await f.event(
+    'message.appended',
+    { turn_id: 'remote', role: 'user', content: remoteOpening.content, resumed: true },
+    true,
+  );
+  expect(f.state().blocks.filter((block) => block.kind === 'message')).toHaveLength(1);
+});
+
+it('drops a shown interrupt once a refresh finds it saved, whatever order its keys come in', async () => {
+  const f = await fixture();
+  f.session.turn_in_flight = true;
+  await f.event('turn.started', { turn_id: 'remote' });
+  await f.event('assistant_text.delta', { turn_id: 'remote', text: 'Partial answer' });
+  const interrupt: Schema['ContentBlockView'] = {
+    type: 'inbox',
+    class: 'interrupt',
+    body: 'Stop there',
+    text: 'Stop there',
+    item_id: 'item',
   };
-  f.saved.messages.push(input);
-  f.saved.total++;
-  hold = true;
+  await f.event('message.appended', { turn_id: 'remote', role: 'user', content: [interrupt] });
+  expect(f.state().blocks.at(-1)).toMatchObject({ kind: 'message', opening: false });
+  f.saved.messages = [
+    remoteOpening,
+    {
+      role: 'user',
+      content: [Object.fromEntries(Object.entries(interrupt).reverse()) as typeof interrupt],
+      turn_id: 'remote',
+    },
+  ];
+  f.saved.total = 2;
+  await f.controller.refresh('s');
+  expect(f.state().blocks).toEqual([{ kind: 'text', text: 'Partial answer' }]);
+});
+
+it('drops a shown opening once a refresh finds it saved', async () => {
+  const f = await fixture();
+  f.session.turn_in_flight = true;
+  await f.event('turn.started', { turn_id: 'remote' });
+  await f.event('message.appended', {
+    turn_id: 'remote',
+    role: 'user',
+    content: remoteOpening.content,
+  });
   await f.event('thinking.delta', { turn_id: 'remote', text: 'Thinking' });
-  await vi.waitFor(() => expect(complete).toBeDefined());
-  await f.controller.earlier('s');
-  await vi.waitFor(() => expect(f.state().saved?.messages).toHaveLength(201));
-  complete!({ ...f.saved, messages: [input] });
-  await Promise.resolve();
-  await Promise.resolve();
-  expect(f.state().offset).toBe(0);
-  expect(f.state().saved?.messages).toEqual(f.saved.messages);
+  f.saved.messages = [remoteOpening];
+  f.saved.total = 1;
+  await f.controller.refresh('s');
+  expect(f.state().saved?.messages).toEqual([remoteOpening]);
   expect(f.state().blocks).toEqual([{ kind: 'thinking', text: 'Thinking' }]);
 });
 
@@ -981,7 +983,14 @@ it('records delivery and completion arriving before an inbox POST response', asy
   await vi.waitFor(() => expect(f.state().loading).toBe(false));
   expect(f.state().saved?.messages).toEqual([]);
   expect(f.state().submissions[0]?.preview).toBe(true);
-  resolve({ item_id: 'item', session_id: 's', class: 'steer', state: 'pending', replayed: false });
+  resolve({
+    item_id: 'item',
+    session_id: 's',
+    class: 'steer',
+    state: 'pending',
+    replayed: false,
+    retry_until: '2026-09-17T01:00:00Z',
+  });
   expect(await sending).toBe(true);
   expect(f.state().submissions[0]?.state).toBe('completed');
   await vi.waitFor(() => expect(f.state().submissions[0]?.preview).toBe(false));
@@ -1007,6 +1016,7 @@ it('applies a pending POST receipt to the replacement entry after reconnecting t
       id: 'item',
       session_id: 's',
       class: 'steer',
+      retry_until: '2026-09-17T01:00:00Z',
       state: 'pending',
       created_at: '',
       source: 'client',
@@ -1017,7 +1027,14 @@ it('applies a pending POST receipt to the replacement entry after reconnecting t
   );
 
   await f.controller.reconnect('s');
-  finish({ item_id: 'item', session_id: 's', class: 'steer', state: 'pending', replayed: false });
+  finish({
+    item_id: 'item',
+    session_id: 's',
+    class: 'steer',
+    state: 'pending',
+    replayed: false,
+    retry_until: '2026-09-17T01:00:00Z',
+  });
   expect(await sending).toBe(true);
   await vi.waitFor(() => expect(f.state().loading).toBe(false));
   expect(f.state().submissions[0]).toMatchObject({ key, state: 'accepted', preview: true });
@@ -1049,6 +1066,7 @@ it('acknowledges an accepted send without waiting for a stalled history read', a
         id: 'item',
         session_id: 's',
         class: 'steer',
+        retry_until: '2026-09-17T01:00:00Z',
         state: 'pending',
         created_at: '',
         source: 'client',
@@ -1097,6 +1115,7 @@ it('shows a submission before POST acknowledgment, preserves it across navigatio
     item_id: 'item',
     session_id: 's',
     class: 'steer',
+    retry_until: '2026-09-17T01:00:00Z',
     state: 'pending',
     replayed: false,
   });
@@ -1130,6 +1149,7 @@ it('keeps a queued identical message while the preceding message is reconciled',
       id: 'queued',
       session_id: 's',
       class: 'followup',
+      retry_until: '2026-09-17T01:00:00Z',
       state: 'pending',
       created_at: queued.createdAt,
       source: 'client',
@@ -1163,6 +1183,7 @@ it.each(['appended', 'absent'])(
               id: 'item',
               session_id: 's',
               class: 'steer',
+              retry_until: '2026-09-17T01:00:00Z',
               state: 'appended',
               created_at: '2026-09-23T00:00:00Z',
               source: 'client',
@@ -1196,6 +1217,7 @@ it('does not retire a preview using a snapshot begun before delivery', async () 
       id: 'item',
       session_id: 's',
       class: 'steer',
+      retry_until: '2026-09-17T01:00:00Z',
       state: 'pending',
       created_at: '',
       source: 'client',
@@ -1238,28 +1260,143 @@ it('keeps the preview until a failed history refresh can recover', async () => {
   expect(f.state().submissions[0]?.preview).toBe(false);
 });
 
-it('shows direct-turn text and image metadata before the blocking POST completes', async () => {
+it('shows direct-turn text and image metadata until the detached turn ends', async () => {
   const f = await fixture();
-  let finish!: (response: { turn_id: string }) => void;
+  let admit!: (turn: Partial<Schema['TurnRecord']>) => void;
   vi.spyOn(f.api, 'mutate').mockImplementation(
     () =>
       new Promise((resolve) => {
-        finish = resolve;
+        admit = resolve;
       }),
   );
   const body: Schema['TurnRequest'] = {
     message: 'Inspect this.',
-    stream: false,
+    detach: true,
     images: [{ media_type: 'image/png', data: 'synthetic-image-data' }],
   };
   const sending = f.controller.submit('s', body, 'turn');
   await vi.waitFor(() => expect(f.state().blocks).toHaveLength(1));
   expect(f.state().submissions[0]).toMatchObject({ body, preview: true, state: 'sending' });
-  finish({ turn_id: 'direct-turn' });
+  f.session.turn_in_flight = true;
+  admit({ id: 'direct-turn', source: 'client' });
   expect(await sending).toBe(true);
-  expect(f.state().submissions[0]?.preview).toBe(false);
+  // Admission is not the answer; the preview stays until the turn's own end.
+  expect(f.state().submissions[0]).toMatchObject({
+    preview: true,
+    state: 'running',
+    turnId: 'direct-turn',
+  });
+  f.session.turn_in_flight = false;
+  await f.event('turn.started', { turn_id: 'direct-turn' });
+  await f.event('turn.finished', { turn_id: 'direct-turn' });
+  await vi.waitFor(() => expect(f.state().submissions[0]?.preview).toBe(false));
   expect(f.state().blocks).toEqual([]);
 });
+it('keeps a deferred message queued, and says why meka gave up on a failed one', async () => {
+  const f = await fixture();
+  vi.spyOn(f.api, 'mutate').mockResolvedValue({
+    item_id: 'item',
+    session_id: 's',
+    class: 'followup',
+    state: 'pending',
+    replayed: false,
+    retry_until: '2026-09-17T01:00:00Z',
+  });
+  f.inbox.items = [
+    {
+      id: 'item',
+      session_id: 's',
+      class: 'followup',
+      retry_until: '2026-09-17T01:00:00Z',
+      state: 'pending',
+      created_at: '2026-09-17T00:00:00Z',
+    },
+  ];
+  expect(await f.controller.submit('s', { message: 'Later.', class: 'followup' }, 'inbox')).toBe(
+    true,
+  );
+  // Its turn failed in a way waiting can help, so it waits to run again rather than leaving.
+  await f.event('inbox.deferred', {
+    item_ids: ['item'],
+    not_before: '2026-09-17T00:05:00Z',
+    error: { title: 'Provider unavailable' },
+  });
+  expect(f.state().submissions[0]).toMatchObject({
+    state: 'accepted',
+    delivery: 'pending',
+    preview: true,
+  });
+  await f.event('inbox.failed', {
+    item_id: 'item',
+    reason: 'retry_ceiling',
+    error: { detail: 'The account is out of quota.' },
+  });
+  expect(f.state().submissions[0]).toMatchObject({
+    state: 'failed',
+    preview: false,
+    error: 'meka gave up on this message: The account is out of quota.',
+  });
+});
+it('says why meka gave up on a queued message, from a replay or a bare reason', async () => {
+  const f = await fixture();
+  vi.spyOn(f.api, 'mutate')
+    .mockRejectedValueOnce(new UncertainMutationError())
+    .mockResolvedValueOnce({
+      item_id: 'item',
+      session_id: 's',
+      class: 'followup',
+      state: 'withdrawn',
+      replayed: true,
+      retry_until: '2026-09-17T01:00:00Z',
+      failure: 'retried past its ceiling',
+      last_error: { title: 'Provider unavailable', detail: 'The provider is down.' },
+    })
+    .mockResolvedValueOnce({
+      item_id: 'other',
+      session_id: 's',
+      class: 'followup',
+      state: 'pending',
+      replayed: false,
+      retry_until: '2026-09-17T01:00:00Z',
+    });
+  await f.controller.submit('s', { message: 'Later.', class: 'followup' }, 'inbox');
+  await f.controller.retrySubmission('s', f.state().submissions[0]!.key);
+  // A canceled turn also withdraws its items with a reason, so the words do not say give-up.
+  expect(f.state().submissions[0]).toMatchObject({
+    state: 'failed',
+    preview: false,
+    error: 'meka withdrew this message: The provider is down.',
+  });
+  f.inbox.items = [
+    {
+      id: 'other',
+      session_id: 's',
+      class: 'followup',
+      retry_until: '2026-09-17T01:00:00Z',
+      state: 'pending',
+      created_at: '2026-09-17T00:00:00Z',
+    },
+  ];
+  await f.controller.submit('s', { message: 'Also later.', class: 'followup' }, 'inbox');
+  // At the retry ceiling meka names no error, only why it gave up.
+  await f.event('inbox.failed', { item_id: 'other', reason: 'retried for an hour' });
+  expect(f.state().submissions[1]).toMatchObject({
+    state: 'failed',
+    error: 'meka gave up on this message: retried for an hour',
+  });
+  // It is reported below the conversation as well, whichever message is the latest.
+  expect(f.state().notices).toEqual([
+    expect.objectContaining({
+      event: 'inbox.failed',
+      itemId: 'other',
+      level: 'error',
+      text: 'meka gave up on a queued message: retried for an hour',
+    }),
+  ]);
+  await f.event('inbox.failed', { item_id: 'other', reason: 'retried for an hour' }, true);
+  expect(f.state().notices).toHaveLength(1);
+});
+
 it('retries uncertain inbox submissions with the same body and key', async () => {
   const f = await fixture();
   const mutate = vi
@@ -1269,6 +1406,7 @@ it('retries uncertain inbox submissions with the same body and key', async () =>
       item_id: 'i',
       session_id: 's',
       class: 'steer',
+      retry_until: '2026-09-17T01:00:00Z',
       state: 'pending',
       replayed: true,
     });
@@ -1276,7 +1414,7 @@ it('retries uncertain inbox submissions with the same body and key', async () =>
     false,
   );
   const key = f.state().submissions[0]!.key;
-  await f.controller.retryInbox('s', key);
+  await f.controller.retrySubmission('s', key);
   expect(mutate.mock.calls[0]).toEqual(mutate.mock.calls[1]);
   expect(f.state().submissions[0]?.state).toBe('accepted');
 });
@@ -1336,11 +1474,12 @@ it('does not repeat an acknowledged inbox submission', async () => {
     item_id: 'known',
     session_id: 's',
     class: 'steer',
+    retry_until: '2026-09-17T01:00:00Z',
     state: 'pending',
     replayed: false,
   });
   await f.controller.submit('s', { message: 'once', class: 'steer' }, 'inbox');
-  await expect(f.controller.retryInbox('s', f.state().submissions[0]!.key)).rejects.toThrow(
+  await expect(f.controller.retrySubmission('s', f.state().submissions[0]!.key)).rejects.toThrow(
     'uncertain',
   );
   expect(mutate).toHaveBeenCalledOnce();
@@ -1354,6 +1493,7 @@ async function queuedFixture() {
       id: 'item',
       session_id: 's',
       class: 'followup',
+      retry_until: '2026-09-17T01:00:00Z',
       // 0.63+ omits source when no sender was named.
       created_at: '2026-09-23T12:00:00Z',
       state: 'pending',

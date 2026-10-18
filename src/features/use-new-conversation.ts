@@ -55,6 +55,9 @@ export function useNewConversation(onCreated: (id: string) => void) {
           // This client can always answer approvals; whether calls ask is the approval mode's
           // choice. Declining here would only refuse calls while the attending feed reconnects.
           supports_permission_prompts: true,
+          // A turn runs on after its tab closes, so its approval prompts wait for someone to
+          // come back rather than being refused while nobody attends.
+          answers_prompts_on_return: true,
         },
       } satisfies Schema['CreateSessionRequest']);
     } catch (failure) {

@@ -55,6 +55,24 @@ it('takes a tool result that loads deferred tools by reference, but only by name
   ).toThrow('Invalid tool result event.');
 });
 
+it('takes a turn’s opening only with typed blocks, and a deferral only with its items', () => {
+  const opening = { turn_id: 't', role: 'user', content: [{ type: 'text', text: 'Hello.' }] };
+  expect(parseEvent({ event: 'message.appended', data: JSON.stringify(opening) })).toEqual(opening);
+  expect(() =>
+    parseEvent({ event: 'message.appended', data: '{"role":"user","content":[{"text":"Hi"}]}' }),
+  ).toThrow('Invalid message event.');
+  expect(() => parseEvent({ event: 'message.appended', data: '{"content":[]}' })).toThrow();
+  const deferral = {
+    item_ids: ['item'],
+    not_before: '2026-10-18T15:00:00Z',
+    error: { title: 'Provider unavailable' },
+  };
+  expect(parseEvent({ event: 'inbox.deferred', data: JSON.stringify(deferral) })).toEqual(deferral);
+  expect(() => parseEvent({ event: 'inbox.deferred', data: '{"not_before":"soon"}' })).toThrow(
+    'Invalid delivery event.',
+  );
+});
+
 it('does not treat inherited object names as registered event types', () => {
   expect(parseEvent({ event: 'constructor', data: '{}' })).toBeUndefined();
   expect(parseEvent({ event: '__proto__', data: '{}' })).toBeUndefined();

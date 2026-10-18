@@ -4,7 +4,7 @@
     "title": "meka HTTP API",
     "description": "Service-to-service API for driving meka agent turns programmatically. Mirrors the wire format described in the HTTP API docs. A field that has no value is omitted from every response and event, never sent as `null`.",
     "license": { "name": "AGPL-3.0-or-later" },
-    "version": "0.77.0"
+    "version": "0.80.0"
   },
   "paths": {
     "/v1/health/live": {
@@ -2155,9 +2155,15 @@
         },
         "responses": {
           "200": {
-            "description": "Blocking turn response (stream=false) or live SSE stream (stream=true). The application/json schema applies only to blocking mode.",
+            "description": "A held turn's response: the assembled turn (stream=false) or its live SSE stream (stream=true). The application/json schema applies only to the former.",
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/TurnResponse" } }
+            }
+          },
+          "202": {
+            "description": "A detached request's turn was admitted (detach=true, stream=false): the body is the turn record and `Location` names it under `/turns/{turn_id}`",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/TurnRecord" } }
             }
           },
           "401": {
@@ -2279,6 +2285,62 @@
           },
           "404": {
             "description": "Session not found",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
+            }
+          }
+        },
+        "security": [{ "bearerAuth": ["sessions:r"] }]
+      }
+    },
+    "/v1/sessions/{id}/turns/{turn_id}": {
+      "get": {
+        "tags": ["conversation"],
+        "summary": "`GET /v1/sessions/{id}/turns/{turn_id}`: one turn, the resource a detached request's\n`Location` names.",
+        "operationId": "turn",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Session UUID",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          },
+          {
+            "name": "turn_id",
+            "in": "path",
+            "description": "Turn UUID, as `turn.started` and the 202 of a detached request name it",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The turn, with its ending once it has one",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/TurnRecord" } }
+            }
+          },
+          "401": {
+            "description": "Authorization missing or invalid",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
+            }
+          },
+          "403": {
+            "description": "Insufficient scope",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
+            }
+          },
+          "404": {
+            "description": "Session not found (`/errors/session-not-found`), or no turn of it has this id (`/errors/not-found`)",
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
             }
@@ -2681,6 +2743,10 @@
       "CapabilitiesBody": {
         "type": "object",
         "properties": {
+          "answers_prompts_on_return": {
+            "type": "boolean",
+            "description": "When `true`, a prompt raised in a turn no request holds waits for this session's client to\ncome back and answer it, instead of being refused with nobody attending or canceled when\nthe last attending reader leaves. Default `false`."
+          },
           "supports_permission_prompts": {
             "type": "boolean",
             "description": "When `false`, mid-turn permission requests are denied immediately with a notice instead of\nparking on the SSE channel. Streaming clients with no approval interface set this. Default\n`true`, so a client that says nothing keeps the chance to approve."
@@ -3072,7 +3138,7 @@
       "InboxItemView": {
         "type": "object",
         "description": "One inbox item as the API shows it.",
-        "required": ["id", "session_id", "class", "state", "created_at"],
+        "required": ["id", "session_id", "class", "state", "created_at", "retry_until"],
         "properties": {
           "appended_at": { "type": ["string", "null"] },
           "class": { "type": "string" },
@@ -3083,6 +3149,17 @@
             "description": "Why it was given up on, when it was."
           },
           "id": { "type": "string", "format": "uuid" },
+          "last_error": {
+            "description": "Why the last turn opened on it failed, as a Problem Detail (`type`, `title`, `status`,\n`detail`), while it waits to be tried again or once it was given up on for it."
+          },
+          "not_before": {
+            "type": ["string", "null"],
+            "description": "When its next attempt may run, while it waits after a failed turn or a held session."
+          },
+          "retry_until": {
+            "type": "string",
+            "description": "When meka stops retrying it: its enqueue plus `[serve] inbox_retry_ceiling`."
+          },
           "session_id": { "type": "string", "format": "uuid" },
           "source": {
             "type": ["string", "null"],
@@ -3126,19 +3203,29 @@
       },
       "InboxResponse": {
         "type": "object",
-        "description": "The answer to `POST /v1/sessions/{id}/inbox`.",
-        "required": ["item_id", "session_id", "class", "state", "replayed"],
+        "description": "The answer to `POST /v1/sessions/{id}/inbox`: the item's identity and state, and what a\nproducer that holds the key needs to know about its fate without listing the inbox.",
+        "required": ["item_id", "session_id", "class", "state", "replayed", "retry_until"],
         "properties": {
           "class": { "type": "string" },
+          "failure": { "type": ["string", "null"] },
           "item_id": { "type": "string", "format": "uuid" },
+          "last_error": {},
+          "not_before": {
+            "type": ["string", "null"],
+            "description": "On a replayed item, as `GET /v1/sessions/{id}/inbox` shows them: when its next attempt\nmay run and why the last one failed while it waits, or why it was given up on."
+          },
           "replayed": {
             "type": "boolean",
             "description": "Whether the `Idempotency-Key` had been used before, so the item is the earlier one."
           },
+          "retry_until": {
+            "type": "string",
+            "description": "When meka stops retrying it: its enqueue plus `[serve] inbox_retry_ceiling`."
+          },
           "session_id": { "type": "string", "format": "uuid" },
           "state": {
             "type": "string",
-            "description": "`pending` on a fresh item. A replayed `Idempotency-Key` answers the earlier item's state."
+            "description": "The item's state as answered: `pending` on a fresh item, unless a turn already running\nread it in the meantime. A replayed `Idempotency-Key` answers the earlier item's."
           }
         }
       },
@@ -3203,6 +3290,10 @@
         "required": ["name", "state"],
         "properties": {
           "name": { "type": "string" },
+          "protocol_version": {
+            "type": ["string", "null"],
+            "description": "The MCP protocol version a `connected` server's connection speaks, such as `2026-07-28`;\nabsent in every other state."
+          },
           "state": {
             "type": "string",
             "description": "`pending`, `connected`, `failed` or `disabled`."
@@ -3387,7 +3478,7 @@
           },
           "profile": {
             "type": ["string", "null"],
-            "description": "Profile to move the session onto. Must name a profile in `config.toml`. Absent → keep\ncurrent.\n\nSwitching mid-conversation is allowed and is the client's call. Thinking blocks are tagged\nwith the profile that produced them and are not replayed to a different one, so the\nreasoning recorded so far stops being visible to the model from the next turn onward."
+            "description": "Profile to move the session onto. Must name a profile in `config.toml`. Absent → keep\ncurrent.\n\nSwitching mid-conversation is allowed and is the client's call. Thinking blocks are tagged\nwith the profile that produced them and are not replayed to a different one, so the\nreasoning recorded so far stops being visible to the model from the next turn onward. A\nprofile with `vision = false` refuses the next turn while the session holds an image."
           },
           "title": {
             "type": ["string", "null"],
@@ -3484,6 +3575,11 @@
           "backend": {
             "type": ["string", "null"],
             "description": "The account's backend, e.g. `anthropic-messages`, `openai-responses` or\n`chatgpt-subscription`. Omitted when the profile names an account that is not configured,\nwhich a listing reports beside the table and which no server starts on."
+          },
+          "fallbacks": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "The profiles a turn falls back to when this one cannot serve it, in order; absent when the\nprofile names none."
           },
           "model": { "type": ["string", "null"] },
           "name": { "type": "string" },
@@ -3594,6 +3690,11 @@
         "type": "object",
         "description": "Per-session capabilities flags declared at create time. Defaults match the bot/bridge use\ncase (server handles everything locally; SSE clients get assistant text + tool calls but not\nthinking deltas). See the HTTP API docs § \"Capabilities\".\n\n`Serialize` / `Deserialize` are derived so the value can be persisted on the session row and\nre-hydrated by `reattach::ensure_session_loaded` when a GC-evicted session is reconstructed.\n`ToSchema` is derived so the field can ride on `SessionResponse` in the OpenAPI spec.",
         "properties": {
+          "answers_prompts_on_return": {
+            "type": "boolean",
+            "description": "When `true`, a prompt raised in a turn no request holds parks whether or not anyone is\nattending, and closes only on an answer, the turn's cancellation or its expiry: the\nsession's client comes and goes and answers what it finds parked on return. A held turn\nkeeps the grace rule, since absence stops it anyway.\n\nDefaults to `false`: a session nobody declared this for refuses a gated call with nobody\nattending rather than holding the session for the prompt's lifetime.",
+            "default": false
+          },
           "supports_permission_prompts": {
             "type": "boolean",
             "description": "When `false`, a mid-turn permission request is denied immediately with a notice instead of\nparking on the SSE channel for [`APPROVAL_TIMEOUT`].\n\nStreaming mode otherwise assumes the consumer can answer a prompt, which is wrong for a\nservice-to-service client: it wants streaming for liveness on a long turn and has no\ninterface to put an approval in front of, so a session with approvals on stalls for the\nwhole approval timeout per gated call and then denies anyway. That reads as a hang rather\nthan a misconfiguration. Setting this `false` gets blocking mode's behavior (immediate deny\nplus an explanatory notice), which is the same outcome without the stall and legible in\nthe response rather than only in the timing.\n\nDefaults to `true`, so a client that declares nothing and an imported `capabilities_json`\nthat omits the flag both park rather than refuse without asking.",
@@ -3654,7 +3755,7 @@
               },
               "turn_in_flight": {
                 "type": "boolean",
-                "description": "Whether a turn is running on this session right now.\n\nExists so a client whose SSE stream dropped mid-turn can tell \"my turn is still running\"\nfrom \"my turn died\" without submitting a speculative turn and reading the 409. A dropped\nstream does not cancel the turn: the spawned task keeps the runtime lock and dropping the\n`JoinHandle` detaches rather than aborts, so the work completes and resubmitting would\nduplicate a reply the user is about to receive anyway.\n\n`false` for a GC-evicted session, since eviction requires an idle session, and `true` for\na sub-agent this process is running under its parent, which is never resident itself. A\nsession another process runs (a screen open on it) reads as idle: only its file lock knows,\nand a read may not probe it."
+                "description": "Whether a turn is running on this session right now.\n\nExists so a client whose SSE stream dropped mid-turn can tell \"my turn is still running\"\nfrom \"my turn died\" without submitting a speculative turn and reading the 409. A dropped\nrequest does not cancel the turn at once: the spawned task keeps the runtime lock and\ndropping the `JoinHandle` detaches rather than aborts, so a held turn runs until its next\nround boundary after the grace, and a detached one to its end; resubmitting would\nduplicate a reply the user is about to receive anyway.\n\n`false` for a GC-evicted session, since eviction requires an idle session, and `true` for\na sub-agent this process is running under its parent, which is never resident itself. A\nsession another process runs (a screen open on it) reads as idle: only its file lock knows,\nand a read may not probe it."
               }
             }
           }
@@ -3693,7 +3794,7 @@
             "oneOf": [
               {
                 "$ref": "#/components/schemas/TurnRecord",
-                "description": "The latest turn: who opened it and when, and once it has ended, how (`succeeded` with its\n`stop_reason`, `failed` with its `error`, or `canceled`), when, and what it spent. Omitted\nfor a session no turn has begun on. A turn that began and shows no ending is either in\nflight, which `turn_in_flight` says, or one the process died under. The record carries it\nbecause a list of sessions is rendered from it, one row per session; the whole history of\nturns is `GET /v1/sessions/{id}/turns`."
+                "description": "The latest turn: who opened it and when, and once it has ended, how (`succeeded` with its\n`stop_reason`, `failed` with its `error`, or `canceled` with its `reason`), when, and what\nit spent. Omitted\nfor a session no turn has begun on. A turn that began and shows no ending is either in\nflight, which `turn_in_flight` says, or one the process died under. The record carries it\nbecause a list of sessions is rendered from it, one row per session; the whole history of\nturns is `GET /v1/sessions/{id}/turns`."
               },
               { "type": "null" }
             ]
@@ -3875,6 +3976,14 @@
             ]
           },
           "id": { "type": "string", "format": "uuid" },
+          "profile": {
+            "type": ["string", "null"],
+            "description": "The profile that served the turn when it was not the session's own: one of its\n`fallbacks`, after the session's profile could not. Absent on a turn the session's profile\nserved."
+          },
+          "reason": {
+            "type": ["string", "null"],
+            "description": "Who or what stopped a turn that was canceled, in the word its `turn.canceled` carries."
+          },
           "source": {
             "type": "string",
             "description": "Who opened it: `client`, `inbox`, `schedule`, `background`, or `parent` for a sub-agent's."
@@ -3895,6 +4004,10 @@
         "type": "object",
         "required": ["message"],
         "properties": {
+          "detach": {
+            "type": "boolean",
+            "description": "`false` (default): this request holds the turn, so the response ends with it and the turn\nis stopped once nobody has been listening for `[serve] stream_reattach_grace`. `true`: the\nrequest is only the trigger, and the turn runs for the session whether or not anybody\nreads; a JSON response is then a `202` at admission, and an SSE response streams from\nadmission and can be dropped without effect on the turn."
+          },
           "images": {
             "type": "array",
             "items": { "$ref": "#/components/schemas/ImageInput" },
@@ -3907,7 +4020,7 @@
           },
           "stream": {
             "type": "boolean",
-            "description": "`false` (default) → blocking JSON response. `true` → SSE."
+            "description": "`false` (default) → a JSON response. `true` → SSE."
           }
         },
         "additionalProperties": false

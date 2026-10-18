@@ -1,10 +1,10 @@
-import { Bot, FileText, Plug, SquareTerminal } from 'lucide-react';
+import { Bot, FileText, MessageSquare, Plug, SquareTerminal } from 'lucide-react';
 import { expect, it } from 'vitest';
 import { toolIconKey, toolIcons } from './tool-icons';
 
 const icon = (name: string) => toolIcons[toolIconKey(name)];
 
-// meka 0.77.0: src/tools/registry.rs::BUILTIN_TOOL_NAMES, plus the checkpoint-only context_replace.
+// meka 0.80.0: src/tools/registry.rs::BUILTIN_TOOL_NAMES, plus the checkpoint-only context_replace.
 const builtins = [
   'agent_delete',
   'agent_followup',
@@ -48,6 +48,8 @@ const builtins = [
   'scratchpad_rename',
   'scratchpad_save_file',
   'scratchpad_write',
+  'session_list',
+  'session_search',
   'shell_execute',
   'skill_delete',
   'skill_read',
@@ -65,6 +67,8 @@ it('gives every built-in tool a specific icon', () => {
   expect(icon('shell_execute')).toBe(SquareTerminal);
   expect(icon('file_read')).toBe(FileText);
   expect(icon('agent_spawn')).toBe(Bot);
+  // The navigation's icon for sessions.
+  expect(icon('session_search')).toBe(MessageSquare);
 });
 
 it('marks MCP server tools and falls back for tools it does not know', () => {

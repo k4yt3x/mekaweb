@@ -1,8 +1,8 @@
 # API schema maintenance
 
-`meka-0.77.0.json` was captured from meka `0.77.0`, commit `77ae53667c0a25f7b3d8c0b6fda010b893a4b55c`, through `/v1/openapi.json` with `[serve].docs = true`. The generated REST types are committed in `src/api/schema.d.ts`; runtime connections do not require schema access.
+`meka-0.80.0.json` was captured from meka `0.80.0`, commit `56a9437c4e42e9e8405319a5aeb2958cffad4106`, through `/v1/openapi.json` with `[serve].docs = true`. The generated REST types are committed in `src/api/schema.d.ts`; runtime connections do not require schema access.
 
-mekaweb requires meka 0.76.0 or newer and refuses older servers during connection discovery. Compared with 0.68.0, the 0.70.0 and 0.71.0 APIs change these shapes the client used:
+mekaweb requires meka 0.78.0 or newer and refuses older servers during connection discovery. Compared with 0.68.0, the 0.70.0 and 0.71.0 APIs change these shapes the client used:
 
 - `/v1/info` no longer reports `vision`; each `/v1/profiles` entry does.
 - `/v1/sessions/{id}/context` no longer reports `used_percent`. The client divides `used` by `window`, rounding down as meka did.
@@ -30,17 +30,30 @@ mekaweb requires meka 0.76.0 or newer and refuses older servers during connectio
 - Each `GET /v1/mcp/{name}/tools` entry states `loading`: `eager`, `deferred`, or `hidden`, by `deferral` and the server's `eager_load_tools`. A hidden tool is not registered, so the agent never sees it.
 - The export archive is format 12, whose thinking blocks may carry a Chat Completions endpoint's reasoning. meka reads a format 11 archive as it is.
 
+0.78.0 changes these, and the client therefore requires it:
+
+- `POST /turn` takes `detach`. A detached request is only the trigger: meka answers `202` at admission with the turn record, and the turn runs whether or not its client stays. A request without it holds its turn, now also with `stream: false`, which meka stops at a round boundary once the request has been gone for `[serve] stream_reattach_grace` with nobody else listening; such a turn ends `canceled` with `reason: "abandoned"`. The client sends every idle turn detached, under its submission's `Idempotency-Key`, which a detached request commits at admission, so a send whose admission is unknown is retried safely on request, while meka still holds the key: it keeps a turn's in memory for a day. A turn known to have started is therefore never sent again.
+- `GET /v1/sessions/{id}/turns/{turn_id}` reads one turn's record. The client settles a sent turn by it when the feed did not deliver its terminal.
+- The session capability `answers_prompts_on_return` keeps a prompt in a turn no request holds parked for the client to come back, until its expiry, rather than refused while nobody attends. New sessions declare it. Capabilities are fixed at creation, so older sessions keep refusing.
+- `message.appended` announces each turn's opening, and a message an interrupt appends, with `role` and `content` typed as `GET /messages` types them. A scheduled fire or a report opening a turn is this event, no longer an `info` notice, and a reader joining mid-turn is handed the opening after the resumed `turn.started`. The client shows it in the live preview instead of reading the opening from history after the first provider event.
+- `inbox.deferred` names items whose turn failed in a way waiting can help, with `not_before` and `error`, and `inbox.failed` carries `error`. Inbox items and replays show `retry_until`, `not_before`, `last_error`, and `failure`. The client keeps a deferred item queued, shows when it runs again and why, and shows the reason meka gave up on one. meka sends each failed attempt's `turn.failed`, with `message_withdrawn`, before the deferral, so the client neither notifies nor keeps a notice for an inbox turn that ended so; an `inbox.failed` is reported as a notice instead, and notifies for the client's own item. A replayed inbox key whose item meka withdrew names why with `failure`, for a canceled turn as for a give-up, so the client says it was withdrawn.
+- A turn's record and its terminal carry `profile` when a fallback profile served it, and `GET /v1/profiles` lists each profile's `fallbacks`. meka also says so in a notice, which the client shows.
+- A blocking `POST /turn` lists the turn's opening message first; the client does not use blocking turns.
+- The export archive is format 14.
+
+0.79.0 adds `protocol_version` to a connected server in `GET /v1/mcp`, which the client shows, and exports archive format 15. 0.80.0 changes no API.
+
 0.70.0 also adds turn records, the `/v1/stream` server feed, conditional rewind and fork through `ETag` and `If-Match`, `conversation.rewound`, `permission_resolved`, `approvals_pending`, the `parent` list filter, and the session's open `checklist` with `checklist.updated`. The client shows the open checklist above the message input. Notices are ephemeral: a running turn's show inline where they arrived, warnings and errors also stay below the conversation, and none survives a reload. The session feed parser ignores events it does not handle.
 
 A shell command may print 64 MiB, all of which `tool_call.completed` carries, while the saved result stays a bounded preview. The SSE parser therefore skips data past 2,000,000 characters and keeps the frame's id, so a reconnect cannot replay it. A skipped tool completion keeps its call, outcome, and correlation from the ends of its JSON, and other skipped events become a notice.
 
 The feed's 409 covers `session-not-loaded`: a token with only `sessions:r` does not load a session by attaching. The client then shows the saved conversation and retries the feed until the server loads the session. `POST /compact` runs as a turn on the feed, with `source: "compaction"` on `turn.started`; the client shows it as compacting and does not notify when it ends.
 
-Schema capture is a manual maintenance step. Choose a disposable meka instance with `[serve].docs = true`, confirm its version, and download its schema. For a 0.77.0 instance listening on port 8081:
+Schema capture is a manual maintenance step. Choose a disposable meka instance with `[serve].docs = true`, confirm its version, and download its schema. For a 0.80.0 instance listening on port 8081:
 
 ```sh
-curl --fail --silent --show-error http://127.0.0.1:8081/v1/openapi.json --output docs/api/meka-0.77.0.json
-npx prettier --write docs/api/meka-0.77.0.json
+curl --fail --silent --show-error http://127.0.0.1:8081/v1/openapi.json --output docs/api/meka-0.80.0.json
+npx prettier --write docs/api/meka-0.80.0.json
 npm run api:generate
 ```
 

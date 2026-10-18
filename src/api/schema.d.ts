@@ -675,6 +675,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/v1/sessions/{id}/turns/{turn_id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * `GET /v1/sessions/{id}/turns/{turn_id}`: one turn, the resource a detached request's
+     *     `Location` names.
+     */
+    get: operations['turn'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/v1/skills': {
     parameters: {
       query?: never;
@@ -812,6 +832,12 @@ export interface components {
       turn_id?: string | null;
     };
     CapabilitiesBody: {
+      /**
+       * @description When `true`, a prompt raised in a turn no request holds waits for this session's client to
+       *     come back and answer it, instead of being refused with nobody attending or canceled when
+       *     the last attending reader leaves. Default `false`.
+       */
+      answers_prompts_on_return?: boolean;
       /**
        * @description When `false`, mid-turn permission requests are denied immediately with a notice instead of
        *     parking on the SSE channel. Streaming clients with no approval interface set this. Default
@@ -1147,6 +1173,15 @@ export interface components {
       failure?: string | null;
       /** Format: uuid */
       id: string;
+      /**
+       * @description Why the last turn opened on it failed, as a Problem Detail (`type`, `title`, `status`,
+       *     `detail`), while it waits to be tried again or once it was given up on for it.
+       */
+      last_error?: unknown;
+      /** @description When its next attempt may run, while it waits after a failed turn or a held session. */
+      not_before?: string | null;
+      /** @description When meka stops retrying it: its enqueue plus `[serve] inbox_retry_ceiling`. */
+      retry_until: string;
       /** Format: uuid */
       session_id: string;
       /** @description Absent when the client named nobody. */
@@ -1184,16 +1219,31 @@ export interface components {
        */
       source?: string | null;
     };
-    /** @description The answer to `POST /v1/sessions/{id}/inbox`. */
+    /**
+     * @description The answer to `POST /v1/sessions/{id}/inbox`: the item's identity and state, and what a
+     *     producer that holds the key needs to know about its fate without listing the inbox.
+     */
     InboxResponse: {
       class: string;
+      failure?: string | null;
       /** Format: uuid */
       item_id: string;
+      last_error?: unknown;
+      /**
+       * @description On a replayed item, as `GET /v1/sessions/{id}/inbox` shows them: when its next attempt
+       *     may run and why the last one failed while it waits, or why it was given up on.
+       */
+      not_before?: string | null;
       /** @description Whether the `Idempotency-Key` had been used before, so the item is the earlier one. */
       replayed: boolean;
+      /** @description When meka stops retrying it: its enqueue plus `[serve] inbox_retry_ceiling`. */
+      retry_until: string;
       /** Format: uuid */
       session_id: string;
-      /** @description `pending` on a fresh item. A replayed `Idempotency-Key` answers the earlier item's state. */
+      /**
+       * @description The item's state as answered: `pending` on a fresh item, unless a turn already running
+       *     read it in the meantime. A replayed `Idempotency-Key` answers the earlier item's.
+       */
       state: string;
     };
     /**
@@ -1248,6 +1298,11 @@ export interface components {
      */
     McpServerStateView: {
       name: string;
+      /**
+       * @description The MCP protocol version a `connected` server's connection speaks, such as `2026-07-28`;
+       *     absent in every other state.
+       */
+      protocol_version?: string | null;
       /** @description `pending`, `connected`, `failed` or `disabled`. */
       state: string;
     };
@@ -1407,7 +1462,8 @@ export interface components {
        *
        *     Switching mid-conversation is allowed and is the client's call. Thinking blocks are tagged
        *     with the profile that produced them and are not replayed to a different one, so the
-       *     reasoning recorded so far stops being visible to the model from the next turn onward.
+       *     reasoning recorded so far stops being visible to the model from the next turn onward. A
+       *     profile with `vision = false` refuses the next turn while the session holds an image.
        */
       profile?: string | null;
       /**
@@ -1498,6 +1554,11 @@ export interface components {
        *     which a listing reports beside the table and which no server starts on.
        */
       backend?: string | null;
+      /**
+       * @description The profiles a turn falls back to when this one cannot serve it, in order; absent when the
+       *     profile names none.
+       */
+      fallbacks?: string[];
       model?: string | null;
       name: string;
       /**
@@ -1587,6 +1648,17 @@ export interface components {
      */
     SessionCapabilities: {
       /**
+       * @description When `true`, a prompt raised in a turn no request holds parks whether or not anyone is
+       *     attending, and closes only on an answer, the turn's cancellation or its expiry: the
+       *     session's client comes and goes and answers what it finds parked on return. A held turn
+       *     keeps the grace rule, since absence stops it anyway.
+       *
+       *     Defaults to `false`: a session nobody declared this for refuses a gated call with nobody
+       *     attending rather than holding the session for the prompt's lifetime.
+       * @default false
+       */
+      answers_prompts_on_return: boolean;
+      /**
        * @description When `false`, a mid-turn permission request is denied immediately with a notice instead of
        *     parking on the SSE channel for [`APPROVAL_TIMEOUT`].
        *
@@ -1659,8 +1731,9 @@ export interface components {
        *
        *     Exists so a client whose SSE stream dropped mid-turn can tell "my turn is still running"
        *     from "my turn died" without submitting a speculative turn and reading the 409. A dropped
-       *     stream does not cancel the turn: the spawned task keeps the runtime lock and dropping the
-       *     `JoinHandle` detaches rather than aborts, so the work completes and resubmitting would
+       *     request does not cancel the turn at once: the spawned task keeps the runtime lock and
+       *     dropping the `JoinHandle` detaches rather than aborts, so a held turn runs until its next
+       *     round boundary after the grace, and a detached one to its end; resubmitting would
        *     duplicate a reply the user is about to receive anyway.
        *
        *     `false` for a GC-evicted session, since eviction requires an idle session, and `true` for
@@ -1846,6 +1919,14 @@ export interface components {
       error?: components['schemas']['TurnError'] | null;
       /** Format: uuid */
       id: string;
+      /**
+       * @description The profile that served the turn when it was not the session's own: one of its
+       *     `fallbacks`, after the session's profile could not. Absent on a turn the session's profile
+       *     served.
+       */
+      profile?: string | null;
+      /** @description Who or what stopped a turn that was canceled, in the word its `turn.canceled` carries. */
+      reason?: string | null;
       /** @description Who opened it: `client`, `inbox`, `schedule`, `background`, or `parent` for a sub-agent's. */
       source: string;
       /** @description RFC 3339, when the turn began. */
@@ -1858,6 +1939,14 @@ export interface components {
     };
     TurnRequest: {
       /**
+       * @description `false` (default): this request holds the turn, so the response ends with it and the turn
+       *     is stopped once nobody has been listening for `[serve] stream_reattach_grace`. `true`: the
+       *     request is only the trigger, and the turn runs for the session whether or not anybody
+       *     reads; a JSON response is then a `202` at admission, and an SSE response streams from
+       *     admission and can be dropped without effect on the turn.
+       */
+      detach?: boolean;
+      /**
        * @description Image attachments for this turn. A sibling of `message` rather than a member of
        *     [`TurnOptions`] because these are user content, not a per-turn knob. Requires the session's
        *     profile to have vision enabled; see [`resolve_turn_images`].
@@ -1866,7 +1955,7 @@ export interface components {
       message: string;
       /** @description Per-turn knobs. See [`TurnOptions`]. Omitting the field is the same as `{}`. */
       options?: components['schemas']['TurnOptions'];
-      /** @description `false` (default) → blocking JSON response. `true` → SSE. */
+      /** @description `false` (default) → a JSON response. `true` → SSE. */
       stream?: boolean;
     };
     TurnResponse: {
@@ -4531,13 +4620,22 @@ export interface operations {
       };
     };
     responses: {
-      /** @description Blocking turn response (stream=false) or live SSE stream (stream=true). The application/json schema applies only to blocking mode. */
+      /** @description A held turn's response: the assembled turn (stream=false) or its live SSE stream (stream=true). The application/json schema applies only to the former. */
       200: {
         headers: {
           [name: string]: unknown;
         };
         content: {
           'application/json': components['schemas']['TurnResponse'];
+        };
+      };
+      /** @description A detached request's turn was admitted (detach=true, stream=false): the body is the turn record and `Location` names it under `/turns/{turn_id}` */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['TurnRecord'];
         };
       };
       /** @description Authorization missing or invalid */
@@ -4686,6 +4784,67 @@ export interface operations {
         };
       };
       /** @description Session not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+    };
+  };
+  turn: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Session UUID */
+        id: string;
+        /** @description Turn UUID, as `turn.started` and the 202 of a detached request name it */
+        turn_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The turn, with its ending once it has one */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['TurnRecord'];
+        };
+      };
+      /** @description Authorization missing or invalid */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Insufficient scope */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Session not found (`/errors/session-not-found`), or no turn of it has this id (`/errors/not-found`) */
       404: {
         headers: {
           [name: string]: unknown;

@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-10-18
+
+### Added
+
+- A turn keeps running after its tab closes; in new sessions, its approval prompts wait for you.
+- Another client's message, a scheduled fire, or a report shows as soon as the turn it opens starts.
+- A turn whose send went unconfirmed can be retried under the same key, as queued messages can.
+- A queued message whose turn failed shows when meka will try it again, and why.
+- A queued message meka gives up on is reported with the reason, and notifies when it was yours.
+- The MCP page shows the protocol version each connected server speaks.
+- meka's session tools show an icon, and `session_search` shows what it searched for.
+
+### Changed
+
+- mekaweb requires meka 0.78.0 or newer, which lets a turn run on without the request that sent it.
+- Recognize meka 0.80.0 as a verified server version.
+- A turn meka stopped because nobody was following it says so.
+
 ## [0.19.1] - 2026-10-18
 
 ### Fixed
@@ -373,7 +391,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Light and dark themes, narrow layouts, and collapsible, resizable session panels.
 - Hosting at the root or a subpath, with GitHub Pages deployment on version tags.
 
-[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.19.1...HEAD
+[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.20.0...HEAD
+[0.20.0]: https://github.com/k4yt3x/mekaweb/compare/0.19.1...0.20.0
 [0.19.1]: https://github.com/k4yt3x/mekaweb/compare/0.19.0...0.19.1
 [0.19.0]: https://github.com/k4yt3x/mekaweb/compare/0.18.2...0.19.0
 [0.18.2]: https://github.com/k4yt3x/mekaweb/compare/0.18.1...0.18.2

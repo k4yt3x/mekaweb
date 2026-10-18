@@ -7,6 +7,7 @@ import {
   isInput,
   messageText,
   pendingInboxMessages,
+  recoverableSubmissions,
   resendable,
   responseActivityIndicator,
   spawnedAgent,
@@ -14,7 +15,7 @@ import {
   type ToolResultBlock,
   type ToolUseBlock,
 } from './conversation-history';
-import type { SessionState, Submission } from '../session/controller';
+import type { LiveBlock, SessionState, Submission } from '../session/controller';
 
 const call = (id: string): ToolUseBlock => ({
   type: 'tool_use',
@@ -38,6 +39,7 @@ it('associates queued metadata only by item ID and never repeats an already visi
     id: 'queued',
     session_id: 'session',
     class: 'followup',
+    retry_until: '2026-09-17T01:00:00Z',
     source: 'client',
     created_at: '2026-09-23T12:00:00Z',
     state: 'pending',
@@ -71,6 +73,7 @@ it('defers unmatched queued metadata while an inbox submission is unidentified',
     id: 'queued',
     session_id: 'session',
     class: 'steer',
+    retry_until: '2026-09-17T01:00:00Z',
     source: 'client',
     created_at: '2026-09-23T12:00:00Z',
     state: 'pending',
@@ -303,6 +306,159 @@ it('interleaves sent messages with live output and removes only reconciled previ
   expect(reconciled[0]?.kind).toBe('agent');
 });
 
+const words: Schema['ContentBlockView'] = { type: 'text', text: 'Hello.' };
+const fed = (turnId: string, opening: boolean, ...content: Schema['ContentBlockView'][]) =>
+  ({ kind: 'message', message: { role: 'user', content, turn_id: turnId }, opening }) as const;
+
+it('shows the feed’s copy of someone’s words only when this tab did not send them', () => {
+  const kinds = (blocks: LiveBlock[], submissions: Submission[]) =>
+    groupLiveMessages(blocks, submissions).map((group) => group.kind);
+  const createdAt = '2026-09-23T12:00:00Z';
+  const sent: Submission = {
+    key: 'direct',
+    kind: 'turn',
+    state: 'running',
+    turnId: 'mine',
+    createdAt,
+    preview: true,
+    body: { message: 'Hello.', detach: true },
+  };
+  const own = { kind: 'submission', key: 'direct' } as const;
+  // A turn this tab opened shows as it was sent; another client's shows as the feed gives it.
+  expect(kinds([own, fed('mine', true, words)], [sent])).toEqual(['user']);
+  expect(kinds([fed('theirs', true, words)], [sent])).toEqual(['message']);
+  // Until admission names the turn, any opening may be this tab's.
+  const sending: Submission = { ...sent, state: 'sending' };
+  delete sending.turnId;
+  expect(kinds([own, fed('theirs', true, words)], [sending])).toEqual(['user']);
+  // An inbox item is told apart by its ID, in an opening or in what an interrupt appended.
+  const queued: Submission = {
+    key: 'queued',
+    kind: 'inbox',
+    state: 'accepted',
+    itemId: 'item',
+    createdAt,
+    preview: true,
+    body: { message: 'Stop.', class: 'interrupt' },
+  };
+  const interrupt = (itemId: string) =>
+    fed('mine', false, {
+      type: 'inbox',
+      class: 'interrupt',
+      body: 'Stop.',
+      text: 'Stop.',
+      item_id: itemId,
+    });
+  expect(kinds([interrupt('item')], [sent, queued])).toEqual([]);
+  expect(kinds([interrupt('other')], [sent, queued])).toEqual(['message']);
+});
+
+it('leaves out only this tab’s own blocks from an opening that carries others', () => {
+  const createdAt = '2026-09-23T12:00:00Z';
+  const sent: Submission = {
+    key: 'direct',
+    kind: 'turn',
+    state: 'running',
+    turnId: 'mine',
+    createdAt,
+    preview: true,
+    body: { message: 'Hello.', detach: true },
+  };
+  const queued: Submission = {
+    key: 'queued',
+    kind: 'inbox',
+    state: 'accepted',
+    itemId: 'item',
+    createdAt,
+    preview: true,
+    body: { message: 'Later.', class: 'followup' },
+  };
+  const item = (itemId: string): Schema['ContentBlockView'] => ({
+    type: 'inbox',
+    class: 'followup',
+    body: itemId,
+    text: itemId,
+    item_id: itemId,
+  });
+  const report: Schema['ContentBlockView'] = {
+    type: 'background_report',
+    task_ids: ['task'],
+    text: 'Build finished.',
+  };
+  const context: Schema['ContentBlockView'] = { type: 'turn_context', text: 'Context' };
+  const shown = (block: LiveBlock, submissions: Submission[]) =>
+    groupLiveMessages([block], submissions).flatMap((group) =>
+      group.kind === 'message' ? group.message.content.map((b) => b.type) : [],
+    );
+  // Whatever was waiting rides this tab's turn: someone's item and a report stay, its words go.
+  expect(shown(fed('mine', true, context, report, words, item('theirs')), [sent])).toEqual([
+    'background_report',
+    'inbox',
+  ]);
+  // This tab's item riding another turn's opening goes; the other words stay.
+  expect(shown(fed('theirs', true, context, words, item('item')), [queued])).toEqual([
+    'turn_context',
+    'text',
+  ]);
+  // A send whose admission is unknown is told apart by its words, not hidden wholesale.
+  const unresolved: Submission = { ...sent, state: 'uncertain' };
+  delete unresolved.turnId;
+  expect(shown(fed('any', true, context, words), [unresolved])).toEqual([]);
+  expect(
+    shown(fed('any', true, context, { type: 'text', text: 'Someone else.' }), [unresolved]),
+  ).toEqual(['turn_context', 'text']);
+  // meka writes a skill's body after the words, and no words at all for an empty message.
+  const skilled: Submission = {
+    ...unresolved,
+    body: { message: 'Hello.', detach: true, options: { skill: 'review' } },
+  };
+  const withSkill = { type: 'text', text: 'Hello.\n\nReview carefully.' } as const;
+  expect(shown(fed('any', true, context, withSkill), [skilled])).toEqual([]);
+  const empty: Submission = { ...unresolved, body: { message: '', detach: true } };
+  expect(shown(fed('any', true, context, report), [empty])).toEqual([
+    'turn_context',
+    'background_report',
+  ]);
+  // Before the inbox POST answers with its ID, the item's words identify it.
+  const posting: Submission = {
+    ...queued,
+    state: 'sending',
+    body: { message: 'theirs', class: 'followup' },
+  };
+  delete posting.itemId;
+  expect(shown(fed('any', false, item('theirs')), [posting])).toEqual([]);
+  expect(shown(fed('any', false, item('other words')), [posting])).toEqual(['inbox']);
+});
+
+it('keeps the words of a queued message meka gave up on, which history no longer holds', () => {
+  const failed = (key: string, kind: 'inbox' | 'turn', id: string): Submission => ({
+    key,
+    kind,
+    state: 'failed',
+    createdAt: '2026-09-23T12:00:00Z',
+    preview: false,
+    ...(kind === 'inbox' ? { itemId: id } : { turnId: id }),
+    body: kind === 'inbox' ? { message: key, class: 'followup' } : { message: key, detach: true },
+  });
+  const notice = (event: 'inbox.failed' | 'turn.failed', subject: Record<string, string>) => ({
+    id: event,
+    event,
+    level: 'error' as const,
+    text: 'Failed.',
+    ...subject,
+  });
+  const queued = failed('queued', 'inbox', 'item');
+  expect(recoverableSubmissions([queued], [notice('inbox.failed', { itemId: 'item' })])).toEqual([
+    queued,
+  ]);
+  // A failed turn keeps its words in history, so the notice below says all there is.
+  const sent = failed('sent', 'turn', 'turn');
+  expect(recoverableSubmissions([sent], [notice('turn.failed', { turnId: 'turn' })])).toEqual([]);
+  // Only the latest failure stays; an unknown outcome stays wherever it is.
+  const uncertain: Submission = { ...sent, key: 'uncertain', state: 'uncertain' };
+  expect(recoverableSubmissions([queued, uncertain, sent], [])).toEqual([uncertain, sent]);
+});
+
 function waitingState(patch: Partial<SessionState> = {}): SessionState {
   return {
     id: 'session',
@@ -328,7 +484,7 @@ function waitingState(patch: Partial<SessionState> = {}): SessionState {
         preview: true,
         turnId: 'turn',
         createdAt: '2026-09-23T12:00:00Z',
-        body: { message: 'Hello.', stream: true },
+        body: { message: 'Hello.', detach: true },
       },
     ],
     ...patch,
@@ -423,6 +579,16 @@ it('distinguishes approval and connection waits from active computation', () => 
     },
   ];
   expect(activity(state)?.status).toBe('approval');
+});
+
+it('places activity after the opening of another client’s turn, which it answers', () => {
+  const state = waitingState({
+    running: true,
+    turnId: 'theirs',
+    submissions: [],
+    blocks: [fed('theirs', true, words)],
+  });
+  expect(activity(state)).toEqual({ index: 1, status: 'working' });
 });
 
 it('shows activity for an externally started turn without requiring a local submission', () => {

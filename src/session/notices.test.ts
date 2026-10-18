@@ -27,6 +27,10 @@ it('suppresses routine cancellation and empty notices without hiding other inter
   expect(sessionNotice('turn.canceled', { reason: 'sse_lag' })?.text).toContain(
     'reader fell behind',
   );
+  // meka 0.78 stops a held turn whose request left with nobody else following it.
+  expect(sessionNotice('turn.canceled', { reason: 'abandoned' })?.text).toContain(
+    'nobody was following it',
+  );
   expect(sessionNotice('turn.canceled', { reason: 'future reason' })?.text).toContain(
     'future reason',
   );

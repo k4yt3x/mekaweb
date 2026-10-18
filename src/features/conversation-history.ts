@@ -5,6 +5,7 @@ import {
   type SessionState,
   type Submission,
 } from '../session/controller';
+import type { SessionNotice } from '../session/notices';
 
 export type ToolUseBlock = Extract<Schema['ContentBlockView'], { type: 'tool_use' }>;
 export type ToolResultBlock = Extract<Schema['ContentBlockView'], { type: 'tool_result' }>;
@@ -151,11 +152,40 @@ export function spawnedAgent(result: string) {
   return /^agent: (\S+)/i.exec(result)?.[1];
 }
 
-type AgentBlock = Exclude<LiveBlock, { kind: 'submission' }>;
+type AgentBlock = Exclude<LiveBlock, { kind: 'submission' | 'message' }>;
 export function groupLiveMessages(blocks: LiveBlock[], submissions: Submission[]) {
   const pending = new Map(submissions.filter((s) => s.preview).map((s) => [s.key, s]));
+  // This tab shows its own words as it sent them, so the feed's copy of them is left out, block by
+  // block, since an opening also carries whatever else was waiting: someone's inbox item, or a
+  // report of background work. A turn's own words are known by its ID; while a send awaits
+  // admission, any opening's may be; and an unresolved one's are known by the words themselves.
+  const ownTurns = new Set(
+    submissions.flatMap((s) => (s.preview && s.kind === 'turn' && s.turnId ? [s.turnId] : [])),
+  );
+  const ownItems = new Set(submissions.flatMap((s) => (s.preview && s.itemId ? [s.itemId] : [])));
+  const unadmitted = submissions.filter((s) => s.kind === 'turn' && !s.turnId && s.preview);
+  const admitting = unadmitted.some((s) => s.state === 'sending');
+  // meka writes no words for an empty message, and puts a skill's body after them.
+  const unresolved = unadmitted.flatMap((s) =>
+    s.state === 'uncertain' && s.body.message.trim()
+      ? [{ message: s.body.message, skill: 'options' in s.body && Boolean(s.body.options?.skill) }]
+      : [],
+  );
+  const sentWords = (words: string) =>
+    unresolved.some(
+      ({ message, skill }) => words === message || (skill && words.startsWith(message + '\n\n')),
+    );
+  // An inbox item names its ID in the conversation; before the POST answers with it, its words.
+  const unidentified = new Set(
+    submissions.flatMap((s) =>
+      s.kind === 'inbox' && !s.itemId && s.preview && ['sending', 'uncertain'].includes(s.state)
+        ? [s.body.message]
+        : [],
+    ),
+  );
   const groups: (
     | { kind: 'user'; key: string; submission: Submission }
+    | { kind: 'message'; key: string; message: Schema['MessageView'] }
     | { kind: 'agent'; key: string; blocks: { block: AgentBlock; index: number }[] }
   )[] = [];
   blocks.forEach((block, index) => {
@@ -164,12 +194,51 @@ export function groupLiveMessages(blocks: LiveBlock[], submissions: Submission[]
       if (submission) groups.push({ kind: 'user', key: submission.key, submission });
       return;
     }
+    if (block.kind === 'message') {
+      const { message, opening } = block;
+      const words = message.content.flatMap((b) => (b.type === 'text' ? [b.text] : [])).join('\n');
+      const ownOpening =
+        opening &&
+        (admitting ||
+          sentWords(words) ||
+          Boolean(message.turn_id && ownTurns.has(message.turn_id)));
+      const content = message.content.filter((b) =>
+        b.type === 'inbox'
+          ? !((b.item_id && ownItems.has(b.item_id)) || unidentified.has(b.body))
+          : !(ownOpening && ['text', 'image', 'turn_context'].includes(b.type)),
+      );
+      if (content.some((b) => b.type !== 'turn_context'))
+        groups.push({ kind: 'message', key: `message-${index}`, message: { ...message, content } });
+      return;
+    }
     if (block.kind === 'text' && !block.text.trim()) return;
     const previous = groups.at(-1);
     if (previous?.kind === 'agent') previous.blocks.push({ block, index });
     else groups.push({ kind: 'agent', key: `agent-${index}`, blocks: [{ block, index }] });
   });
   return groups;
+}
+
+/**
+ * The submissions whose outcome the user must see: any whose outcome is unknown, and the latest if
+ * it failed, unless its turn's failure is reported below and its words stay in history. A queued
+ * message meka gave up on stays, since meka took its words back out of the conversation.
+ */
+export function recoverableSubmissions(
+  submissions: readonly Submission[],
+  notices: readonly SessionNotice[],
+) {
+  const latest = submissions.at(-1);
+  return submissions.filter(
+    (submission) =>
+      submission.state === 'uncertain' ||
+      (submission === latest &&
+        submission.state === 'failed' &&
+        !notices.some(
+          (notice) =>
+            notice.event === 'turn.failed' && notice.turnId && notice.turnId === submission.turnId,
+        )),
+  );
 }
 
 /** Inbox metadata has no body. Only an explicit item ID can associate it with a local message. */
@@ -231,7 +300,8 @@ export function responseActivityIndicator(
   let index = groups.length;
   while (index > 0) {
     const group = groups[index - 1]!;
-    if (group.kind === 'agent') break;
+    // Output, or words someone else sent, which this turn answers.
+    if (group.kind !== 'user') break;
     const submission = group.submission;
     if (
       submission.state === 'running' ||

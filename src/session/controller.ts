@@ -10,10 +10,9 @@ import {
   type Schema,
 } from '../api/client';
 import { emptyComposerOptions } from './composer-options';
-import { parseEvent, SseParser, string, type EventData, type SseFrame } from './events';
+import { parseEvent, record, SseParser, string, type EventData, type SseFrame } from './events';
 import { createId } from '../identifiers';
-import { readTurnStream } from './turn-stream';
-import { sessionNotice, type SessionNotice } from './notices';
+import { problemText, sessionNotice, type SessionNotice } from './notices';
 
 export interface LiveTool {
   id: string;
@@ -34,6 +33,8 @@ export type LiveBlock =
   | { kind: 'report'; tasks: string[]; text: string }
   /** What the agent or a provider said during the turn, where it said it. */
   | { kind: 'notice'; level: SessionNotice['level']; text: string }
+  /** Words that entered the conversation: a turn's opening, or a message an interrupt appended. */
+  | { kind: 'message'; message: Schema['MessageView']; opening: boolean }
   | { kind: 'submission'; key: string };
 export interface Approval {
   id: string;
@@ -141,15 +142,13 @@ interface Entry {
   outcomes: Map<string, Submission['state']>;
   notificationTurns: Set<string>;
   notifiedTurns: Set<string>;
+  /** Turns the inbox opened, with the items they opened on, whose failed attempts meka may retry. */
+  inboxTurns: Map<string, string[]>;
+  /** Turns whose opening this feed has announced. */
+  openings: Set<string>;
   notificationsSince: number;
   textIdleTimer?: ReturnType<typeof setTimeout>;
   preparing?: string;
-  opening?: {
-    saved: Schema['MessagesResponse'];
-    offset: number;
-    progressed: boolean;
-    requested: boolean;
-  };
 }
 export function isSessionRunning(state: SessionState) {
   return state.running || state.submissions.some((submission) => submission.state === 'running');
@@ -187,10 +186,41 @@ function needsFollowing(submission: Submission) {
     (submission.state === 'accepted' && submission.preview)
   );
 }
+/** A message as `message.appended` and history both type it, whatever order its keys arrive in. */
+function sameMessage(a: Schema['MessageView'], b: Schema['MessageView']) {
+  const canonical = (value: unknown): unknown =>
+    Array.isArray(value)
+      ? value.map(canonical)
+      : record(value)
+        ? Object.fromEntries(
+            Object.keys(value)
+              .sort()
+              .map((key) => [key, canonical(value[key])]),
+          )
+        : value;
+  return (
+    a.role === b.role &&
+    a.turn_id === b.turn_id &&
+    JSON.stringify(canonical(a.content)) === JSON.stringify(canonical(b.content))
+  );
+}
+/**
+ * Whether saved history holds a message the feed announced. An opening is found by its turn
+ * alone, since an interrupt joined onto an opening nothing answered rewrites it in place.
+ */
+function holds(
+  saved: readonly Schema['MessageView'][],
+  message: Schema['MessageView'],
+  opening: boolean,
+) {
+  if (!opening || !message.turn_id) return saved.some((item) => sameMessage(item, message));
+  return saved.find((item) => item.turn_id === message.turn_id)?.role === 'user';
+}
 function turnBody(message: string, options: ComposerOptions): Schema['TurnRequest'] {
   return {
     message,
-    stream: true,
+    // The turn runs on whether or not this tab stays; the session feed shows it either way.
+    detach: true,
     ...(options.images.length
       ? {
           images: options.images.map((image) =>
@@ -213,6 +243,8 @@ function turnBody(message: string, options: ComposerOptions): Schema['TurnReques
 export class SessionController {
   private lifetime = new AbortController();
   private entries = new Map<string, Entry>();
+  // Turns whose records are being read for an ending the feed did not deliver.
+  private settling = new Set<string>();
   private drafts = new Map<string, ComposerOptions>();
   private deletions = new Map<string, Promise<string[]>>();
   private settingsChanges = new Set<string>();
@@ -275,12 +307,15 @@ export class SessionController {
     const notice = sessionNotice(event, data);
     const notices = entry.state.notices;
     if (!notice) return notices;
-    // A terminal belongs to one explicit turn, even if the server replays it again.
+    // A terminal belongs to one explicit turn, and a give-up to one queued message, even if the
+    // server replays it again.
+    const subject = notice.turnId ?? notice.itemId;
     if (
       notice.event !== 'notice' &&
-      notice.turnId &&
+      subject &&
       notices.some(
-        (existing) => existing.event === notice.event && existing.turnId === notice.turnId,
+        (existing) =>
+          existing.event === notice.event && (existing.turnId ?? existing.itemId) === subject,
       )
     )
       return notices;
@@ -332,6 +367,8 @@ export class SessionController {
       outcomes: entry?.outcomes ?? new Map(),
       notificationTurns: entry?.notificationTurns ?? new Set(),
       notifiedTurns: entry?.notifiedTurns ?? new Set(),
+      inboxTurns: entry?.inboxTurns ?? new Map(),
+      openings: entry?.openings ?? new Set(),
       notificationsSince: entry?.notificationsSince ?? Infinity,
       abort: new AbortController(),
       selected: this.selected === id,
@@ -527,13 +564,22 @@ export class SessionController {
       return;
     }
     const turnId = string(data, 'turn_id');
-    // A POST terminal can reach us before the attending feed's replay. Its saved snapshot
+    // A turn's record can settle it before the attending feed's replay. Its saved snapshot
     // supersedes those old deltas; replay must not reopen work or duplicate the saved answer.
     if (entry.outcomes.has(turnId) && !frame.event.startsWith('inbox.') && frame.event !== 'notice')
       return;
     if (frame.event === 'turn.started') {
       // Finishing a compaction is not the agent finishing work, so it does not notify.
       const compacting = string(data, 'source') === 'compaction';
+      if (string(data, 'source') === 'inbox') {
+        const items = Array.isArray(data.item_ids) ? data.item_ids : [];
+        entry.inboxTurns.set(
+          turnId,
+          items.filter((item): item is string => typeof item === 'string'),
+        );
+        if (entry.inboxTurns.size > 50)
+          entry.inboxTurns.delete(entry.inboxTurns.keys().next().value!);
+      }
       if (
         !compacting &&
         (data.resumed === true ||
@@ -542,19 +588,14 @@ export class SessionController {
         this.followCompletion(entry, turnId);
       }
       if (entry.state.turnId !== turnId) {
-        delete entry.opening;
+        // A newer turn means an earlier one ended, though its terminal may not have reached us.
         if (
-          entry.state.saved &&
-          !entry.state.partial &&
-          entry.reconcileEpoch === undefined &&
-          !data.resumed
+          entry.state.submissions.some(
+            (submission) =>
+              submission.state === 'running' && submission.turnId && submission.turnId !== turnId,
+          )
         )
-          entry.opening = {
-            saved: entry.state.saved,
-            offset: entry.state.offset,
-            progressed: false,
-            requested: false,
-          };
+          void this.settleTurns(entry);
         entry.epoch++;
         this.publish(entry, {
           ...(string(data, 'source') === 'parent'
@@ -590,6 +631,7 @@ export class SessionController {
           'progress',
           'turn.nudged',
           'task.reported',
+          'message.appended',
         ].includes(frame.event))
     ) {
       // A truncated replay may start in the middle of work. Its explicit turn ID is enough
@@ -634,6 +676,34 @@ export class SessionController {
       const textStreaming = tail?.kind === 'text' && Boolean(tail.text.trim());
       if (textStreaming) this.noteTextStreaming(entry);
       this.publish(entry, { blocks, textStreaming });
+    } else if (frame.event === 'message.appended') {
+      const message: Schema['MessageView'] = {
+        role: string(data, 'role'),
+        content: data.content as Schema['MessageView']['content'],
+        ...(turnId ? { turn_id: turnId } : {}),
+      };
+      // The turn's first, before anything it did, is the message it opened with. A notice may
+      // come first: a fallback profile or a compaction announces itself inside the turn.
+      const seen = Boolean(turnId) && entry.openings.has(turnId);
+      const opening =
+        !seen &&
+        state.blocks.every((block) => block.kind === 'submission' || block.kind === 'notice');
+      if (turnId) {
+        entry.openings.add(turnId);
+        if (entry.openings.size > 50) entry.openings.delete(entry.openings.values().next().value!);
+      }
+      // Joining mid-turn, the feed hands over an opening the saved conversation may already hold,
+      // and a reconnect may hand over again one this feed already showed.
+      if (
+        !(seen && data.resumed === true) &&
+        (!state.saved || !holds(state.saved.messages, message, opening))
+      )
+        this.publish(entry, {
+          textStreaming: false,
+          blocks: [...state.blocks, { kind: 'message', message, opening }],
+        });
+      // The opening is saved by now, so the list and header can show the title it gives.
+      if (data.resumed !== true) this.invalidated(state.id);
     } else if (frame.event === 'turn.nudged') {
       this.publish(entry, {
         textStreaming: false,
@@ -759,39 +829,47 @@ export class SessionController {
         this.followCompletion(entry, turnId);
         this.notifyCompletion(entry, turnId, entry.outcomes.get(turnId));
       }
-      for (const id of ids)
-        if (typeof id === 'string')
-          entry.deliveries.set(id, {
-            state:
-              frame.event === 'inbox.delivered'
-                ? 'delivered'
-                : frame.event === 'inbox.failed'
-                  ? 'failed'
-                  : 'withdrawn',
-            ...(turnId ? { turnId } : {}),
-          });
-      if (entry.deliveries.size > 200)
-        entry.deliveries.delete(entry.deliveries.keys().next().value!);
+      // A deferred item failed a turn that waiting can help, and waits in the queue to run again.
+      const next: Submission['state'] =
+        frame.event === 'inbox.delivered'
+          ? 'delivered'
+          : frame.event === 'inbox.failed'
+            ? 'failed'
+            : frame.event === 'inbox.deferred'
+              ? 'accepted'
+              : 'withdrawn';
+      // A give-up at the retry ceiling names no error, only why.
+      const problem = problemText(data.error) || string(data, 'reason');
+      if (frame.event !== 'inbox.deferred') {
+        for (const id of ids)
+          if (typeof id === 'string')
+            entry.deliveries.set(id, { state: next, ...(turnId ? { turnId } : {}) });
+        if (entry.deliveries.size > 200)
+          entry.deliveries.delete(entry.deliveries.keys().next().value!);
+      }
+      // Giving up is news its failed attempts were not: a notice, and for this tab's own
+      // message, the notification its turn would have made.
+      const gaveUp = frame.event === 'inbox.failed';
+      if (gaveUp && state.submissions.some((s) => s.itemId && ids.includes(s.itemId))) {
+        const opened = [...entry.inboxTurns]
+          .reverse()
+          .find(([, items]) => items.some((item) => ids.includes(item)))?.[0];
+        if (opened) this.notifyCompletion(entry, opened, 'failed');
+      }
       this.publish(entry, {
+        ...(gaveUp ? { notices: this.withNotice(entry, frame.event, data) } : {}),
         submissions: state.submissions.map((s) =>
           s.itemId && ids.includes(s.itemId)
             ? {
                 ...s,
-                state:
-                  frame.event === 'inbox.delivered'
-                    ? 'delivered'
-                    : frame.event === 'inbox.failed'
-                      ? 'failed'
-                      : 'withdrawn',
+                state: next,
                 ...(turnId ? { turnId } : {}),
-                delivery:
-                  frame.event === 'inbox.delivered'
-                    ? 'delivered'
-                    : frame.event === 'inbox.failed'
-                      ? 'failed'
-                      : 'withdrawn',
+                delivery: next === 'accepted' ? 'pending' : next,
                 ...(frame.event === 'inbox.withdrawn' || frame.event === 'inbox.failed'
                   ? { preview: false }
+                  : {}),
+                ...(frame.event === 'inbox.failed'
+                  ? { error: `meka gave up on this message${problem ? `: ${problem}` : '.'}` }
                   : {}),
               }
             : s,
@@ -808,16 +886,18 @@ export class SessionController {
     const outcome =
       event === 'turn.finished' ? 'completed' : event === 'turn.failed' ? 'failed' : 'canceled';
     const state = entry.state;
+    // An inbox turn that ended before the model answered gives its items back to run again, or
+    // gives them up; their queued messages say which, so each attempt is not news of its own.
+    const attempt = data.message_withdrawn === true && entry.inboxTurns.has(turnId);
+    const followed = entry.notificationTurns.delete(turnId);
     const notify =
-      entry.notificationTurns.delete(turnId) ||
-      state.submissions.some(
-        (submission) => submission.turnId === turnId && submission.state === 'running',
-      );
+      !attempt &&
+      (followed ||
+        state.submissions.some(
+          (submission) => submission.turnId === turnId && submission.state === 'running',
+        ));
     const current = !state.turnId || state.turnId === turnId;
-    if (current) {
-      entry.followed = false;
-      delete entry.opening;
-    }
+    if (current) entry.followed = false;
     entry.outcomes.set(turnId, outcome);
     if (entry.outcomes.size > 50) entry.outcomes.delete(entry.outcomes.keys().next().value!);
     const message = sessionNotice(event, data)?.text;
@@ -848,7 +928,7 @@ export class SessionController {
             }
           : submission,
       ),
-      notices: this.withNotice(entry, event, data),
+      notices: attempt ? state.notices : this.withNotice(entry, event, data),
     });
     if (notify) this.notifyCompletion(entry, turnId, outcome);
     void this.refresh(state.id, current).then(() => {
@@ -1075,6 +1155,8 @@ export class SessionController {
         entry.abort.signal,
       );
       if (entry.snapshotEpoch !== request || entry.abort.signal.aborted) return;
+      // Its terminal may have gone by in a gap or while the feed was away; its record says.
+      if (!session.turn_in_flight) void this.settleTurns(entry);
       if (
         entry.state.submissions.some(
           (submission) =>
@@ -1105,7 +1187,10 @@ export class SessionController {
         entry.followed = false;
       const pendingPreviews = new Set(submissions.filter((s) => s.preview).map((s) => s.key));
       const blocks = entry.state.blocks.filter((block) =>
-        block.kind === 'submission' ? pendingPreviews.has(block.key) : !reconciled,
+        block.kind === 'submission'
+          ? pendingPreviews.has(block.key)
+          : !reconciled &&
+            (block.kind !== 'message' || !holds(saved.messages, block.message, block.opening)),
       );
       this.publish(entry, {
         saved,
@@ -1118,13 +1203,10 @@ export class SessionController {
         ...(epoch === entry.epoch ? { running: session.turn_in_flight } : {}),
         ...(reconciled ? { tools: {}, partial: false } : {}),
       });
-      this.syncTurnInput(entry);
       if (pendingInbox.length || wasFollowed) this.release(entry);
     } catch (error) {
-      if (!entry.abort.signal.aborted && request === entry.snapshotEpoch) {
+      if (!entry.abort.signal.aborted && request === entry.snapshotEpoch)
         this.publish(entry, { loading: false, error: asError(error) });
-        this.syncTurnInput(entry);
-      }
     }
   }
   private async loadSnapshot(
@@ -1194,7 +1276,6 @@ export class SessionController {
         saved: { ...page, messages: [...page.messages, ...previous.messages] },
         offset,
       });
-      this.syncTurnInput(entry);
     } catch (error) {
       this.publish(entry, { error: asError(error) });
     }
@@ -1319,8 +1400,12 @@ export class SessionController {
           s.key === submission.key ? { ...s, ...patch } : s,
         ),
       });
-    update({ state: 'sending', preview: true });
+    // A retry leaves the message where the last read put it, which may be saved history, rather
+    // than showing it again below whatever ran since.
+    const preview = entry.state.submissions.find((s) => s.key === submission.key)?.preview ?? true;
+    update({ state: 'sending', preview });
     if (
+      preview &&
       !entry.state.blocks.some(
         (block) => block.kind === 'submission' && block.key === submission.key,
       )
@@ -1343,18 +1428,30 @@ export class SessionController {
         entry = current;
         const delivery = entry.deliveries.get(result.item_id);
         const outcome = delivery?.turnId ? entry.outcomes.get(delivery.turnId) : undefined;
+        // A replayed key answers what became of the item: withdrawn by meka, it names why,
+        // which a canceled turn does as well as a give-up, so the words do not say which.
+        const failure = result.failure ? problemText(result.last_error) || result.failure : '';
+        const failed = !outcome && (delivery ? delivery.state === 'failed' : Boolean(failure));
         update({
           itemId: result.item_id,
           delivery: delivery?.state ?? result.state,
           state:
             outcome ??
-            delivery?.state ??
-            (result.state === 'delivered'
-              ? 'delivered'
-              : result.state === 'withdrawn'
-                ? 'withdrawn'
-                : 'accepted'),
+            (failed
+              ? 'failed'
+              : (delivery?.state ??
+                (result.state === 'delivered'
+                  ? 'delivered'
+                  : result.state === 'withdrawn'
+                    ? 'withdrawn'
+                    : 'accepted'))),
           ...(delivery?.turnId ? { turnId: delivery.turnId } : {}),
+          ...(failed
+            ? {
+                error: `meka withdrew this message${failure ? `: ${failure}` : '.'}`,
+                preview: false,
+              }
+            : {}),
         });
         if (delivery?.turnId) {
           this.followCompletion(entry, delivery.turnId);
@@ -1372,21 +1469,27 @@ export class SessionController {
         )
           void this.refresh(entry.state.id, Boolean(outcome)).then(() => this.release(entry));
         else this.release(entry);
-      } else if ('stream' in submission.body && submission.body.stream) {
-        return await this.startStreamingTurn(entry, submission);
       } else {
-        const result = await this.api.mutate<Schema['TurnResponse']>(
+        // A detached turn is answered at admission with its record. The attending feed renders
+        // the turn and reports its outcome, and the turn runs on if this tab goes.
+        const turn = await this.api.mutate<Schema['TurnRecord']>(
           'POST',
           sessionPath(entry.state.id) + '/turn',
           submission.body,
           submission.key,
         );
+        if (typeof turn?.id !== 'string' || !turn.id)
+          throw new UncertainMutationError(
+            new Error('The turn response did not identify its turn.'),
+          );
         const current = this.entries.get(entry.state.id);
         if (this.disposed || !current) return false;
         entry = current;
-        update({ state: 'completed', turnId: result.turn_id });
-        entry.followed = false;
-        await this.refresh(entry.state.id, true);
+        // The feed may announce the turn, and even end it, before this response arrives.
+        const outcome = entry.outcomes.get(turn.id);
+        update({ turnId: turn.id, state: outcome ?? 'running' });
+        this.notifyCompletion(entry, turn.id, outcome);
+        if (outcome) void this.refresh(entry.state.id, entry.state.turnId === turn.id);
       }
       this.invalidated(entry.state.id);
       return true;
@@ -1420,116 +1523,85 @@ export class SessionController {
       return false;
     }
   }
-  private async startStreamingTurn(entry: Entry, submission: Submission): Promise<boolean> {
-    // Streaming turns do not honor idempotency keys. This request is never automatically retried.
-    const response = await this.api.response('POST', sessionPath(entry.state.id) + '/turn', {
-      body: submission.body,
-      accept: 'text/event-stream',
-      signal: this.lifetime.signal,
-    });
-    let admitted = false;
-    let turnId: string | undefined;
-    let accept!: (value: boolean) => void;
-    let refuse!: (error: unknown) => void;
-    const admission = new Promise<boolean>((resolve, reject) => {
-      accept = resolve;
-      refuse = reject;
-    });
+  /** Settles this tab's turns whose terminal never reached it, by the records meka keeps. */
+  private async settleTurns(entry: Entry) {
     const id = entry.state.id;
-    const update = (current: Entry, patch: Partial<Submission>) => {
-      this.publish(current, {
-        submissions: current.state.submissions.map((item) =>
-          item.key === submission.key ? { ...item, ...patch } : item,
-        ),
-      });
-    };
-    // The session feed alone renders content and approvals. The POST stream owns admission and
-    // this submission's outcome, so simultaneous copies cannot duplicate text or tool results.
-    void readTurnStream(response, this.lifetime.signal, (frame, data) => {
-      const current = this.entries.get(id);
-      if (this.disposed || !current) return;
-      if (data.session_id && data.session_id !== id)
-        throw new Error('The turn stream named another session.');
-      const eventTurn = string(data, 'turn_id');
-      if (turnId && eventTurn && eventTurn !== turnId)
-        throw new Error('The turn stream changed its turn ID.');
-      const terminal = ['turn.finished', 'turn.failed', 'turn.canceled'].includes(frame.event);
-      if (!admitted) {
-        if (frame.event !== 'turn.started' && !terminal) return;
-        if (!eventTurn) throw new Error('The turn stream did not identify its turn.');
-        turnId = eventTurn;
-        admitted = true;
-        const outcome = current.outcomes.get(turnId);
-        update(current, { turnId, state: outcome ?? 'running' });
-        this.notifyCompletion(current, turnId, outcome);
-        accept(true);
-        this.invalidated(id);
-        if (outcome) void this.refresh(id, current.state.turnId === turnId);
-      }
-      if (
-        [
-          'assistant_text.delta',
-          'thinking.delta',
-          'tool_call.composing',
-          'tool_call.executing',
-        ].includes(frame.event)
-      )
-        this.markTurnProgress(current, eventTurn);
-      if (terminal && turnId) {
-        this.finishTurn(current, frame.event, data);
-      }
-    })
-      .then((terminal) => {
-        if (!admitted) refuse(new UncertainMutationError());
-        // A dropped POST after admission does not cancel accepted work. Keep following the feed.
-        else if (!terminal && turnId) void this.recoverStreamingTurn(id, submission.key, turnId);
-      })
-      .catch((error: unknown) => {
-        if (!admitted) refuse(new UncertainMutationError(error));
-        else if (turnId) void this.recoverStreamingTurn(id, submission.key, turnId);
-      });
-    return admission;
+    const turns = entry.state.submissions.flatMap((submission) =>
+      submission.state === 'running' &&
+      submission.turnId &&
+      !entry.outcomes.has(submission.turnId) &&
+      !this.settling.has(submission.turnId)
+        ? [submission.turnId]
+        : [],
+    );
+    await Promise.all(
+      turns.map(async (turnId) => {
+        this.settling.add(turnId);
+        try {
+          const read = () =>
+            this.api.get<Schema['TurnRecord']>(
+              sessionPath(id) + '/turns/' + segment(turnId),
+              undefined,
+              this.lifetime.signal,
+            );
+          let turn = await read();
+          if (!turn.ended_at) {
+            // No ending yet: running, unless the session runs nothing, when it either ended
+            // between these reads, which a second read shows, or died with its process.
+            const session = await this.api.get<Schema['SessionResponse']>(
+              sessionPath(id),
+              undefined,
+              this.lifetime.signal,
+            );
+            if (session.turn_in_flight) return;
+            turn = await read();
+          }
+          const current = this.entries.get(id);
+          if (this.disposed || !current || current.outcomes.has(turnId)) return;
+          if (turn.ended_at && turn.status) {
+            this.finishTurn(
+              current,
+              turn.status === 'succeeded'
+                ? 'turn.finished'
+                : turn.status === 'failed'
+                  ? 'turn.failed'
+                  : 'turn.canceled',
+              {
+                turn_id: turnId,
+                ...(turn.error ? { error: turn.error } : {}),
+                ...(turn.reason ? { reason: turn.reason } : {}),
+              },
+            );
+            return;
+          }
+          this.unconfirmed(current, turnId);
+        } catch (error) {
+          const current = this.entries.get(id);
+          if (!this.disposed && current && error instanceof ApiError && error.status === 404)
+            this.unconfirmed(current, turnId);
+          // Anything else is tried again at the next refresh.
+        } finally {
+          this.settling.delete(turnId);
+        }
+      }),
+    );
   }
-  private async recoverStreamingTurn(id: string, key: string, turnId: string) {
-    const entry = this.entries.get(id);
-    if (this.disposed || !entry || entry.outcomes.has(turnId)) return;
-    try {
-      const session = await this.api.get<Schema['SessionResponse']>(
-        sessionPath(id),
-        undefined,
-        this.lifetime.signal,
-      );
-      const current = this.entries.get(id);
-      if (this.disposed || !current || current.outcomes.has(turnId)) return;
-      if (!session.turn_in_flight) {
-        this.publish(current, {
-          submissions: current.state.submissions.map((submission) =>
-            submission.key === key && submission.state === 'running'
-              ? {
-                  ...submission,
-                  state: 'uncertain',
-                  error:
-                    'The turn started, but its final status could not be confirmed. Review the saved conversation before sending again.',
-                }
-              : submission,
-          ),
-        });
-        await this.refresh(id, current.state.turnId === turnId);
-      } else if (current.state.feed === 'unavailable') {
-        await this.reconnect(id);
-      }
-    } catch (error) {
-      const current = this.entries.get(id);
-      if (!this.disposed && current && current.state.feed !== 'connected')
-        this.publish(current, { error: asError(error), partial: true });
-      // A healthy session feed remains authoritative if this supplementary read also fails.
-    }
+  private unconfirmed(entry: Entry, turnId: string) {
+    this.publish(entry, {
+      submissions: entry.state.submissions.map((submission) =>
+        submission.turnId === turnId && submission.state === 'running'
+          ? {
+              ...submission,
+              state: 'uncertain',
+              error:
+                'The turn started, but its final status could not be confirmed. Review the saved conversation before sending again.',
+            }
+          : submission,
+      ),
+    });
+    void this.refresh(entry.state.id, entry.state.turnId === turnId);
   }
   private markTurnProgress(entry: Entry, turnId: string) {
-    if (turnId === entry.state.turnId && entry.opening) {
-      entry.opening.progressed = true;
-      this.syncTurnInput(entry);
-    }
     if (
       !entry.state.submissions.some(
         (submission) =>
@@ -1546,104 +1618,37 @@ export class SessionController {
           : submission,
       ),
     });
-    // turn.started precedes the eager user-message save. The first provider event
-    // gives both the list and header another read after that title can be derived.
-    this.invalidated(entry.state.id);
+    // A refresh put off while this turn was being admitted can read the saved input now.
+    if (entry.snapshotDeferred) void this.refresh(entry.state.id);
   }
-  private syncTurnInput(entry: Entry) {
-    if (this.disposed || entry.abort.signal.aborted || this.entries.get(entry.state.id) !== entry)
-      return;
-    const opening = entry.opening;
-    const saved = entry.state.saved;
-    if (
-      !opening?.progressed ||
-      !saved ||
-      entry.state.loading ||
-      entry.state.submissions.some((submission) => submission.preview)
-    )
-      return;
-    if (opening.saved !== saved) {
-      // An idle refresh or earlier-page read may finish after turn admission. The same
-      // revision and end position still identify the prefix, without comparing text.
-      if (
-        opening.saved.revision !== saved.revision ||
-        opening.offset + opening.saved.messages.length !==
-          entry.state.offset + saved.messages.length
-      ) {
-        delete entry.opening;
-        return;
-      }
-      opening.saved = saved;
-      opening.offset = entry.state.offset;
-      opening.requested = false;
-    }
-    if (opening.requested) return;
-    opening.requested = true;
-    void this.refreshTurnInput(entry, opening);
-    this.invalidated(entry.state.id);
-  }
-  private async refreshTurnInput(entry: Entry, opening: NonNullable<Entry['opening']>) {
-    const request = entry.snapshotEpoch;
-    const current = () =>
-      !this.disposed &&
-      !entry.abort.signal.aborted &&
-      this.entries.get(entry.state.id) === entry &&
-      entry.opening === opening &&
-      entry.snapshotEpoch === request &&
-      entry.state.saved === opening.saved &&
-      !entry.state.submissions.some((submission) => submission.preview);
-    const messages: Schema['MessageView'][] = [];
-    let offset = opening.offset + opening.saved.messages.length;
-    try {
-      // The feed has no user-message payload. After the first provider event, fetch the
-      // appended input by position and revision, stopping before this turn's saved output.
-      // Copying the whole snapshot would duplicate the response already being streamed.
-      while (current()) {
-        const page = await this.api.get<Schema['MessagesResponse']>(
-          sessionPath(entry.state.id) + '/messages',
-          { offset, limit: 100 },
-          entry.abort.signal,
-        );
-        if (!current() || page.revision !== opening.saved.revision || !page.messages.length) return;
-        // Tool results also use the user role. A turn opens with someone's words or images, typed
-        // or sent through the inbox, or with meka's context ahead of a scheduled fire or a report.
-        const input = page.messages.findIndex(
-          (message) =>
-            message.role === 'user' &&
-            message.content.some((block) =>
-              ['text', 'inbox', 'image', 'turn_context', 'scheduled'].includes(block.type),
-            ),
-        );
-        messages.push(...(input < 0 ? page.messages : page.messages.slice(0, input + 1)));
-        if (input >= 0) {
-          this.publish(entry, {
-            saved: {
-              ...page,
-              messages: [...opening.saved.messages, ...messages],
-            },
-          });
-          return;
-        }
-        offset += page.messages.length;
-        if (offset >= page.total) return;
-      }
-    } catch (error) {
-      if (current()) this.publish(entry, { error: asError(error) });
-    }
-  }
-  async retryInbox(id: string, key: string) {
+  /**
+   * Sends an uncertain submission again under its key, for which meka answers with what the first
+   * request did. It holds a turn's key in memory for a day, so a turn known to have started is not
+   * sent again: a restart that lost the key would run it twice.
+   */
+  async retrySubmission(id: string, key: string) {
     const entry = await this.ensure(id);
     const submission = entry?.state.submissions.find((s) => s.key === key);
-    if (!entry || !submission || submission.kind !== 'inbox')
-      throw new Error('Only inbox submissions can be safely retried after an unknown outcome.');
+    if (
+      !entry ||
+      !submission ||
+      (submission.kind === 'turn' && !('detach' in submission.body && submission.body.detach))
+    )
+      throw new Error('Only queued messages and detached turns can be safely retried.');
     if (submission.state !== 'uncertain')
       throw new Error('Only uncertain submissions can be retried.');
+    if (submission.turnId)
+      throw new Error('This turn started. Review the saved conversation before sending it again.');
     if (!this.canWrite || entry.state.feed !== 'connected')
       throw new Error('An attending feed with sessions:w is required before retrying.');
     if (entry.state.settingsPending || entry.state.deleting || this.deletions.has(id))
       throw new Error('Wait for the pending session change before retrying.');
     entry.followed = true;
-    return this.send(entry, submission);
+    const sent = await this.send(entry, submission);
+    // A replayed key names the turn the first request started, which may have ended unseen.
+    const current = this.entries.get(id);
+    if (sent && submission.kind === 'turn' && current) void this.settleTurns(current);
+    return sent;
   }
   async withdrawInbox(id: string, itemId: string) {
     if (this.disposed || !this.canWrite)
@@ -1830,8 +1835,8 @@ export class SessionController {
     void this.ensure(id).catch(() => {});
   }
   /**
-   * Leaves the selection for another connection. Feeds stay open only for work in flight, since
-   * meka stops a streaming turn nobody reads; a sub-agent's feed is read only, so it goes too.
+   * Leaves the selection for another connection. Feeds stay open only for work in flight, so
+   * this tab still follows it; a sub-agent's feed is read only, so it goes too.
    */
   park() {
     this.select(undefined);
