@@ -321,6 +321,12 @@ export class SessionController {
       return notices;
     return [...notices, { ...notice, id: createId() }].slice(-20);
   }
+  /** What was said before a newer turn, kept so a replay of it is still known, but put away. */
+  private pastNotices(entry: Entry) {
+    return entry.state.notices.map((notice) =>
+      notice.superseded ? notice : { ...notice, superseded: true },
+    );
+  }
   select(id: string | undefined) {
     this.selected = id;
     for (const [key, entry] of this.entries) {
@@ -610,6 +616,7 @@ export class SessionController {
           running: true,
           compacting,
           textStreaming: false,
+          notices: this.pastNotices(entry),
           partial: data.resumed === true || !entry.state.saved || entry.state.loading,
           blocks: entry.state.submissions
             .filter((submission) => submission.preview)
@@ -641,6 +648,7 @@ export class SessionController {
         turnId,
         running: true,
         compacting: false,
+        notices: this.pastNotices(entry),
         partial: true,
         blocks: entry.state.blocks.filter((block) => block.kind === 'submission'),
         tools: {},

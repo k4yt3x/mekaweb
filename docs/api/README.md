@@ -1,6 +1,6 @@
 # API schema maintenance
 
-`meka-0.80.0.json` was captured from meka `0.80.0`, commit `56a9437c4e42e9e8405319a5aeb2958cffad4106`, through `/v1/openapi.json` with `[serve].docs = true`. The generated REST types are committed in `src/api/schema.d.ts`; runtime connections do not require schema access.
+`meka-0.82.0.json` was captured from meka `0.82.0`, commit `73004204ab968863ee5feb2e52b734a80ddc96af`, through `/v1/openapi.json` with `[serve].docs = true`. The generated REST types are committed in `src/api/schema.d.ts`; runtime connections do not require schema access.
 
 mekaweb requires meka 0.78.0 or newer and refuses older servers during connection discovery. Compared with 0.68.0, the 0.70.0 and 0.71.0 APIs change these shapes the client used:
 
@@ -41,7 +41,7 @@ mekaweb requires meka 0.78.0 or newer and refuses older servers during connectio
 - A blocking `POST /turn` lists the turn's opening message first; the client does not use blocking turns.
 - The export archive is format 14.
 
-0.79.0 adds `protocol_version` to a connected server in `GET /v1/mcp`, which the client shows, and exports archive format 15. 0.80.0 changes no API.
+0.79.0 adds `protocol_version` to a connected server in `GET /v1/mcp`, which the client shows, and exports archive format 15. 0.80.0 and 0.81.0 change no API; 0.81.0 moves two configuration keys the client never reads. 0.82.0 removes the Swagger UI at `/v1/docs`, which now answers 404, so Settings links to meka's online HTTP API reference; its schema differs from 0.80.0's only in its version.
 
 0.70.0 also adds turn records, the `/v1/stream` server feed, conditional rewind and fork through `ETag` and `If-Match`, `conversation.rewound`, `permission_resolved`, `approvals_pending`, the `parent` list filter, and the session's open `checklist` with `checklist.updated`. The client shows the open checklist above the message input. Notices are ephemeral: a running turn's show inline where they arrived, warnings and errors also stay below the conversation, and none survives a reload. The session feed parser ignores events it does not handle.
 
@@ -49,11 +49,11 @@ A shell command may print 64 MiB, all of which `tool_call.completed` carries, wh
 
 The feed's 409 covers `session-not-loaded`: a token with only `sessions:r` does not load a session by attaching. The client then shows the saved conversation and retries the feed until the server loads the session. `POST /compact` runs as a turn on the feed, with `source: "compaction"` on `turn.started`; the client shows it as compacting and does not notify when it ends.
 
-Schema capture is a manual maintenance step. Choose a disposable meka instance with `[serve].docs = true`, confirm its version, and download its schema. For a 0.80.0 instance listening on port 8081:
+Schema capture is a manual maintenance step. Choose a disposable meka instance with `[serve].docs = true`, confirm its version, and download its schema. For a 0.82.0 instance listening on port 8081:
 
 ```sh
-curl --fail --silent --show-error http://127.0.0.1:8081/v1/openapi.json --output docs/api/meka-0.80.0.json
-npx prettier --write docs/api/meka-0.80.0.json
+curl --fail --silent --show-error http://127.0.0.1:8081/v1/openapi.json --output docs/api/meka-0.82.0.json
+npx prettier --write docs/api/meka-0.82.0.json
 npm run api:generate
 ```
 

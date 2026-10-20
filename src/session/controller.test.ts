@@ -1926,6 +1926,38 @@ it('does not duplicate a replayed terminal error and bounds retained notices', a
   expect(f.state().notices.at(-1)?.text).toBe('Warning 24');
 });
 
+it('puts notices away once a newer turn starts, still knowing their replays', async () => {
+  const f = await fixture();
+  const shown = () =>
+    f
+      .state()
+      .notices.filter((notice) => !notice.superseded)
+      .map((notice) => notice.text);
+  await f.event('turn.started', { turn_id: 'turn' });
+  await f.event('notice', { turn_id: 'turn', level: 'warn', text: 'Provider advisory' });
+  await f.event('turn.failed', { turn_id: 'turn', error: { detail: 'Provider failed' } });
+  await f.event('inbox.failed', { item_id: 'item', reason: 'retried for an hour' });
+  expect(shown()).toEqual([
+    'Provider advisory',
+    'Provider failed',
+    'meka gave up on a queued message: retried for an hour',
+  ]);
+  await f.event('turn.started', { turn_id: 'next' });
+  expect(shown()).toEqual([]);
+  expect(f.state().notices).toHaveLength(3);
+  // The newer turn's own notices show until the one after it.
+  await f.event('notice', { turn_id: 'next', level: 'warn', text: 'Fallback profile' });
+  expect(shown()).toEqual(['Fallback profile']);
+  // A replayed give-up is the one already reported, not news again.
+  await f.event('inbox.failed', { item_id: 'item', reason: 'retried for an hour' }, true);
+  expect(shown()).toEqual(['Fallback profile']);
+  await f.event('turn.finished', { turn_id: 'next' });
+  // A replay that starts in the middle of a newer turn moves past them as well.
+  await f.event('assistant_text.delta', { turn_id: 'later', text: 'Hello' });
+  expect(f.state().turnId).toBe('later');
+  expect(shown()).toEqual([]);
+});
+
 it('labels resumed previews as partial and keeps saved state separate', async () => {
   const f = await fixture();
   await f.event('turn.started', { turn_id: 'joined', resumed: true }, true);

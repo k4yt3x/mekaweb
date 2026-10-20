@@ -494,17 +494,15 @@ export function SettingsPage() {
           >
             Download OpenAPI
           </Button>
-          {state.api && (
-            <a
-              className="button button-secondary"
-              href={state.api.url('/v1/docs')}
-              title="Requires API documentation to be enabled on the server"
-              target="_blank"
-              rel="noreferrer noopener"
-            >
-              API documentation ↗
-            </a>
-          )}
+          {/* meka 0.82.0 serves no API browser; its book documents the API instead. */}
+          <a
+            className="button button-secondary"
+            href="https://docs.meka.run/usage/http-api.html"
+            target="_blank"
+            rel="noreferrer noopener"
+          >
+            API reference ↗
+          </a>
         </div>
         <ErrorNotice error={action.error} />
         <div className="panel-footer">

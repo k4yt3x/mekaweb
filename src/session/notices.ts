@@ -8,6 +8,8 @@ export interface SessionNotice {
   turnId?: string;
   /** The queued message a notice is about. */
   itemId?: string;
+  /** A later turn started, so the notice no longer says where the conversation stands. */
+  superseded?: boolean;
 }
 
 /** What a Problem Detail says happened, in its own words: the detail, else its title. */

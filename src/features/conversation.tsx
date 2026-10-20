@@ -134,6 +134,8 @@ export function Conversation({ state }: { state: SessionState }) {
       ? undefined
       : activity;
   const problems = recoverableSubmissions(state.submissions, state.notices);
+  // A newer turn puts away what was said before it; the conversation has moved past it.
+  const notices = state.notices.filter((notice) => !notice.superseded);
   // A give-up reported below keeps its words on the message without saying why twice.
   const reported = new Set(
     state.notices.flatMap((notice) =>
@@ -407,7 +409,7 @@ export function Conversation({ state }: { state: SessionState }) {
               {state.saved?.messages.length === 0 &&
                 !live.length &&
                 !waiting &&
-                !state.notices.length &&
+                !notices.length &&
                 !recovered.length &&
                 !queued.length && <Empty title="Send a message to begin" />}
               {messages.map((group, position) => (
@@ -495,7 +497,7 @@ export function Conversation({ state }: { state: SessionState }) {
                   />
                 ),
               )}
-              {state.notices.map((notice) => (
+              {notices.map((notice) => (
                 <NoticeMessage key={notice.id} notice={notice} />
               ))}
               {state.feed === 'unloaded' && (

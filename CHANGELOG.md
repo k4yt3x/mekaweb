@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-10-20
+
+### Changed
+
+- Recognize meka 0.82.0 as a verified server version.
+- Settings links to meka's online HTTP API reference, since meka 0.82.0 removed its Swagger UI.
+
+### Fixed
+
+- Errors and warnings below the conversation clear once the next turn starts, not only on reload.
+
 ## [0.21.0] - 2026-10-18
 
 ### Changed
@@ -397,7 +408,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Light and dark themes, narrow layouts, and collapsible, resizable session panels.
 - Hosting at the root or a subpath, with GitHub Pages deployment on version tags.
 
-[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.21.0...HEAD
+[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.22.0...HEAD
+[0.22.0]: https://github.com/k4yt3x/mekaweb/compare/0.21.0...0.22.0
 [0.21.0]: https://github.com/k4yt3x/mekaweb/compare/0.20.0...0.21.0
 [0.20.0]: https://github.com/k4yt3x/mekaweb/compare/0.19.1...0.20.0
 [0.19.1]: https://github.com/k4yt3x/mekaweb/compare/0.19.0...0.19.1

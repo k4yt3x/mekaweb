@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
 import { supportsVersion } from './version';
 
-it.each(['0.78.0', '0.78.1', '0.80.0', '0.100.0', '1.0.0', '0.78.0+build.1'])(
+it.each(['0.78.0', '0.78.1', '0.82.0', '0.100.0', '1.0.0', '0.78.0+build.1'])(
   'connects to meka %s',
   (version) => expect(supportsVersion(version)).toBe(true),
 );
