@@ -22,6 +22,7 @@ import { Dialog } from './components/ui/dialog';
 import { ErrorNotice, Json, Loading } from './components/common';
 import { NavigationToggle } from './components/layout';
 import { ConnectionBanner } from './components/connection-banner';
+import { DeprecationBanner } from './components/deprecation-banner';
 import { ConnectionSwitcher } from './components/connection-switcher';
 import { trackFocusInput } from './components/focus-input';
 import { NotificationToasts } from './notifications/toasts';
@@ -36,6 +37,7 @@ export function App({ runtime }: { runtime: ConnectionRuntime }) {
   useEffect(() => runtime.start(), [runtime]);
   return (
     <RuntimeContext.Provider value={runtime}>
+      <DeprecationBanner />
       <Shell />
       <NotificationToasts />
     </RuntimeContext.Provider>

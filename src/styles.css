@@ -29,7 +29,9 @@
   --safe-right: env(safe-area-inset-right, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-left: env(safe-area-inset-left, 0px);
-  --app-top: calc(var(--safe-top) + var(--connection-banner-height, 0px));
+  --app-top: calc(
+    var(--safe-top) + var(--deprecation-banner-height, 0px) + var(--connection-banner-height, 0px)
+  );
   --app-height: calc(var(--viewport-height) - var(--app-top) - var(--safe-bottom));
   --app-width: calc(100vw - var(--safe-left) - var(--safe-right));
   --danger: #b42332;
@@ -346,9 +348,42 @@ progress {
   min-height: 0;
   overflow: hidden;
 }
-.connection-banner {
+.deprecation-banner {
   position: fixed;
   inset: var(--safe-top) var(--safe-right) auto var(--safe-left);
+  z-index: 120;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 6px 12px;
+  background: var(--raised);
+  border-bottom: 1px solid var(--warning);
+  color: var(--text);
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+.deprecation-banner > svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: var(--warning);
+}
+.deprecation-banner > p {
+  flex: 1;
+  margin: 0;
+}
+/* Centered on the first line without making a one-line banner taller. */
+.deprecation-banner > .button {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  min-height: 26px;
+  padding: 4px;
+  margin: -4px -6px -4px 0;
+}
+.connection-banner {
+  position: fixed;
+  inset: calc(var(--safe-top) + var(--deprecation-banner-height, 0px)) var(--safe-right) auto
+    var(--safe-left);
   z-index: 120;
   pointer-events: auto;
   display: flex;
@@ -738,7 +773,7 @@ nav a.active {
   flex-direction: column;
   justify-content: center;
   max-width: 500px;
-  padding: calc(var(--welcome-block-padding) + var(--safe-top))
+  padding: calc(var(--welcome-block-padding) + var(--app-top))
     calc(var(--welcome-inline-padding) + var(--safe-right))
     calc(var(--welcome-block-padding) + var(--safe-bottom))
     calc(var(--welcome-inline-padding) + var(--safe-left));
