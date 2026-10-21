@@ -108,6 +108,29 @@ it('replaces an oversized tool completion with a note, keeping its call, id and 
   }
 });
 
+it('keeps a short result whose change makes the completion oversized', () => {
+  // meka 0.83 follows content with the whole text a call changed, before and after.
+  const text = 'line "quoted" \\ ]}\n'.repeat(80_000);
+  const result = [{ type: 'text', text: 'Edited lockfile.json: replaced 1 occurrence ]}' }];
+  const payload = JSON.stringify({
+    id: 'toolu_2',
+    is_error: false,
+    content: result,
+    change: { path: 'lockfile.json', old: text, new: text + 'more' },
+    turn_id: 'turn-2',
+  });
+  const frames: SseFrame[] = [];
+  const parser = new SseParser((frame) => frames.push(frame));
+  parser.push(`id: 4\nevent: tool_call.completed\ndata: ${payload}\n\n`);
+  expect(payload.length).toBeGreaterThan(2_000_000);
+  expect(parseEvent(frames[0]!)).toEqual({
+    id: 'toolu_2',
+    is_error: false,
+    content: result,
+    turn_id: 'turn-2',
+  });
+});
+
 it('turns other oversized events into a notice that keeps the stream going', () => {
   const frames: SseFrame[] = [];
   const parser = new SseParser((frame) => frames.push(frame));

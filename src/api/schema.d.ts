@@ -1360,6 +1360,10 @@ export interface components {
        */
       created_at: string;
       description: string;
+      /** @description RFC 3339, when the memory stops applying, present when an expiry was set. */
+      expires_at?: string | null;
+      /** @description How the memory reaches the agent's context: `inline`, `index` or `search`. */
+      load: string;
       name: string;
       /**
        * Format: int32
@@ -1373,8 +1377,14 @@ export interface components {
        *     ranking; an operator reading the memory does not move it.
        */
       read_count: number;
+      /** @description The memories whose references name this one, present on the single-memory surfaces. */
+      referenced_by?: string[] | null;
+      /** @description What the memory depends on: memory names, paths, URLs, external ids. */
+      references: string[];
       /** @description The line the words of a search were found on, present only on an entry a search found. */
       snippet?: string | null;
+      /** @description Where the fact came from; empty when not recorded. */
+      source: string;
       /** @description Lowercase labels for grouping and filtering. */
       tags: string[];
       /**
@@ -1382,6 +1392,11 @@ export interface components {
        *     `created_at` for when the note was made.
        */
       updated_at: string;
+      /**
+       * @description RFC 3339, when the fact was last verified: the creation, until an explicit verification
+       *     moves it. Search freshness decays from here.
+       */
+      verified_at: string;
     };
     MemoryListResponse: {
       memories: components['schemas']['MemoryDetail'][];
@@ -2018,15 +2033,34 @@ export interface components {
       /** @description One line saying what this memory is for. */
       description: string;
       /**
+       * @description When the memory stops applying: RFC 3339, or `YYYY-MM-DD` for the whole of that day.
+       *     Omit to keep; send `""` to clear.
+       */
+      expires?: string | null;
+      /**
+       * @description How the memory reaches the agent's context: `inline`, `index` or `search`. Omit to keep;
+       *     defaults to `index` on creation.
+       */
+      load?: string | null;
+      /**
        * Format: int32
        * @description 0..=9, lower first. Omit to keep an existing memory's priority; defaults to 5 on creation.
        */
       priority?: number | null;
       /**
+       * @description What the memory depends on: memory names, paths, URLs or ids, one line each, at most 20.
+       *     Omit to keep; send `[]` to clear.
+       */
+      references?: string[] | null;
+      /** @description Where the fact came from, one line. Omit to keep; send `""` to clear. */
+      source?: string | null;
+      /**
        * @description Lowercase labels (`[a-z0-9-]`, at most 10). Omit to keep an existing memory's tags; send
        *     `[]` to clear them.
        */
       tags?: string[] | null;
+      /** @description `true` when this write verifies the fact is current, which moves `verified_at`. */
+      verified?: boolean | null;
     };
     WriteSkillRequest: {
       /**
@@ -2427,6 +2461,15 @@ export interface operations {
          *     `q`.
          */
         limit?: number | null;
+        /**
+         * @description Only memories whose references name this: a memory name, path, URL or id, matched whole
+         *     and without regard to case.
+         */
+        referencing?: string | null;
+        /** @description Only memories not verified within this long, e.g. `90d`. */
+        unverified?: string | null;
+        /** @description Only memories whose expiry has passed. */
+        expired?: boolean | null;
       };
       header?: never;
       path?: never;

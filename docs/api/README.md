@@ -1,6 +1,6 @@
 # API schema maintenance
 
-`meka-0.82.0.json` was captured from meka `0.82.0`, commit `73004204ab968863ee5feb2e52b734a80ddc96af`, through `/v1/openapi.json` with `[serve].docs = true`. The generated REST types are committed in `src/api/schema.d.ts`; runtime connections do not require schema access.
+`meka-0.83.0.json` was captured from meka `0.83.0`, commit `5c02b582961d2f39a9cbfe0a8605037d6370d7c9`, through `/v1/openapi.json` with `[serve].docs = true`. The generated REST types are committed in `src/api/schema.d.ts`; runtime connections do not require schema access.
 
 mekaweb requires meka 0.78.0 or newer and refuses older servers during connection discovery. Compared with 0.68.0, the 0.70.0 and 0.71.0 APIs change these shapes the client used:
 
@@ -43,17 +43,24 @@ mekaweb requires meka 0.78.0 or newer and refuses older servers during connectio
 
 0.79.0 adds `protocol_version` to a connected server in `GET /v1/mcp`, which the client shows, and exports archive format 15. 0.80.0 and 0.81.0 change no API; 0.81.0 moves two configuration keys the client never reads. 0.82.0 removes the Swagger UI at `/v1/docs`, which now answers 404, so Settings links to meka's online HTTP API reference; its schema differs from 0.80.0's only in its version.
 
+0.83.0 changes these:
+
+- A memory's `load`, `inline`, `index`, or `search`, decides how it reaches the agent's context, which priority 0 used to decide; priority is importance alone, and a priority-0 memory becomes `inline` on upgrade. A memory also carries `source`, `references`, `verified_at`, and `expires_at`, and its single read `referenced_by`. A write takes `load`, `source`, `references`, `expires`, and `verified`, each kept when omitted. The memory editor sets them and sends only what changed: meka stores a date's expiry as the moment that day ends, so sending it back unchanged would move it a day.
+- `GET /v1/memory` lists every memory, search-only and expired ones included, and takes `referencing`, `unverified`, and `expired`. The memory page asks which have expired, so it marks them by meka's clock.
+- `memory_edit` and `skill_edit` replace an exact string in a body, and are labeled by `name`.
+- `tool_call.completed` carries `change`: the whole text a file, memory, or skill change left before and after. It is live only, and saved history replaces the live turn when it ends, so the client does not draw it. A large file's change can carry a completion past the parser's limit with a short result, which the parser keeps when it closes within the frame's kept head.
+
 0.70.0 also adds turn records, the `/v1/stream` server feed, conditional rewind and fork through `ETag` and `If-Match`, `conversation.rewound`, `permission_resolved`, `approvals_pending`, the `parent` list filter, and the session's open `checklist` with `checklist.updated`. The client shows the open checklist above the message input. Notices are ephemeral: a running turn's show inline where they arrived, warnings and errors also stay below the conversation, and none survives a reload. The session feed parser ignores events it does not handle.
 
 A shell command may print 64 MiB, all of which `tool_call.completed` carries, while the saved result stays a bounded preview. The SSE parser therefore skips data past 2,000,000 characters and keeps the frame's id, so a reconnect cannot replay it. A skipped tool completion keeps its call, outcome, and correlation from the ends of its JSON, and other skipped events become a notice.
 
 The feed's 409 covers `session-not-loaded`: a token with only `sessions:r` does not load a session by attaching. The client then shows the saved conversation and retries the feed until the server loads the session. `POST /compact` runs as a turn on the feed, with `source: "compaction"` on `turn.started`; the client shows it as compacting and does not notify when it ends.
 
-Schema capture is a manual maintenance step. Choose a disposable meka instance with `[serve].docs = true`, confirm its version, and download its schema. For a 0.82.0 instance listening on port 8081:
+Schema capture is a manual maintenance step. Choose a disposable meka instance with `[serve].docs = true`, confirm its version, and download its schema. For a 0.83.0 instance listening on port 8081:
 
 ```sh
-curl --fail --silent --show-error http://127.0.0.1:8081/v1/openapi.json --output docs/api/meka-0.82.0.json
-npx prettier --write docs/api/meka-0.82.0.json
+curl --fail --silent --show-error http://127.0.0.1:8081/v1/openapi.json --output docs/api/meka-0.83.0.json
+npx prettier --write docs/api/meka-0.83.0.json
 npm run api:generate
 ```
 

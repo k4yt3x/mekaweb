@@ -4,7 +4,7 @@ import { toolIconKey, toolIcons } from './tool-icons';
 
 const icon = (name: string) => toolIcons[toolIconKey(name)];
 
-// meka 0.82.0: src/tools/registry.rs::BUILTIN_TOOL_NAMES, plus the checkpoint-only context_replace.
+// meka 0.83.0: src/tools/registry.rs::BUILTIN_TOOL_NAMES, plus the checkpoint-only context_replace.
 const builtins = [
   'agent_delete',
   'agent_followup',
@@ -33,6 +33,7 @@ const builtins = [
   'mcp_resource_unsubscribe',
   'mcp_resource_updates_list',
   'memory_delete',
+  'memory_edit',
   'memory_read',
   'memory_search',
   'memory_write',
@@ -52,6 +53,7 @@ const builtins = [
   'session_search',
   'shell_execute',
   'skill_delete',
+  'skill_edit',
   'skill_read',
   'skill_search',
   'skill_write',

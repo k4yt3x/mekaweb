@@ -4,7 +4,7 @@
 export const minimumVersion = '0.78.0';
 
 /** The versions this release was checked against. A newer one connects, flagged in Settings. */
-export const verifiedVersions = ['0.82.0'];
+export const verifiedVersions = ['0.83.0'];
 
 export function supportsVersion(version: string): boolean {
   const match = /^(\d+)\.(\d+)\.(\d+)(?:\+[\w.-]+)?$/.exec(version);

@@ -94,6 +94,27 @@ export class SseParser {
       this.retry(Number(value));
   }
 }
+/** The JSON array `text` opens with, when it closes within `text`. */
+function leadingArray(text: string): unknown[] | undefined {
+  let depth = 0;
+  let quoted = false;
+  for (let index = 0; index < text.length; index++) {
+    const char = text[index];
+    if (quoted) {
+      if (char === '\\') index++;
+      else if (char === '"') quoted = false;
+    } else if (char === '"') quoted = true;
+    else if (char === '[' || char === '{') depth++;
+    else if ((char === ']' || char === '}') && --depth === 0) {
+      try {
+        const value: unknown = JSON.parse(text.slice(0, index + 1));
+        return Array.isArray(value) ? value : undefined;
+      } catch {
+        return undefined;
+      }
+    }
+  }
+}
 /**
  * Stands in for a frame too large to hold. A tool completion keeps its call, outcome and
  * correlation, which meka writes before and after `content`; anything else becomes a notice, whose
@@ -125,13 +146,16 @@ export function recoverOversized(
     head,
   );
   const id = json(call?.[1]);
+  // Since meka 0.83, `change` follows `content` with a changed file's whole text before and after,
+  // so a large file's edit passes the limit with a short result the kept head holds whole.
+  const content = call && leadingArray(head.slice(call[0].length));
   if (event === 'tool_call.completed' && id)
     return {
       event,
       data: JSON.stringify({
         id,
         is_error: call?.[2] === 'true',
-        content: [
+        content: content || [
           {
             type: 'text',
             text: `This result is too large to show while the turn runs (${megabytes}). Once the turn ends, the conversation shows meka's saved preview.`,

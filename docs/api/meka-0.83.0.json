@@ -4,7 +4,7 @@
     "title": "meka HTTP API",
     "description": "Service-to-service API for driving meka agent turns programmatically. Mirrors the wire format described in the HTTP API docs. A field that has no value is omitted from every response and event, never sent as `null`.",
     "license": { "name": "AGPL-3.0-or-later" },
-    "version": "0.82.0"
+    "version": "0.83.0"
   },
   "paths": {
     "/v1/health/live": {
@@ -307,6 +307,27 @@
             "description": "How many a search answers with at most. Default 10, clamped to 1..25. Ignored without\n`q`.",
             "required": false,
             "schema": { "type": ["integer", "null"], "format": "int32", "minimum": 0 }
+          },
+          {
+            "name": "referencing",
+            "in": "query",
+            "description": "Only memories whose references name this: a memory name, path, URL or id, matched whole\nand without regard to case.",
+            "required": false,
+            "schema": { "type": ["string", "null"] }
+          },
+          {
+            "name": "unverified",
+            "in": "query",
+            "description": "Only memories not verified within this long, e.g. `90d`.",
+            "required": false,
+            "schema": { "type": ["string", "null"] }
+          },
+          {
+            "name": "expired",
+            "in": "query",
+            "description": "Only memories whose expiry has passed.",
+            "required": false,
+            "schema": { "type": ["boolean", "null"] }
           }
         ],
         "responses": {
@@ -3356,8 +3377,12 @@
           "name",
           "description",
           "priority",
+          "load",
           "updated_at",
           "created_at",
+          "verified_at",
+          "source",
+          "references",
           "tags",
           "read_count"
         ],
@@ -3371,6 +3396,14 @@
             "description": "RFC 3339, when the memory was created. Stamped once, at creation: the one the model is\nshown as an age, and the one ties are broken by."
           },
           "description": { "type": "string" },
+          "expires_at": {
+            "type": ["string", "null"],
+            "description": "RFC 3339, when the memory stops applying, present when an expiry was set."
+          },
+          "load": {
+            "type": "string",
+            "description": "How the memory reaches the agent's context: `inline`, `index` or `search`."
+          },
           "name": { "type": "string" },
           "priority": {
             "type": "integer",
@@ -3384,9 +3417,23 @@
             "description": "How many times the agent has recalled this memory through `memory_read`. Feeds search\nranking; an operator reading the memory does not move it.",
             "minimum": 0
           },
+          "referenced_by": {
+            "type": ["array", "null"],
+            "items": { "type": "string" },
+            "description": "The memories whose references name this one, present on the single-memory surfaces."
+          },
+          "references": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "What the memory depends on: memory names, paths, URLs, external ids."
+          },
           "snippet": {
             "type": ["string", "null"],
             "description": "The line the words of a search were found on, present only on an entry a search found."
+          },
+          "source": {
+            "type": "string",
+            "description": "Where the fact came from; empty when not recorded."
           },
           "tags": {
             "type": "array",
@@ -3396,6 +3443,10 @@
           "updated_at": {
             "type": "string",
             "description": "RFC 3339, when the row was last written, which a metadata-only edit moves; see\n`created_at` for when the note was made."
+          },
+          "verified_at": {
+            "type": "string",
+            "description": "RFC 3339, when the fact was last verified: the creation, until an explicit verification\nmoves it. Search freshness decays from here."
           }
         }
       },
@@ -4105,16 +4156,37 @@
             "type": "string",
             "description": "One line saying what this memory is for."
           },
+          "expires": {
+            "type": ["string", "null"],
+            "description": "When the memory stops applying: RFC 3339, or `YYYY-MM-DD` for the whole of that day.\nOmit to keep; send `\"\"` to clear."
+          },
+          "load": {
+            "type": ["string", "null"],
+            "description": "How the memory reaches the agent's context: `inline`, `index` or `search`. Omit to keep;\ndefaults to `index` on creation."
+          },
           "priority": {
             "type": ["integer", "null"],
             "format": "int32",
             "description": "0..=9, lower first. Omit to keep an existing memory's priority; defaults to 5 on creation.",
             "minimum": 0
           },
+          "references": {
+            "type": ["array", "null"],
+            "items": { "type": "string" },
+            "description": "What the memory depends on: memory names, paths, URLs or ids, one line each, at most 20.\nOmit to keep; send `[]` to clear."
+          },
+          "source": {
+            "type": ["string", "null"],
+            "description": "Where the fact came from, one line. Omit to keep; send `\"\"` to clear."
+          },
           "tags": {
             "type": ["array", "null"],
             "items": { "type": "string" },
             "description": "Lowercase labels (`[a-z0-9-]`, at most 10). Omit to keep an existing memory's tags; send\n`[]` to clear them."
+          },
+          "verified": {
+            "type": ["boolean", "null"],
+            "description": "`true` when this write verifies the fact is current, which moves `verified_at`."
           }
         },
         "additionalProperties": false

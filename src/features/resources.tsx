@@ -7,6 +7,7 @@ import { Button } from '../components/ui/button';
 import { Dialog } from '../components/ui/dialog';
 import { ConfirmButton, Empty, ErrorNotice, Field, Json, Loading } from '../components/common';
 import { Markdown } from '../components/markdown';
+import { SwitchField } from '../components/ui/switch';
 type Kind = 'memory' | 'skills';
 type Detail = Schema['MemoryDetail'] | Schema['SkillDetail'];
 export function ResourcesPage({ kind }: { kind: Kind }) {
@@ -19,6 +20,13 @@ export function ResourcesPage({ kind }: { kind: Kind }) {
     undefined,
     kind === 'memory' && canRead,
   );
+  // meka decides what has expired, by its own clock and time zone.
+  const expired = useResource<Schema['MemoryListResponse']>(
+    '/v1/memory',
+    { expired: true },
+    kind === 'memory' && canRead,
+  );
+  const expiredNames = new Set(expired.data?.memories.map((memory) => memory.name));
   const skills = useResource<Schema['SkillView'][]>('/v1/skills', undefined, kind === 'skills');
   const [filter, setFilter] = useState('');
   const [selected, setSelected] = useState<string>();
@@ -30,12 +38,22 @@ export function ResourcesPage({ kind }: { kind: Kind }) {
   );
   const list = kind === 'memory' ? memories.data?.memories : skills.data;
   const rows = list?.filter((item) =>
-    [item.name, item.description, ...('tags' in item ? item.tags : [])]
+    [
+      item.name,
+      item.description,
+      ...('tags' in item ? [...item.tags, item.source, ...item.references] : []),
+    ]
       .join(' ')
       .toLowerCase()
       .includes(filter.toLowerCase()),
   );
   const title = kind === 'memory' ? 'Memory' : 'Skills';
+  function open(name: string) {
+    runtime.queries.removeQueries({
+      queryKey: [connection?.id, connection?.authority, `/v1/${kind}/${segment(name)}`],
+    });
+    setSelected(name);
+  }
   return (
     <div className="page">
       <header className="page-heading">
@@ -67,22 +85,17 @@ export function ResourcesPage({ kind }: { kind: Kind }) {
           <button
             className="resource-card"
             key={item.name}
-            onClick={() => {
-              runtime.queries.removeQueries({
-                queryKey: [
-                  connection?.id,
-                  connection?.authority,
-                  `/v1/${kind}/${segment(item.name)}`,
-                ],
-              });
-              setSelected(item.name);
-            }}
+            onClick={() => open(item.name)}
             disabled={!canRead}
           >
             <h2>{item.name}</h2>
             <p>{item.description}</p>
             <div className="card-meta">
               <span>Priority {item.priority}</span>
+              {'load' in item && item.load !== 'index' && (
+                <span className="badge">{loads[item.load] ?? item.load}</span>
+              )}
+              {expiredNames.has(item.name) && <span className="badge">Expired</span>}
               {'tags' in item &&
                 item.tags.map((tag) => (
                   <span className="tag" key={tag}>
@@ -118,6 +131,7 @@ export function ResourcesPage({ kind }: { kind: Kind }) {
             kind={kind}
             initial={detail.data}
             canWrite={canWrite}
+            onOpen={open}
             onSaved={async () => {
               await runtime.queries.invalidateQueries();
               setSelected(undefined);
@@ -159,16 +173,32 @@ export function ResourcesPage({ kind }: { kind: Kind }) {
     </div>
   );
 }
+/** How a memory reaches the agent's context, by meka's `load`. */
+const loads: Readonly<Record<string, string>> = {
+  inline: 'Inline',
+  index: 'Index',
+  search: 'Search only',
+};
+/** The last day a memory applies, in this browser's time zone; meka stores when it stops. */
+function lastDay(expiresAt: string | null | undefined) {
+  if (!expiresAt) return '';
+  const day = new Date(Date.parse(expiresAt) - 1);
+  return [day.getFullYear(), day.getMonth() + 1, day.getDate()]
+    .map((part) => String(part).padStart(2, '0'))
+    .join('-');
+}
 function ResourceEditor({
   kind,
   initial,
   canWrite,
   onSaved,
+  onOpen,
 }: {
   kind: Kind;
   initial?: Detail;
   canWrite: boolean;
   onSaved: () => void | Promise<void>;
+  onOpen?: (name: string) => void;
 }) {
   const { api } = useConnection();
   const [name, setName] = useState(initial?.name ?? '');
@@ -179,6 +209,12 @@ function ResourceEditor({
   const [author, setAuthor] = useState(
     initial && 'author' in initial ? (initial.author ?? '') : '',
   );
+  const memory = initial && 'load' in initial ? initial : undefined;
+  const [load, setLoad] = useState(memory?.load ?? 'index');
+  const [expires, setExpires] = useState(() => lastDay(memory?.expires_at));
+  const [source, setSource] = useState(memory?.source ?? '');
+  const [references, setReferences] = useState(memory?.references.join('\n') ?? '');
+  const [verified, setVerified] = useState(false);
   const [preview, setPreview] = useState(false);
   const action = useAction();
   async function submit(event: FormEvent) {
@@ -201,9 +237,23 @@ function ResourceEditor({
         if (values.length > 10 || values.some((tag) => !/^[a-z0-9-]+$/.test(tag)))
           throw new Error('Use at most 10 lowercase tags containing letters, numbers, or hyphens.');
         const original = initial && 'tags' in initial ? initial.tags : [];
+        const cited = references
+          .split('\n')
+          .map((reference) => reference.trim())
+          .filter(Boolean);
+        if (cited.length > 20) throw new Error('Use at most 20 references, one per line.');
+        // Each is sent only when changed, so a save cannot move what it did not touch, such as
+        // an expiry meka stores as the moment after the day it was given.
         await api.mutate('PUT', `/v1/memory/${segment(name)}`, {
           ...base,
           ...(JSON.stringify(values) !== JSON.stringify(original) ? { tags: values } : {}),
+          ...(load !== (memory?.load ?? 'index') ? { load } : {}),
+          ...(expires !== lastDay(memory?.expires_at) ? { expires } : {}),
+          ...(source !== (memory?.source ?? '') ? { source } : {}),
+          ...(JSON.stringify(cited) !== JSON.stringify(memory?.references ?? [])
+            ? { references: cited }
+            : {}),
+          ...(verified ? { verified } : {}),
         } satisfies Schema['WriteMemoryRequest']);
       } else
         await api.mutate('PUT', `/v1/skills/${segment(name)}`, {
@@ -239,6 +289,24 @@ function ResourceEditor({
             />
           </Field>
         </div>
+        {kind === 'memory' && (
+          <div className="form-grid">
+            <Field label="Load">
+              <select value={load} onChange={(event) => setLoad(event.target.value)}>
+                <option value="index">Index: listed by description</option>
+                <option value="inline">Inline: whole body every turn</option>
+                <option value="search">Search only</option>
+              </select>
+            </Field>
+            <Field label="Expires" hint="The last day it applies, by the server's time zone.">
+              <input
+                type="date"
+                value={expires}
+                onChange={(event) => setExpires(event.target.value)}
+              />
+            </Field>
+          </div>
+        )}
         <Field label="Description">
           <input
             required
@@ -247,13 +315,37 @@ function ResourceEditor({
           />
         </Field>
         {kind === 'memory' ? (
-          <Field label="Tags">
-            <input
-              value={tags}
-              placeholder="project, preferences"
-              onChange={(event) => setTags(event.target.value)}
-            />
-          </Field>
+          <>
+            <Field label="Tags">
+              <input
+                value={tags}
+                placeholder="project, preferences"
+                onChange={(event) => setTags(event.target.value)}
+              />
+            </Field>
+            <Field label="Source">
+              <input
+                value={source}
+                placeholder="Where the fact came from"
+                onChange={(event) => setSource(event.target.value)}
+              />
+            </Field>
+            <Field label="References" hint="Memory names, paths, URLs, or IDs, one per line.">
+              <textarea
+                rows={2}
+                value={references}
+                onChange={(event) => setReferences(event.target.value)}
+                spellCheck={false}
+              />
+            </Field>
+            {memory && (
+              <SwitchField
+                label={`Mark as verified (last verified ${new Date(memory.verified_at).toLocaleDateString()})`}
+                checked={verified}
+                onCheckedChange={setVerified}
+              />
+            )}
+          </>
         ) : (
           <Field label="Author">
             <input
@@ -265,6 +357,16 @@ function ResourceEditor({
           </Field>
         )}
       </fieldset>
+      {memory?.referenced_by?.length ? (
+        <div className="card-meta">
+          <span className="muted small">Referenced by</span>
+          {memory.referenced_by.map((name) => (
+            <Button key={name} size="sm" variant="secondary" onClick={() => onOpen?.(name)}>
+              {name}
+            </Button>
+          ))}
+        </div>
+      ) : null}
       <div className="editor-tabs">
         <Button
           variant={!preview ? 'secondary' : 'ghost'}

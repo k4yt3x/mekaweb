@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-10-21
+
+### Added
+
+- The memory editor sets how a memory loads, its expiry, source, and references, and verifies it.
+- Memory cards mark inline, search-only, and expired memories; a memory links what references it.
+- `memory_edit` and `skill_edit` calls show the memory or skill they edit.
+
+### Changed
+
+- Recognize meka 0.83.0 as a verified server version.
+
+### Fixed
+
+- An edit to a file over 1 MB shows its result while the turn runs, not a too-large note.
+
 ## [0.22.0] - 2026-10-20
 
 ### Changed
@@ -408,7 +424,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Light and dark themes, narrow layouts, and collapsible, resizable session panels.
 - Hosting at the root or a subpath, with GitHub Pages deployment on version tags.
 
-[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.22.0...HEAD
+[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.23.0...HEAD
+[0.23.0]: https://github.com/k4yt3x/mekaweb/compare/0.22.0...0.23.0
 [0.22.0]: https://github.com/k4yt3x/mekaweb/compare/0.21.0...0.22.0
 [0.21.0]: https://github.com/k4yt3x/mekaweb/compare/0.20.0...0.21.0
 [0.20.0]: https://github.com/k4yt3x/mekaweb/compare/0.19.1...0.20.0
