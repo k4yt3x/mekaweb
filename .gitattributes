@@ -2,5 +2,5 @@
 *.png binary
 *.ico binary
 
-src/api/schema.d.ts linguist-generated=true
+web/src/api/schema.d.ts linguist-generated=true
 docs/api/meka-*.json linguist-generated=true

@@ -1,0 +1,12 @@
+[Unit]
+Description=mekaweb, the web interface for meka
+Documentation=https://github.com/k4yt3x/mekaweb
+
+[Service]
+Type=exec
+ExecStart=%h/.local/bin/mekaweb serve
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

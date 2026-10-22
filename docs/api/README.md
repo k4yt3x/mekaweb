@@ -1,8 +1,8 @@
 # API schema maintenance
 
-`meka-0.83.0.json` was captured from meka `0.83.0`, commit `5c02b582961d2f39a9cbfe0a8605037d6370d7c9`, through `/v1/openapi.json` with `[serve].docs = true`. The generated REST types are committed in `src/api/schema.d.ts`; runtime connections do not require schema access.
+`meka-0.83.0.json` was captured from meka `0.83.0`, commit `5c02b582961d2f39a9cbfe0a8605037d6370d7c9`, through `/v1/openapi.json` with `[serve].docs = true`. The generated REST types are committed in `web/src/api/schema.d.ts`; runtime connections do not require schema access.
 
-mekaweb requires meka 0.78.0 or newer and refuses older servers during connection discovery. Compared with 0.68.0, the 0.70.0 and 0.71.0 APIs change these shapes the client used:
+mekaweb requires meka 0.83.0 or newer and refuses older servers when it connects. Compared with 0.68.0, the 0.70.0 and 0.71.0 APIs change these shapes the client used:
 
 - `/v1/info` no longer reports `vision`; each `/v1/profiles` entry does.
 - `/v1/sessions/{id}/context` no longer reports `used_percent`. The client divides `used` by `window`, rounding down as meka did.
@@ -60,18 +60,21 @@ Schema capture is a manual maintenance step. Choose a disposable meka instance w
 
 ```sh
 curl --fail --silent --show-error http://127.0.0.1:8081/v1/openapi.json --output docs/api/meka-0.83.0.json
-npx prettier --write docs/api/meka-0.83.0.json
+cd web
+npx prettier --write ../docs/api/meka-0.83.0.json
 npm run api:generate
 ```
 
-Review the captured version and schema diff before committing. When upgrading the baseline, update the versioned filename, generation command in `scripts/schema/package.json`, the minimum and verified versions in `src/api/version.ts`, and coverage documentation. Capture is separate from automated checks and does not start a meka process.
+Review the captured version and schema diff before committing. When upgrading the baseline, update the versioned filename, generation command in `web/tools/schema/package.json`, the minimum and verified versions in `web/src/api/meka-versions.json`, and coverage documentation. Capture is separate from automated checks and does not start a meka process.
+
+`npm run api:generate` also writes mekaweb's own API types: it runs `cargo run -p mekaweb -- openapi` into `web/src/api/mekaweb-openapi.json`, from which `web/src/api/mekaweb-schema.d.ts` is generated. Run it after changing anything mekaweb's API serializes.
 
 Generation uses an npm workspace with TypeScript 5 because openapi-typescript 7.13.0 declares a TypeScript 5 peer dependency. The application retains TypeScript 6. Generated types preserve the upstream wire schema, including nullable optional annotations, even though the API omits absent response values.
 
 Problem Details use `https://meka.run/errors/`. The client also recognizes exact identifiers from the older `https://meka.so/errors/` namespace.
 
-Session SSE validation is maintained separately in `src/session/events.ts`, against meka's HTTP frontend and API reference. Streaming responses are not a complete event schema. No private database schema or transcript replay implementation is duplicated here.
+Session SSE validation is maintained separately in `web/src/session/events.ts`, against meka's HTTP frontend and API reference. Streaming responses are not a complete event schema. No private database schema or transcript replay implementation is duplicated here.
 
-When upgrading meka, also compare `src/session/tool-summary.ts` with `builtin_primary_param` in meka's `src/tools.rs`. This fallback labels stored tool calls whose history responses have no `display_summary`; live calls use the server's resolved summary.
+When upgrading meka, also compare `web/src/session/tool-summary.ts` with `builtin_primary_param` in meka's `src/tools.rs`. This fallback labels stored tool calls whose history responses have no `display_summary`; live calls use the server's resolved summary.
 
 Generation uses `--empty-objects-unknown` because meka’s Problem Details extension object accepts arbitrary members. The command formats generated output so regeneration is reproducible, and CI checks that it produces no diff.

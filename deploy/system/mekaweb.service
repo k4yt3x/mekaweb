@@ -1,0 +1,18 @@
+[Unit]
+Description=mekaweb, the web interface for meka
+Documentation=https://github.com/k4yt3x/mekaweb
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=exec
+User=you
+Group=you
+WorkingDirectory=~
+ExecStart=/usr/local/bin/mekaweb serve
+#Environment=XDG_RUNTIME_DIR=/run/user/1000
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

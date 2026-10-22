@@ -1,0 +1,38 @@
+# mekaweb's config, usually ~/.config/mekaweb/config.toml. Paths may start with ~/.
+# Settings commented out are optional, shown with their default or an example.
+
+# Where mekaweb listens. Keep it on loopback, behind a TLS proxy or tunnel.
+listen = "127.0.0.1:8090"
+
+# The address browsers open mekaweb at. Passkeys work only on this hostname.
+public_origin = "https://meka.example.com"
+
+# Proxies whose X-Forwarded-For is trusted for client addresses. None by default.
+#trusted_proxies = ["127.0.0.1", "::1"]
+
+# Where the database is kept.
+#state_dir = "~/.local/state/mekaweb"
+
+[meka]
+# meka's address, on loopback.
+url = "http://127.0.0.1:8080"
+
+# A file holding a meka token with every scope, reread without a restart.
+token_file = "~/.config/mekaweb/meka-token"
+
+# The token itself, instead of token_file.
+#token = "<token>"
+
+[push]
+# A mailto: or https: contact for push services. Push is off without it.
+#subject = "mailto:you@example.com"
+
+[terminal]
+# Whether terminals may be opened.
+#enabled = true
+
+# How long an unused terminal stays open.
+#idle_timeout = "24h"
+
+# The shell to run, instead of your login shell.
+#shell = "/bin/bash"

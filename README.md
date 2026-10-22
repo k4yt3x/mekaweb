@@ -1,79 +1,61 @@
 # mekaweb
 
-A web interface for [meka](https://github.com/k4yt3x/meka), hosted at [web.meka.run](https://web.meka.run).
+A web interface for [meka](https://github.com/k4yt3x/meka), served from the meka host.
 
-mekaweb is a static site that connects your browser directly to your own meka server. There is no separate backend or account. It supports **meka 0.78.0** and newer; it refuses older servers when connecting.
+mekaweb is a server you install beside meka. It signs you in, serves the interface, and passes your requests to meka on loopback, so meka itself is never exposed to your network or the internet. Put mekaweb behind a Cloudflare Tunnel or an HTTPS proxy, and reach your meka from any browser, or install it on your phone's Home Screen.
 
-## Getting started
+Besides meka's sessions, memory, skills, schedules and MCP servers, mekaweb adds what meka leaves to the host:
 
-Allow the site's origin and add an API token in your meka `config.toml`:
+- **Sign-in** with a password or a passkey, a list of the devices signed in, and a sign-in log.
+- **Files** beside each session, at its working directory: preview, upload, download, mention a file in a message.
+- **A terminal** docked under each session that keeps running when you leave, to come back to from any device.
+- **Push notifications** when a turn finishes, fails, or waits for your approval, even with the app closed.
+- **Data saver** for mobile data, and preferences shared by every device.
 
-```toml
-[serve]
-bind = "0.0.0.0:8080"
-cors_allowed_origins = ["https://web.meka.run"]
+This release supports **meka 0.83.0** and newer.
 
-[[serve.tokens]]
-token = "${MEKA_WEB_TOKEN}"
-description = "Web interface"
-scopes = [
-  "sessions:r", "sessions:w",
-  "memory:r", "memory:w",
-  "skills:r", "skills:w",
-  "schedule:r", "schedule:w",
-  "mcp:r", "mcp:w",
-]
-```
+web.meka.run, the static site that reached meka straight from the browser, is retired; its last release was mekaweb 0.23.1.
 
-Start `meka serve` with `MEKA_WEB_TOKEN` set, open [web.meka.run](https://web.meka.run), and enter the server's base URL, such as `http://127.0.0.1:8080`, and the token. Token scopes determine which controls are available; see meka's [token configuration](https://github.com/k4yt3x/meka/blob/0.83.0/docs/book/src/usage/http-api.md#token-configuration).
+## Install
 
-An HTTPS site reaching a local server needs browser permission, such as Chrome's [Local Network Access](https://developer.chrome.com/blog/local-network-access). For access over the internet, put meka behind an HTTPS reverse proxy.
-
-## Run locally
-
-Install Node.js 24 and npm 11, then run:
+See [Installing mekaweb](docs/install.md). In short, with `~/.config/mekaweb/config.toml` naming meka's address and its token ([`config/mekaweb.toml`](config/mekaweb.toml) is the example):
 
 ```sh
+mekaweb user add <username>
+mekaweb serve
+```
+
+## Develop
+
+Install Node.js 24, npm 11 and the Rust toolchain. Run mekaweb against a meka, with its `public_origin` set to the dev server's address:
+
+```toml
+listen = "127.0.0.1:4180"
+public_origin = "http://localhost:5173"
+state_dir = "/tmp/mekaweb-dev"
+
+[meka]
+url = "http://127.0.0.1:8080"
+token_file = "/tmp/mekaweb-dev/meka-token"
+```
+
+```sh
+cargo run -- --config dev.toml user add me
+cargo run -- --config dev.toml serve
+cd web
 npm ci
 npm run dev
 ```
 
-Open the URL printed by Vite and allow its origin in meka:
-
-```toml
-[serve]
-cors_allowed_origins = ["http://localhost:5173"]
-```
-
-Use the origin from the browser address bar: the scheme, hostname, and port, without any path. Include any reverse-proxy path in the base URL, such as `https://example.com/meka/`.
-
-## Static hosting
-
-Build and preview the application:
-
-```sh
-npm ci
-npm run build
-npm run preview -- --host 127.0.0.1
-```
-
-Serve the contents of `dist/` from any static host. Hash routes need no server-side rewrites. JavaScript, highlighting assets, and fonts are bundled locally.
-
-For hosting under a path such as `/mekaweb/`:
-
-```sh
-MEKAWEB_BASE_PATH=/mekaweb/ npm run build
-MEKAWEB_BASE_PATH=/mekaweb/ npm run preview -- --host 127.0.0.1
-```
-
-The base path must start and end with `/`. It controls where the frontend assets are hosted, not the meka endpoint. Add the deployed site's origin to meka's CORS configuration. Never embed tokens or provider credentials in build variables.
+The dev server passes `/api` and `/meka` to mekaweb at `MEKAWEB_GATEWAY`, `http://127.0.0.1:4180` unless set. See [Development](docs/development.md) for the checks and releases.
 
 ## Documentation
 
-- [Using mekaweb](docs/usage.md): connection details, features, notifications, and local data
+- [Installing mekaweb](docs/install.md): meka and mekaweb as services, HTTPS, and your phone
+- [Using mekaweb](docs/usage.md): signing in, Files, the terminal, notifications, and Data saver
 - [API support](docs/api-coverage.md): supported meka operations and limits
-- [Architecture](docs/architecture.md): component boundaries and state invariants
-- [Development](docs/development.md): checks, GitHub Pages deployment, and releases
+- [Architecture](docs/architecture.md): the server, the interface, and their invariants
+- [Development](docs/development.md): layout, checks, and releases
 - [Changelog](CHANGELOG.md)
 
 ## License

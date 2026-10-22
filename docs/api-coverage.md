@@ -1,6 +1,6 @@
 # API support
 
-mekaweb targets **meka 0.83.0**, commit `5c02b582961d2f39a9cbfe0a8605037d6370d7c9`. It refuses servers older than 0.78.0 when connecting, since 0.70.0 reshaped the API and 0.78.0 lets a turn run on without the request that started it, which every message to an idle session asks for. The table maps supported HTTP operations to the interface. Available actions depend on the token's scopes and the server's configuration.
+mekaweb targets **meka 0.83.0**, commit `5c02b582961d2f39a9cbfe0a8605037d6370d7c9`, and refuses older servers: the minimum and the verified versions are in `web/src/api/meka-versions.json`, which mekaweb's server checks too. The interface reaches meka through mekaweb at `/meka/v1/…`, which adds a token with every scope. The table maps supported HTTP operations to the interface.
 
 See the [captured schema and generation instructions](api/README.md) for the wire contract and the [meka HTTP API reference](https://github.com/k4yt3x/meka/blob/0.83.0/docs/book/src/usage/http-api.md) for server behavior.
 
@@ -51,12 +51,11 @@ See the [captured schema and generation instructions](api/README.md) for the wir
 | GET    | `/v1/mcp/{name}/tools`                     | Tools, permissions, deferral, and filtering explanations                        |
 | POST   | `/v1/mcp/{name}/reconnect`                 | Reconnect and inspect returned state                                            |
 | GET    | `/v1/instructions`                         | Resolved standing instructions                                                  |
-| GET    | `/v1/openapi.json`                         | Optional schema link/download, tolerating disabled docs                         |
 
 ## Limits and behavior
 
 - **Sessions:** Lists use cursor pagination and hold top-level sessions; a session's sub-agents are read with `parent` when it is unfolded. Search includes sub-agents. Search returns up to 100 matches in server relevance order, including conversation text and titles. It excludes thinking and tool inputs/results. Refine the query when the result limit is reached; the search API has no pagination. Listings group loaded sub-agents beneath their parents, retaining the server’s pin and recency order among roots and siblings. Titles can be reset to the first message; neither renaming nor pinning changes `updated_at`. The interface does not offer a working-directory filter. Fork supports a working-directory override. Directory/profile changes require an idle session, while permission, approval mode, titles, and pins can change during a turn.
-- **Read-only tokens:** A token without `sessions:w` cannot load a session by opening its feed. The interface shows the saved conversation and retries the feed every 15 seconds until the server loads the session, such as when a client with write access opens it.
+- **Read-only tokens:** mekaweb's token has every scope. Should meka refuse a feed with `session-not-loaded`, the interface shows the saved conversation and retries the feed every 15 seconds until the server loads the session.
 - **Sub-agents:** Their parent drives them. Their history, context, and tasks can be inspected, and a running sub-agent's feed is shown live, but they cannot receive direct user turns or independent settings, title, or pin changes through the HTTP API. The parent's feed carries a sub-agent's approval prompts.
 - **History:** Compaction and rewind alter model context. With `[session].turn_retention` set, meka deletes turns a compaction summarized once they age past the window, so the history starts at what remains. Live replay is bounded and cannot serve as a complete transcript. Export supports Markdown transcripts and JSON archives. Meka 0.83.0 exports archive format 15 and imports formats 3 through 15; older data conversion is handled by the server. What meka writes into a conversation on another's behalf keeps its kind: an inbox item shows as its sender's words, and a scheduled fire or a background report as meka's note, inside a running turn when a report reached it at a tool round's end. Compaction summaries quote the most recent messages received as they were written; the summary view renders them as block quotes. An explicit compaction runs as a turn, shown as compacting, without a completion notification. Stop ends its checkpoint early, and meka still writes the summary.
 - **Images and skills:** These use direct turns while idle; the inbox accepts text only. Skill activation is available from composer Settings.
@@ -66,6 +65,6 @@ See the [captured schema and generation instructions](api/README.md) for the wir
 - **Schedules:** One-time timestamps/durations, intervals, cron expressions, and shell/tool gates are supported. Gate predicates include changes, success, regular expressions, and JSON-pointer conditions. Retention is server-owned, and gate details may be withheld without `sessions:r`.
 - **MCP:** Server status, tool catalogs, and reconnect are available. MCP configuration, login, and interactive elicitation are not exposed by this API.
 - **Profiles and instructions:** These are read-only through the HTTP API. Configure them in meka. `/instructions` returns standing instructions, excluding the per-session files named in `[instructions]`.
-- **Documentation:** The OpenAPI download is optional and requires `[serve].docs` on the server. meka 0.82.0 removed its Swagger UI, so Settings links to meka's online HTTP API reference instead.
+- **Documentation:** mekaweb does not pass `/v1/openapi.json` through. meka 0.82.0 removed its Swagger UI, so Settings links to meka's online HTTP API reference instead.
 
 See [using mekaweb](usage.md) for connection setup, recovery guidance, and browser compatibility, and the [architecture](architecture.md) for credential and state-handling invariants.

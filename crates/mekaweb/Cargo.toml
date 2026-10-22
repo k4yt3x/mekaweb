@@ -1,0 +1,64 @@
+[package]
+name = "mekaweb"
+description = "The web interface for meka, served from the meka host"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+repository.workspace = true
+
+[dependencies]
+aes-gcm = "0.11"
+anyhow = "1"
+argon2 = "0.6"
+axum = { version = "0.8", features = ["macros", "ws"] }
+base64 = "0.23"
+bytes = "1"
+chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4", features = ["derive", "wrap_help"] }
+flate2 = "1"
+futures-util = "0.3"
+getrandom = "0.4"
+hkdf = "0.13"
+http-body-util = "0.1"
+humantime-serde = "1"
+ipnet = { version = "2", features = ["serde"] }
+libc = "0.2"
+mime_guess = "2"
+# Built from source and linked in, so the binary needs no OpenSSL where it runs: webauthn-rs
+# checks passkeys with it.
+openssl = { version = "0.10", features = ["vendored"] }
+p256 = { version = "0.14", features = ["ecdh", "ecdsa"] }
+percent-encoding = "2"
+pty-process = { version = "0.5", features = ["async"] }
+reqwest = { version = "0.13", default-features = false, features = ["http2", "json", "rustls", "stream"] }
+rpassword = "7"
+rusqlite = { version = "0.40", features = ["bundled"] }
+rust-embed = { version = "8", features = ["include-exclude"] }
+rustix = { version = "1", features = ["fs", "process"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+sha2 = "0.11"
+similar = "3"
+thiserror = "2"
+tokio = { version = "1", features = ["full"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
+tokio-util = { version = "0.7", features = ["io"] }
+toml = { version = "1", features = ["preserve_order"] }
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.7", features = ["catch-panic", "compression-br", "compression-gzip", "limit", "trace"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+url = "2"
+utoipa = { version = "6", features = ["axum_extras", "chrono"] }
+utoipa-axum = "0.3"
+uuid = { version = "1", features = ["v4", "serde"] }
+webauthn-rs = { version = "0.5", features = ["conditional-ui"] }
+zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

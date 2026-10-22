@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-10-21
+
+### Added
+
+- mekaweb is a server installed beside meka: it serves the interface and passes requests to meka.
+- Sign in with a password or a passkey; risky changes ask you to confirm it's you again.
+- Settings lists the devices signed in, signs them out, and shows recent sign-in activity.
+- Signing a device out ends its open connections; a new password signs out every other device.
+- Files opens in a panel beside a session at its folder, browses anywhere, and mentions files.
+- Uploads go in pieces and resume after a dropped connection; folders download as zip archives.
+- A session's terminal docks under it, starts a shell when opened, and stays a bar while it runs.
+- Ctrl+` shows or hides the session's terminal.
+- Settings sets the terminal's font size; Ctrl with the wheel, =, - or 0 changes it for a while.
+- Push notifications say when a turn finishes or fails, or waits for approval, with the app closed.
+- Settings shows whether meka answers and whether this mekaweb supports its version.
+- mekaweb keeps your preferences, so every device you sign in on shares them.
+- Data saver sends less over mobile data: fewer messages, pictures on tap, and batched replies.
+- File tool calls open the file in the session's Files; Files starts a session in a folder.
+- The new-session folder picker makes the folder it names.
+
+### Changed
+
+- **Breaking:** mekaweb requires meka 0.83.0 or newer.
+- **Breaking:** meka stays on loopback; browsers reach it only through mekaweb, holding no token.
+- After a turn, only the messages that came after those shown are read again.
+- The session list follows meka's change feed, and polls only every five minutes.
+- Event streams arrive compressed, and an edit's change carries its changed lines, not whole files.
+- An image over meka's 3.75 MB limit is shrunk to fit before sending, and says so.
+- Push notifications replace the browser notifications an open page sent.
+
+### Removed
+
+- **Breaking:** web.meka.run, and connecting to meka straight from a browser: install mekaweb.
+- **Breaking:** Saved connections, token storage, and settings import and export.
+
 ## [0.23.1] - 2026-10-21
 
 ### Deprecated
@@ -430,7 +465,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Light and dark themes, narrow layouts, and collapsible, resizable session panels.
 - Hosting at the root or a subpath, with GitHub Pages deployment on version tags.
 
-[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.23.1...HEAD
+[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.24.0...HEAD
+[0.24.0]: https://github.com/k4yt3x/mekaweb/compare/0.23.1...0.24.0
 [0.23.1]: https://github.com/k4yt3x/mekaweb/compare/0.23.0...0.23.1
 [0.23.0]: https://github.com/k4yt3x/mekaweb/compare/0.22.0...0.23.0
 [0.22.0]: https://github.com/k4yt3x/mekaweb/compare/0.21.0...0.22.0
