@@ -47,32 +47,33 @@ it('takes shared preferences from mekaweb, checked, and leaves this device’s o
   const adapter = new BrowserStorage(local);
   adapter.dataSaver(true);
   adapter.layout({ detailsOpen: true });
+  adapter.conversationFontSize(18);
   const changes: unknown[] = [];
   adapter.subscribe(() => changes.push(adapter.getSnapshot()));
   adapter.applyPreferences({
     theme: 'light',
-    conversationFontSize: -4,
+    conversationFontSize: 12,
+    conversationOffset: 40,
+    terminalFontSize: 20,
     showTurnContext: true,
+    completionSound: 'yes',
     dataSaver: false,
     layout: { detailsOpen: false },
   });
   expect(adapter.getSnapshot()).toMatchObject({
-    theme: 'light',
-    conversationFontSize: CONVERSATION_FONT.default,
+    theme: 'system',
+    conversationFontSize: 18,
+    conversationOffset: CONVERSATION_OFFSET.default,
+    terminalFontSize: TERMINAL_FONT.default,
     showTurnContext: true,
+    completionSound: false,
     dataSaver: true,
     layout: { detailsOpen: true },
   });
   expect(changes).toHaveLength(1);
-  adapter.applyPreferences({ theme: 'light' });
+  adapter.applyPreferences({ showTurnContext: true });
   expect(changes).toHaveLength(1);
   expect(adapter.preferences()).toEqual({
-    theme: 'light',
-    conversationFontSize: CONVERSATION_FONT.default,
-    conversationMaxWidth: CONVERSATION_WIDTH.default,
-    conversationAnchor: 'page',
-    conversationOffset: CONVERSATION_OFFSET.default,
-    terminalFontSize: TERMINAL_FONT.default,
     showTurnContext: true,
     inAppNotifications: true,
     completionSound: false,

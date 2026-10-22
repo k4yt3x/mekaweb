@@ -143,7 +143,8 @@ it('takes the preferences mekaweb kept, and saves changes for every device once 
   const saved: unknown[] = [];
   const { runtime, storage } = fixture({
     ...signedIn,
-    'GET /api/preferences': () => Response.json({ value: { theme: 'dark' } }),
+    'GET /api/preferences': () =>
+      Response.json({ value: { showTurnContext: true, theme: 'dark' } }),
     'PUT /api/preferences': (_url, init) => {
       saved.push(JSON.parse(String(init?.body)));
       return new Response(null, { status: 204 });
@@ -154,15 +155,19 @@ it('takes the preferences mekaweb kept, and saves changes for every device once 
   try {
     await vi.waitFor(() => expect(runtime.getSnapshot().auth).toBe('signed-in'));
     await vi.waitFor(() => expect(runtime.getSnapshot().busy).toBe(false));
-    expect(storage.getSnapshot().theme).toBe('dark');
-    storage.conversationFontSize(16);
+    expect(storage.getSnapshot()).toMatchObject({ showTurnContext: true, theme: 'system' });
     storage.conversationFontSize(17);
     storage.dataSaver(true);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(saved, 'appearance and Data saver stay with this browser').toHaveLength(0);
+    storage.completionSound(true);
+    storage.completionSound(false);
+    storage.completionSound(true);
     expect(saved).toHaveLength(0);
     await vi.advanceTimersByTimeAsync(1000);
-    expect(saved).toHaveLength(1);
-    expect(saved[0]).toMatchObject({ value: { theme: 'dark', conversationFontSize: 17 } });
-    expect((saved[0] as { value: object }).value).not.toHaveProperty('dataSaver');
+    expect(saved).toEqual([
+      { value: { showTurnContext: true, inAppNotifications: true, completionSound: true } },
+    ]);
   } finally {
     stop();
   }

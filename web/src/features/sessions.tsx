@@ -16,7 +16,7 @@ import {
   Ellipsis,
   Folder,
   FolderOpen,
-  ChartNoAxesColumn,
+  Info,
   SquareTerminal,
   List,
   ListCollapse,
@@ -471,7 +471,7 @@ export function SessionsPage({ id }: { id?: string | undefined }) {
                       aria-controls="session-details"
                       onClick={toggleDetails}
                     >
-                      <ChartNoAxesColumn size={18} />
+                      <Info size={18} />
                     </Button>
                     <SessionActions
                       key={`${state.connection?.id}:${state.connection?.authority}:${selected.id}`}

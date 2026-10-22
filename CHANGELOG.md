@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.24.1] - 2026-10-22
+
+### Fixed
+
+- Appearance stays with each browser, since screens differ; it no longer follows the account.
+
 ## [0.24.0] - 2026-10-21
 
 ### Added
@@ -465,7 +471,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Light and dark themes, narrow layouts, and collapsible, resizable session panels.
 - Hosting at the root or a subpath, with GitHub Pages deployment on version tags.
 
-[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.24.0...HEAD
+[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.24.1...HEAD
+[0.24.1]: https://github.com/k4yt3x/mekaweb/compare/0.24.0...0.24.1
 [0.24.0]: https://github.com/k4yt3x/mekaweb/compare/0.23.1...0.24.0
 [0.23.1]: https://github.com/k4yt3x/mekaweb/compare/0.23.0...0.23.1
 [0.23.0]: https://github.com/k4yt3x/mekaweb/compare/0.22.0...0.23.0

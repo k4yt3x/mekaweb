@@ -50,16 +50,10 @@ export interface Connection {
   authority: string;
 }
 /**
- * Preferences every device shares, kept by mekaweb; layout, Data saver and notification
- * permission stay with each device.
+ * Preferences every device shares, kept by mekaweb; appearance, layout, Data saver and
+ * notification permission stay with each browser, since screens differ.
  */
 export const PORTABLE_PREFERENCES = [
-  'theme',
-  'conversationFontSize',
-  'conversationMaxWidth',
-  'conversationAnchor',
-  'conversationOffset',
-  'terminalFontSize',
   'showTurnContext',
   'inAppNotifications',
   'completionSound',
