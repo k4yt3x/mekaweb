@@ -322,6 +322,8 @@ it('leaves out of a replayed turn what saved history shows, so the rest carries 
     message('user', result('one')),
     message('assistant', { type: 'text', text: 'Step 2.' }, call('two')),
     message('user', result('two')),
+    // Saved before it ran: still running, it shows its progress live.
+    message('assistant', { type: 'text', text: 'Waiting.' }, call('three')),
   ];
   const { groups, continued } = liveAfterSaved(groupLiveMessages(blocks, []), saved);
   expect(continued).toBe(true);
@@ -340,6 +342,27 @@ it('leaves out of a replayed turn what saved history shows, so the rest carries 
     groups: [],
     continued: false,
   });
+  // A notice kept from before someone's words, and the saved output going on after them: what
+  // goes on after them is not taken to carry on from what is shown before them.
+  const interrupted = liveAfterSaved(
+    groupLiveMessages(
+      [
+        { kind: 'notice', level: 'warning', text: 'Slow.' },
+        { kind: 'tool', id: 'one' },
+        {
+          kind: 'message',
+          message: { role: 'user', content: [{ type: 'text', text: 'Stop.' }] },
+          opening: false,
+        },
+        { kind: 'tool', id: 'two' },
+        { kind: 'text', text: 'Stopping.' },
+      ],
+      [],
+    ),
+    saved,
+  );
+  expect(interrupted.groups.map((group) => group.kind)).toEqual(['agent', 'message', 'agent']);
+  expect(interrupted.continued).toBe(false);
 });
 
 const words: Schema['ContentBlockView'] = { type: 'text', text: 'Hello.' };

@@ -1271,15 +1271,16 @@
           {
             "name": "path",
             "in": "query",
-            "required": true,
+            "description": "The folder, for all it holds.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": ["string", "null"]
             }
           },
           {
-            "name": "only",
+            "name": "selection",
             "in": "query",
-            "description": "Only these names in the folder, separated by `/`, which no name holds.",
+            "description": "The id `POST /api/files/zip/selection` gave the entries chosen, for just those.",
             "required": false,
             "schema": {
               "type": ["string", "null"]
@@ -1312,6 +1313,52 @@
             }
           },
           "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/files/zip/selection": {
+      "post": {
+        "tags": ["files"],
+        "summary": "Keeps entries chosen in a folder for a zip of them, which `GET /api/files/zip` then downloads\nby the id given: their names would make too long an address.",
+        "operationId": "select_for_zip",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewSelection"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SelectionMade"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
             "content": {
               "application/json": {
                 "schema": {
@@ -1928,6 +1975,24 @@
           }
         }
       },
+      "NewSelection": {
+        "type": "object",
+        "description": "Entries chosen in a folder, to download as one zip.",
+        "required": ["path", "names"],
+        "properties": {
+          "names": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Their names in it."
+          },
+          "path": {
+            "type": "string",
+            "description": "The folder they are in."
+          }
+        }
+      },
       "NewTerminal": {
         "type": "object",
         "description": "A terminal to open.",
@@ -2106,6 +2171,16 @@
           "name": {
             "type": "string",
             "description": "The name; empty goes back to the default."
+          }
+        }
+      },
+      "SelectionMade": {
+        "type": "object",
+        "description": "The id a selection's zip downloads by.",
+        "required": ["id"],
+        "properties": {
+          "id": {
+            "type": "string"
           }
         }
       },

@@ -6,9 +6,10 @@
 
 use std::{
     cell::RefCell,
+    collections::HashSet,
     ffi::OsStr,
     fs::File,
-    io::Write,
+    io::{Read, Write},
     os::{
         fd::{AsFd, OwnedFd},
         unix::{
@@ -167,9 +168,10 @@ fn add_tree<W: Write>(
     let mut top = Adding::start(zip, dir, prefix.to_owned())?;
     if let Some(only) = only {
         // A name gone since it was chosen is not there to add.
+        let only: HashSet<Vec<u8>> = only.into_iter().map(String::into_bytes).collect();
         top.left = top
             .left
-            .filter(|name| only.iter().any(|kept| kept.as_bytes() == name.as_slice()))
+            .filter(|name| only.contains(name))
             .collect::<Vec<_>>()
             .into_iter();
     }
@@ -240,15 +242,14 @@ fn add_tree<W: Write>(
                     continue;
                 }
                 let modified = Utc.timestamp_opt(metadata.mtime(), 0).single();
-                let start = {
-                    let mut pending = pending.borrow_mut();
-                    pending.holding = true;
-                    pending.buffer.len()
-                };
                 // A file past 4 GiB into the archive is ZIP64 too: its offset makes its central
-                // record ZIP64, and UnZip then takes its data descriptor to be ZIP64 as well.
-                let zip64 = metadata.len() >= ZIP64_FROM
-                    || pending.borrow().position() >= u64::from(u32::MAX);
+                // record ZIP64, and UnZip then takes its data descriptor to be ZIP64 as well. The
+                // entry before still has to write its end first, which the margin leaves room for.
+                let zip64 =
+                    metadata.len() >= ZIP64_FROM || pending.borrow().position() >= ZIP64_FROM;
+                // Its header is written after the end of the entry before, all of it kept back
+                // so the header can be corrected.
+                pending.borrow_mut().holding = true;
                 let started = zip.start_file(
                     &path,
                     options(modified, metadata.permissions().mode(), zip64),
@@ -256,11 +257,13 @@ fn add_tree<W: Write>(
                 let mut held = pending.borrow_mut();
                 held.holding = false;
                 started.map_err(std::io::Error::other)?;
-                if zip64 && let Some(header) = held.buffer.get_mut(start..) {
-                    zero_zip64_sizes(header);
+                if zip64 {
+                    zero_zip64_sizes(&mut held.buffer, path.as_bytes());
                 }
                 drop(held);
-                std::io::copy(&mut file, zip)?;
+                // As much as it held when looked at: a file that grows as it is read would
+                // otherwise outgrow the form its entry was started in.
+                std::io::copy(&mut (&mut file).take(metadata.len()), zip)?;
             }
             _ => left_out += 1,
         }
@@ -268,8 +271,8 @@ fn add_tree<W: Write>(
     Ok(left_out)
 }
 
-/// The size from which a file is written in ZIP64 form: 4 GiB, less room for deflating to grow
-/// what does not compress.
+/// The size or offset from which an entry is written in ZIP64 form: 4 GiB, less room for
+/// deflating to grow what does not compress, and for what the entry before writes at its end.
 const ZIP64_FROM: u64 = 0xFFFF_FFFF - 16 * 1024 * 1024;
 
 /// How an entry is written, in ZIP64 form only if `zip64`: streamed, the zip crate cannot go back
@@ -297,31 +300,39 @@ fn options(modified: Option<chrono::DateTime<Utc>>, mode: u32, zip64: bool) -> S
     }
 }
 
-/// Zeroes the sizes in the ZIP64 field of the local header `header` begins with, as the
-/// specification asks of an entry with a data descriptor, which gives them after its data: the
+/// Zeroes the sizes in the ZIP64 field of the local header of `name` that `buffer` ends with, as
+/// the specification asks of an entry with a data descriptor, which gives them after its data: the
 /// zip crate leaves placeholders there for when it can go back, which a stream cannot.
-fn zero_zip64_sizes(header: &mut [u8]) {
-    let field = |header: &[u8], at: usize| -> Option<usize> {
-        let bytes: [u8; 2] = header.get(at..at.checked_add(2)?)?.try_into().ok()?;
+fn zero_zip64_sizes(buffer: &mut [u8], name: &[u8]) {
+    let field = |buffer: &[u8], at: usize| -> Option<usize> {
+        let bytes: [u8; 2] = buffer.get(at..at.checked_add(2)?)?.try_into().ok()?;
         Some(usize::from(u16::from_le_bytes(bytes)))
     };
-    let (Some(flags), Some(name), Some(extra)) =
-        (field(header, 6), field(header, 26), field(header, 28))
-    else {
+    // The header is the last thing written: found from the end, by its name and its lengths.
+    let shortest = 30 + name.len();
+    let Some(latest) = buffer.len().checked_sub(shortest) else {
+        return;
+    };
+    let earliest = latest.saturating_sub(usize::from(u16::MAX));
+    let Some(header) = (earliest..=latest).rev().find(|&at| {
+        buffer.get(at..at + 4) == Some(b"PK\x03\x04")
+            && field(buffer, at + 26) == Some(name.len())
+            && field(buffer, at + 28).is_some_and(|extra| at + shortest + extra == buffer.len())
+            && buffer.get(at + 30..at + shortest) == Some(name)
+    }) else {
         return;
     };
     // Only an entry with a data descriptor gives its sizes later.
-    if !header.starts_with(b"PK\x03\x04") || flags & 0x8 == 0 {
+    if field(buffer, header + 6).is_none_or(|flags| flags & 0x8 == 0) {
         return;
     }
-    let mut at = 30 + name;
-    let end = at + extra;
-    while at + 4 <= end {
-        let (Some(id), Some(len)) = (field(header, at), field(header, at + 2)) else {
+    let mut at = header + shortest;
+    while at + 4 <= buffer.len() {
+        let (Some(id), Some(len)) = (field(buffer, at), field(buffer, at + 2)) else {
             return;
         };
         if id == 0x0001 {
-            if let Some(sizes) = header.get_mut(at + 4..(at + 4 + len).min(end)) {
+            if let Some(sizes) = buffer.get_mut(at + 4..at + 4 + len) {
                 sizes.fill(0);
             }
             return;
@@ -420,17 +431,34 @@ mod tests {
 
     #[test]
     fn a_zip64_entry_streamed_gives_its_local_sizes_as_zero() {
-        let mut archive = Vec::new();
-        let mut zip = ZipWriter::new_stream(&mut archive);
+        let (sender, mut receiver) = mpsc::channel(16);
+        let pending = Rc::new(RefCell::new(Pending::default()));
+        let mut zip = ZipWriter::new_stream(ChannelWriter {
+            sender,
+            pending: Rc::clone(&pending),
+        });
+        // A file before it, whose end is written as the ZIP64 one starts.
+        zip.start_file("small.txt", options(None, 0o644, false))
+            .unwrap();
+        zip.write_all(b"before").unwrap();
+        pending.borrow_mut().holding = true;
         zip.start_file("big.bin", options(None, 0o644, true))
             .unwrap();
+        zero_zip64_sizes(&mut pending.borrow_mut().buffer, b"big.bin");
+        pending.borrow_mut().holding = false;
         zip.write_all(b"contents").unwrap();
-        zip.finish().unwrap();
-        // The ZIP64 field follows the local header and its name: the crate leaves placeholders.
-        let sizes = 30 + "big.bin".len() + 4;
+        zip.finish().unwrap().flush().unwrap();
+        let mut archive = Vec::new();
+        while let Ok(chunk) = receiver.try_recv() {
+            archive.extend_from_slice(&chunk.unwrap());
+        }
+        let header = archive
+            .windows(4)
+            .rposition(|bytes| bytes == b"PK\x03\x04")
+            .unwrap();
+        // The ZIP64 field follows the header and its name.
+        let sizes = header + 30 + "big.bin".len() + 4;
         assert_eq!(archive.get(sizes - 4..sizes), Some(&[1, 0, 16, 0][..]));
-        assert_eq!(archive.get(sizes..sizes + 16), Some(&[0xFF; 16][..]));
-        zero_zip64_sizes(&mut archive);
         assert_eq!(archive.get(sizes..sizes + 16), Some(&[0; 16][..]));
         let mut zip = zip::ZipArchive::new(std::io::Cursor::new(archive)).unwrap();
         let mut text = String::new();

@@ -46,7 +46,16 @@ import { scrollRegion } from '../components/scrolling';
 import { useOverlayPadding } from '../components/visual-viewport';
 import { useMediaQuery } from '../components/media-query';
 import { isProblem, type Gateway } from '../api/gateway';
-import { basename, crumbs, formatSize, join, parent, rawUrl, zipUrl } from '../files/paths';
+import {
+  basename,
+  crumbs,
+  formatSize,
+  join,
+  parent,
+  rawUrl,
+  selectionZipUrl,
+  zipUrl,
+} from '../files/paths';
 import { pending, Uploads, type UploadBatch, type UploadItem } from '../files/uploader';
 import { droppedItems, pickedFolder, readDropped } from '../files/dropped';
 import { useSessionNavigation } from './session-navigation';
@@ -820,6 +829,16 @@ function EntryRow({
   );
 }
 
+/** Starts downloading `url`, as following a link to it would. */
+function startDownload(url: string) {
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = '';
+  document.body.append(link);
+  link.click();
+  link.remove();
+}
+
 /** The parts menu items are made of, a dropdown menu's or a context menu's. */
 type MenuParts = Pick<typeof DropdownMenu, 'Item' | 'Separator'>;
 
@@ -876,15 +895,20 @@ function useSelectionActions({
   }
   const mention = workspace ? () => workspace.mention(paths.map(mentionPath).join(' ')) : undefined;
   const download = {
-    href: one
-      ? isFolder(one)
-        ? zipUrl(paths[0]!)
-        : rawUrl(paths[0]!, true)
-      : zipUrl(
-          folder,
-          selected.map((entry) => entry.name),
-        ),
     label: one && !isFolder(one) ? 'Download' : 'Download as zip',
+    start: () => {
+      if (one) startDownload(isFolder(one) ? zipUrl(paths[0]!) : rawUrl(paths[0]!, true));
+      // Their names would make too long an address: mekaweb keeps them, for a short one.
+      else
+        void action.run(async () => {
+          const { id } = await runtime.gateway.send<Gateway['SelectionMade']>(
+            'POST',
+            '/api/files/zip/selection',
+            { path: folder, names: selected.map((entry) => entry.name) },
+          );
+          startDownload(selectionZipUrl(id));
+        });
+    },
   };
   const trash = () =>
     void each(
@@ -919,11 +943,9 @@ function useSelectionActions({
             Mention in message
           </Item>
         )}
-        <Item className="menu-item" asChild>
-          <a href={download.href} download>
-            <Download size={14} />
-            {download.label}
-          </a>
+        <Item className="menu-item" onSelect={download.start}>
+          <Download size={14} />
+          {download.label}
         </Item>
         <Item className="menu-item" onSelect={move}>
           <FolderInput size={14} />
@@ -1055,15 +1077,15 @@ function SelectionBar({
           <AtSign size={16} />
         </Button>
       )}
-      <Button variant="ghost" size="icon" asChild>
-        <a
-          href={actions.download.href}
-          download
-          aria-label={actions.download.label}
-          title={actions.download.label}
-        >
-          <Download size={16} />
-        </a>
+      <Button
+        variant="ghost"
+        size="icon"
+        aria-label={actions.download.label}
+        title={actions.download.label}
+        disabled={actions.busy}
+        onClick={actions.download.start}
+      >
+        <Download size={16} />
       </Button>
       <Button
         variant="ghost"

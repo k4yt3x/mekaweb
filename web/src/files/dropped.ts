@@ -48,18 +48,22 @@ async function readFolder(folder: FileSystemDirectoryEntry, path: string, tree: 
       return;
     }
     if (!part.length) return;
-    for (const entry of part) {
+    // A part's files are asked for together, which thousands of them make worth it.
+    const files = await Promise.all(
+      part.map((entry) =>
+        entry.isFile
+          ? new Promise<File>((resolve, reject) =>
+              (entry as FileSystemFileEntry).file(resolve, reject),
+            ).catch(() => undefined)
+          : undefined,
+      ),
+    );
+    for (const [index, entry] of part.entries()) {
       const inner = `${path}/${entry.name}`;
+      const file = files[index];
       if (entry.isDirectory) await readFolder(entry as FileSystemDirectoryEntry, inner, tree);
-      else if (entry.isFile)
-        try {
-          const file = await new Promise<File>((resolve, reject) =>
-            (entry as FileSystemFileEntry).file(resolve, reject),
-          );
-          tree.files.push({ file, path: inner });
-        } catch {
-          tree.unread++;
-        }
+      else if (file) tree.files.push({ file, path: inner });
+      else if (entry.isFile) tree.unread++;
     }
   }
 }

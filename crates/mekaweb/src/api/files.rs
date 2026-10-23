@@ -47,12 +47,28 @@ pub(crate) struct Location {
     pub(crate) path: String,
 }
 
-/// A folder to download as a zip.
+/// A folder to download as a zip, or entries chosen in one.
 #[derive(Debug, Deserialize, IntoParams)]
 pub(crate) struct ZipQuery {
+    /// The folder, for all it holds.
+    pub(crate) path: Option<String>,
+    /// The id `POST /api/files/zip/selection` gave the entries chosen, for just those.
+    pub(crate) selection: Option<String>,
+}
+
+/// Entries chosen in a folder, to download as one zip.
+#[derive(Debug, Deserialize, ToSchema)]
+pub(crate) struct NewSelection {
+    /// The folder they are in.
     pub(crate) path: String,
-    /// Only these names in the folder, separated by `/`, which no name holds.
-    pub(crate) only: Option<String>,
+    /// Their names in it.
+    pub(crate) names: Vec<String>,
+}
+
+/// The id a selection's zip downloads by.
+#[derive(Debug, serde::Serialize, ToSchema)]
+pub(crate) struct SelectionMade {
+    pub(crate) id: String,
 }
 
 /// A file to download or show.
@@ -365,7 +381,16 @@ pub(crate) async fn zip(
     _signed: Signed,
     Query(query): Query<ZipQuery>,
 ) -> ApiResult<Response> {
-    let folder = path(&query.path)?;
+    let (folder, only) = match (query.selection, query.path) {
+        (Some(id), _) => {
+            let selection = app.files.selection(&id)?;
+            (selection.folder, Some(selection.names))
+        }
+        (None, Some(folder)) => (path(&folder)?, None),
+        (None, None) => {
+            return Err(FilesError::BadPath("give a folder or a selection".to_owned()).into());
+        }
+    };
     let dir = app.files.open_folder(folder.clone()).await?;
     let name = folder.file_name().map_or_else(
         || "root".to_owned(),
@@ -373,9 +398,6 @@ pub(crate) async fn zip(
     );
     let (sender, receiver) = mpsc::channel(8);
     let prefix = name.clone();
-    let only = query
-        .only
-        .map(|names| names.split('/').map(str::to_owned).collect());
     tokio::task::spawn_blocking(move || crate::files::zip::write(dir, prefix, only, sender));
     let disposition = format!(
         "attachment; filename*=UTF-8''{}",
@@ -391,6 +413,25 @@ pub(crate) async fn zip(
         headers.insert(header::CONTENT_DISPOSITION, value);
     }
     Ok(response)
+}
+
+/// Keeps entries chosen in a folder for a zip of them, which `GET /api/files/zip` then downloads
+/// by the id given: their names would make too long an address.
+#[utoipa::path(
+    post,
+    path = "/api/files/zip/selection",
+    tag = "files",
+    request_body = NewSelection,
+    responses((status = 200, body = SelectionMade), (status = 400, body = crate::error::Problem), (status = 403, body = crate::error::Problem))
+)]
+pub(crate) async fn select_for_zip(
+    State(app): State<App>,
+    _signed: Signed,
+    Json(body): Json<NewSelection>,
+) -> ApiResult<Json<SelectionMade>> {
+    let folder = path(&body.path)?;
+    let id = app.files.select(folder, body.names)?;
+    Ok(Json(SelectionMade { id }))
 }
 
 #[utoipa::path(

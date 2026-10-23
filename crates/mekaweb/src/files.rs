@@ -15,6 +15,7 @@ pub(crate) mod trash;
 pub(crate) mod zip;
 
 use std::{
+    collections::HashMap,
     ffi::OsStr,
     fs::{File, Metadata},
     io::{Read, Seek, SeekFrom, Write},
@@ -26,7 +27,8 @@ use std::{
         },
     },
     path::{Component, Path, PathBuf},
-    time::Duration,
+    sync::{Mutex, PoisonError},
+    time::{Duration, Instant},
 };
 
 use axum::http::StatusCode;
@@ -316,7 +318,23 @@ pub(crate) struct Files {
     store: Store,
     /// The home folder's trash, if there is a home folder.
     home_trash: Option<PathBuf>,
+    /// Entries chosen to download as one zip, by the id their download names them by.
+    selections: Mutex<HashMap<String, Selection>>,
 }
+
+/// Entries chosen in a folder, to download as one zip.
+#[derive(Debug, Clone)]
+pub(crate) struct Selection {
+    pub(crate) folder: PathBuf,
+    pub(crate) names: Vec<String>,
+    made: Instant,
+}
+
+/// How long a selection lasts for its download to start, or start again.
+const SELECTION_LIFETIME: Duration = Duration::from_secs(10 * 60);
+
+/// The most selections kept; the oldest goes for a new one past that.
+const MAX_SELECTIONS: usize = 64;
 
 impl Files {
     /// Files, with uploads kept in `store`.
@@ -324,7 +342,49 @@ impl Files {
         Self {
             store,
             home_trash: trash::home_trash().ok(),
+            selections: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Keeps `names` in the folder `folder` for a zip of them; the id to download it by.
+    pub(crate) fn select(&self, folder: PathBuf, names: Vec<String>) -> Result<String, FilesError> {
+        for name in &names {
+            check_name(OsStr::new(name))?;
+        }
+        let id = Uuid::new_v4().to_string();
+        let mut selections = self
+            .selections
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        selections.retain(|_, selection| selection.made.elapsed() < SELECTION_LIFETIME);
+        if selections.len() >= MAX_SELECTIONS
+            && let Some(oldest) = selections
+                .iter()
+                .min_by_key(|(_, selection)| selection.made)
+                .map(|(id, _)| id.clone())
+        {
+            selections.remove(&oldest);
+        }
+        selections.insert(id.clone(), Selection {
+            folder,
+            names,
+            made: Instant::now(),
+        });
+        drop(selections);
+        Ok(id)
+    }
+
+    /// The selection `id` names, while it lasts.
+    pub(crate) fn selection(&self, id: &str) -> Result<Selection, FilesError> {
+        self.selections
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(id)
+            .filter(|selection| selection.made.elapsed() < SELECTION_LIFETIME)
+            .cloned()
+            .ok_or_else(|| {
+                FilesError::NotFound("that selection, which lasts ten minutes,".to_owned())
+            })
     }
 
     fn home_trash(&self) -> Result<PathBuf, FilesError> {

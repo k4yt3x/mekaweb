@@ -452,6 +452,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/files/zip/selection': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Keeps entries chosen in a folder for a zip of them, which `GET /api/files/zip` then downloads
+     *     by the id given: their names would make too long an address.
+     */
+    post: operations['select_for_zip'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/preferences': {
     parameters: {
       query?: never;
@@ -706,6 +726,13 @@ export interface components {
       current: string;
       password: string;
     };
+    /** @description Entries chosen in a folder, to download as one zip. */
+    NewSelection: {
+      /** @description Their names in it. */
+      names: string[];
+      /** @description The folder they are in. */
+      path: string;
+    };
     /** @description A terminal to open. */
     NewTerminal: {
       /** Format: int32 */
@@ -794,6 +821,10 @@ export interface components {
     Rename: {
       /** @description The name; empty goes back to the default. */
       name: string;
+    };
+    /** @description The id a selection's zip downloads by. */
+    SelectionMade: {
+      id: string;
     };
     /** @description Who is signed in, on which device, and what they can confirm themselves with. */
     SessionView: {
@@ -2097,10 +2128,11 @@ export interface operations {
   };
   zip: {
     parameters: {
-      query: {
-        path: string;
-        /** @description Only these names in the folder, separated by `/`, which no name holds. */
-        only?: string | null;
+      query?: {
+        /** @description The folder, for all it holds. */
+        path?: string | null;
+        /** @description The id `POST /api/files/zip/selection` gave the entries chosen, for just those. */
+        selection?: string | null;
       };
       header?: never;
       path?: never;
@@ -2134,6 +2166,45 @@ export interface operations {
         };
       };
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  select_for_zip: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['NewSelection'];
+      };
+    };
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['SelectionMade'];
+        };
+      };
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Problem'];
+        };
+      };
+      403: {
         headers: {
           [name: string]: unknown;
         };

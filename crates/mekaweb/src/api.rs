@@ -58,6 +58,7 @@ pub(crate) fn routes() -> OpenApiRouter<App> {
         .routes(routes!(files::text))
         .routes(routes!(files::raw))
         .routes(routes!(files::zip))
+        .routes(routes!(files::select_for_zip))
         .routes(routes!(files::make_folder))
         .routes(routes!(files::move_entry))
         .routes(routes!(files::trash_entry))

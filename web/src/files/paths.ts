@@ -89,12 +89,17 @@ export function rawUrl(path: string, download = false): string {
   return url.pathname + url.search;
 }
 
-/** The address of a folder as a zip; with `only`, of just those names in it. */
-export function zipUrl(path: string, only?: readonly string[]): string {
+/** The address of a folder as a zip. */
+export function zipUrl(path: string): string {
   const url = new URL('/api/files/zip', location.origin);
   url.searchParams.set('path', path);
-  // No name holds a `/`.
-  if (only) url.searchParams.set('only', only.join('/'));
+  return url.pathname + url.search;
+}
+
+/** The address of a zip of entries chosen, by the id mekaweb keeps them under. */
+export function selectionZipUrl(id: string): string {
+  const url = new URL('/api/files/zip', location.origin);
+  url.searchParams.set('selection', id);
   return url.pathname + url.search;
 }
 

@@ -62,14 +62,26 @@ export function pending(item: UploadItem): boolean {
  * [`UPLOADS_AT_ONCE`] are sent at a time.
  */
 export class Uploads {
+  /**
+   * The batches, changed in place as uploads go, so thousands of files cost no more than a few:
+   * what is shown is a copy of them, made when asked for after a change.
+   */
   private batches: UploadBatch[] = [];
+  private byKey = new Map<string, { batch: UploadBatch; item: UploadItem }>();
+  private snapshot: UploadBatch[] = [];
+  private stale = false;
+  private notifying: ReturnType<typeof setTimeout> | undefined;
+  /** Batches taken off the list, which nothing puts back. */
+  private gone = new WeakSet<UploadBatch>();
   private files = new Map<string, File>();
   private aborts = new Map<string, AbortController>();
   private ids = new Map<string, string>();
   /** Uploads told to replace what is there. */
   private replacing = new Set<string>();
-  /** Uploads waiting their turn, in order. */
+  /** Uploads waiting their turn, in order, from `next`; those to go again go first. */
   private waiting: string[] = [];
+  private next = 0;
+  private again: string[] = [];
   private running = 0;
   /** The folders made for each batch, or being made, by path. */
   private made = new Map<string, Map<string, Promise<unknown>>>();
@@ -85,32 +97,36 @@ export class Uploads {
       this.listeners.delete(listener);
     };
   };
-  getSnapshot = () => this.batches;
-  private changed() {
-    for (const listener of this.listeners) listener();
-  }
-  private find(key: string): { batch: UploadBatch; item: UploadItem } | undefined {
-    for (const batch of this.batches) {
-      const item = batch.items.find((candidate) => candidate.key === key);
-      if (item) return { batch, item };
+  getSnapshot = () => {
+    if (this.stale) {
+      this.stale = false;
+      this.snapshot = this.batches.map((batch) => ({
+        ...batch,
+        items: batch.items.map((item) => ({ ...item })),
+      }));
     }
-    return undefined;
+    return this.snapshot;
+  };
+  private changed() {
+    this.stale = true;
+    // Changes close together, as thousands of files make, are told of once.
+    this.notifying ??= setTimeout(() => {
+      this.notifying = undefined;
+      for (const listener of this.listeners) listener();
+    }, 50);
   }
-  private patch(keys: ReadonlySet<string>, patch: (item: UploadItem) => Partial<UploadItem>) {
-    this.batches = this.batches.map((batch) =>
-      batch.items.some((item) => keys.has(item.key))
-        ? {
-            ...batch,
-            items: batch.items.map((item) =>
-              keys.has(item.key) ? { ...item, ...patch(item) } : item,
-            ),
-          }
-        : batch,
-    );
+  private find(key: string) {
+    return this.byKey.get(key);
+  }
+  private patch(keys: Iterable<string>, patch: (item: UploadItem) => Partial<UploadItem>) {
+    for (const key of keys) {
+      const found = this.byKey.get(key);
+      if (found) Object.assign(found.item, patch(found.item));
+    }
     this.changed();
   }
   private update(key: string, patch: Partial<UploadItem>) {
-    this.patch(new Set([key]), () => patch);
+    this.patch([key], () => patch);
   }
   /**
    * Uploads `files` into the folder `dir` as one batch, with `note` on what was left out. Those
@@ -123,6 +139,7 @@ export class Uploads {
     { note, folders = [] }: { note?: string | undefined; folders?: readonly string[] } = {},
   ) {
     if (!files.length && !note && !folders.length) return;
+    // Folders alone are only made, and said so only if one cannot be.
     const items = files.map(({ file, path }): UploadItem => {
       const key = `upload-${++sequence}`;
       this.files.set(key, file);
@@ -143,21 +160,32 @@ export class Uploads {
     });
     const batch: UploadBatch = { key: `batch-${++sequence}`, dir, items };
     if (note) batch.note = note;
-    this.batches = [...this.batches, batch];
-    this.waiting.push(...items.map((item) => item.key));
+    if (items.length || note) this.batches.push(batch);
+    for (const item of items) {
+      this.byKey.set(item.key, { batch, item });
+      this.waiting.push(item.key);
+    }
     this.changed();
-    const filled = items.map((item) => item.dir);
+    // A folder a file goes in, or one above it, is made for that file.
+    const filled = new Set<string>();
+    for (const item of items) {
+      let folder = item.dir;
+      while (folder.length > dir.length && !filled.has(folder)) {
+        filled.add(folder);
+        folder = folder.slice(0, folder.lastIndexOf('/'));
+      }
+    }
     const empty = folders
       .map((folder) => join(dir, folder))
-      .filter((folder) => !filled.some((full) => full === folder || full.startsWith(`${folder}/`)));
-    if (empty.length) void this.makeFolders(batch.key, empty);
+      .filter((folder) => !filled.has(folder));
+    if (empty.length) void this.makeFolders(batch, empty);
     this.pump();
   }
   /** Uploads again over the files of the same name. */
   replace(keys: readonly string[]) {
     for (const key of keys) this.replacing.add(key);
-    this.waiting.unshift(...keys);
-    this.patch(new Set(keys), () => ({ state: 'queued', sent: 0, error: undefined }));
+    this.again.push(...keys);
+    this.patch(keys, () => ({ state: 'queued', sent: 0, error: undefined }));
     this.pump();
   }
   /**
@@ -165,16 +193,12 @@ export class Uploads {
    * still to come.
    */
   decide(batch: string, existing: 'replace' | 'skip') {
-    this.batches = this.batches.map((candidate) =>
-      candidate.key === batch ? { ...candidate, existing } : candidate,
-    );
-    const there =
-      this.batches
-        .find((candidate) => candidate.key === batch)
-        ?.items.filter((item) => item.state === 'exists')
-        .map((item) => item.key) ?? [];
+    const found = this.batches.find((candidate) => candidate.key === batch);
+    if (!found) return;
+    found.existing = existing;
+    const there = found.items.filter((item) => item.state === 'exists').map((item) => item.key);
     if (existing === 'replace') this.replace(there);
-    else this.patch(new Set(there), () => ({ state: 'skipped', error: undefined }));
+    else this.patch(there, () => ({ state: 'skipped', error: undefined }));
   }
   /** Stops uploads, waiting or under way, and removes what they sent. */
   cancel(keys: readonly string[]) {
@@ -182,7 +206,7 @@ export class Uploads {
       this.aborts.get(key)?.abort();
       this.discard(key);
     }
-    this.patch(new Set(keys), (item) => (pending(item) ? { state: 'cancelled' } : {}));
+    this.patch(keys, (item) => (pending(item) ? { state: 'cancelled' } : {}));
   }
   /** Removes what an upload that will not finish sent. */
   private discard(key: string) {
@@ -195,17 +219,23 @@ export class Uploads {
   }
   /** Takes a batch off the list, stopping any of it still under way. */
   dismiss(batch: string) {
-    for (const item of this.batches.find((candidate) => candidate.key === batch)?.items ?? [])
-      this.forget(item.key);
+    const found = this.batches.find((candidate) => candidate.key === batch);
+    if (found) this.gone.add(found);
+    for (const item of found?.items ?? []) this.forget(item.key);
     this.batches = this.batches.filter((candidate) => candidate.key !== batch);
     this.made.delete(batch);
     this.changed();
   }
   /** Stops every upload and forgets them, as the account signs out. */
   forgetAll() {
-    for (const batch of this.batches) for (const item of batch.items) this.forget(item.key);
+    for (const batch of this.batches) {
+      this.gone.add(batch);
+      for (const item of batch.items) this.forget(item.key);
+    }
     this.batches = [];
     this.waiting = [];
+    this.next = 0;
+    this.again = [];
     this.made.clear();
     this.changed();
   }
@@ -214,11 +244,24 @@ export class Uploads {
     this.discard(key);
     this.files.delete(key);
     this.replacing.delete(key);
+    this.byKey.delete(key);
+  }
+  /** The next upload waiting its turn, if any. */
+  private waitingNext(): string | undefined {
+    const again = this.again.shift();
+    if (again !== undefined) return again;
+    if (this.next >= this.waiting.length) {
+      this.waiting = [];
+      this.next = 0;
+      return undefined;
+    }
+    return this.waiting[this.next++];
   }
   /** Starts what is waiting, as far as there is room. */
   private pump() {
-    while (this.running < UPLOADS_AT_ONCE && this.waiting.length) {
-      const key = this.waiting.shift()!;
+    while (this.running < UPLOADS_AT_ONCE) {
+      const key = this.waitingNext();
+      if (key === undefined) return;
       if (this.find(key)?.item.state !== 'queued') continue;
       this.running++;
       void this.run(key).finally(() => {
@@ -241,16 +284,14 @@ export class Uploads {
     return making;
   }
   /** Makes the folders of a batch that no file needs, said in its note when one cannot be. */
-  private async makeFolders(batch: string, paths: readonly string[]) {
+  private async makeFolders(batch: UploadBatch, paths: readonly string[]) {
     for (const path of paths) {
       try {
-        await this.makeFolder(batch, path);
+        await this.makeFolder(batch.key, path);
       } catch (error) {
-        this.batches = this.batches.map((candidate) =>
-          candidate.key === batch && !candidate.note
-            ? { ...candidate, note: `${path} could not be made: ${errorMessage(error)}` }
-            : candidate,
-        );
+        if (batch.note || this.gone.has(batch)) continue;
+        batch.note = `${path} could not be made: ${errorMessage(error)}`;
+        if (!this.batches.includes(batch)) this.batches.push(batch);
         this.changed();
       }
     }

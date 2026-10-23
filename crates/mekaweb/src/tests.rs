@@ -580,6 +580,49 @@ async fn files_list_and_uploads_land_through_the_api() {
 }
 
 #[tokio::test]
+async fn entries_chosen_download_as_one_zip_by_the_id_kept_for_them() {
+    let (_app, router, _, dir) = mekaweb().await;
+    let cookie = sign_in(&router).await;
+    let work = dir.path().join("work");
+    std::fs::write(work.join("a.txt"), "alpha").unwrap();
+    std::fs::write(work.join("b.txt"), "beta").unwrap();
+    std::fs::write(work.join("c.txt"), "gamma").unwrap();
+    let select = |names: serde_json::Value| {
+        request("POST", "/api/files/zip/selection")
+            .header(header::COOKIE, &cookie)
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                serde_json::json!({ "path": work, "names": names }).to_string(),
+            ))
+            .unwrap()
+    };
+    let made = send(&router, select(serde_json::json!(["a.txt", "c.txt"]))).await;
+    assert_eq!(made.status(), StatusCode::OK);
+    let id = json(made).await["id"].as_str().unwrap().to_owned();
+    let download = |query: String| {
+        request("GET", &format!("/api/files/zip?{query}"))
+            .header(header::COOKIE, &cookie)
+            .body(Body::empty())
+            .unwrap()
+    };
+    let zip = send(&router, download(format!("selection={id}"))).await;
+    assert_eq!(zip.status(), StatusCode::OK);
+    let archive = zip.into_body().collect().await.unwrap().to_bytes();
+    let archive = zip::ZipArchive::new(std::io::Cursor::new(archive.to_vec())).unwrap();
+    let mut names: Vec<String> = archive
+        .file_names()
+        .map(|name| name.unwrap().into_owned())
+        .collect();
+    names.sort_unstable();
+    assert_eq!(names, ["work/", "work/a.txt", "work/c.txt"]);
+    // A name is one name, and an id is one given.
+    let refused = send(&router, select(serde_json::json!(["../a.txt"]))).await;
+    assert_eq!(refused.status(), StatusCode::BAD_REQUEST);
+    let unknown = send(&router, download("selection=nothing".to_owned())).await;
+    assert_eq!(unknown.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
 async fn paths_reach_meka_as_written_and_never_leave_its_api() {
     let (_app, router, _, _dir) = mekaweb().await;
     let cookie = sign_in(&router).await;

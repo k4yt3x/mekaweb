@@ -224,8 +224,9 @@ export type LiveGroup = ReturnType<typeof groupLiveMessages>[number];
 /**
  * The live groups without the agent's output that saved history shows already: a turn replayed on
  * reconnect starts again from its beginning, so what came up to the last tool call history holds
- * is left out. Notices stay, which history does not keep. `continued` says whether what is left
- * starts by carrying on that saved output.
+ * with its result is left out; one still running shows its progress here. Notices stay, which
+ * history does not keep. `continued` says whether what is left starts by carrying on that saved
+ * output.
  */
 export function liveAfterSaved(
   groups: readonly LiveGroup[],
@@ -233,11 +234,9 @@ export function liveAfterSaved(
 ): { groups: LiveGroup[]; continued: boolean } {
   const savedCalls = new Set(
     saved.flatMap((message) =>
-      message.role === 'assistant'
-        ? message.content.flatMap((block) =>
-            block.type === 'tool_use' && block.id ? [block.id] : [],
-          )
-        : [],
+      message.content.flatMap((block) =>
+        block.type === 'tool_result' && block.tool_use_id ? [block.tool_use_id] : [],
+      ),
     ),
   );
   let last: { group: number; block: number } | undefined;
@@ -250,15 +249,20 @@ export function liveAfterSaved(
   });
   if (!last) return { groups: [...groups], continued: false };
   const through = last;
+  let carried: LiveGroup | undefined;
   const left = groups.flatMap((group, groupIndex): LiveGroup[] => {
     if (group.kind !== 'agent' || groupIndex > through.group) return [group];
     const blocks = group.blocks.filter(
       ({ block }, blockIndex) =>
         block.kind === 'notice' || (groupIndex === through.group && blockIndex > through.block),
     );
-    return blocks.length ? [{ ...group, blocks }] : [];
+    if (!blocks.length) return [];
+    const kept = { ...group, blocks };
+    if (groupIndex === through.group) carried = kept;
+    return [kept];
   });
-  return { groups: left, continued: left[0]?.kind === 'agent' };
+  // Only the group the saved output ends in carries it on, and only with nothing before it.
+  return { groups: left, continued: carried !== undefined && left[0] === carried };
 }
 
 /**
