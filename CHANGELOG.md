@@ -7,12 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-10-23
+
 ### Added
 
 - mekaweb runs on macOS and Windows; releases add Apple silicon and x86-64 Windows binaries.
 - Files lists the folder shown again by itself whenever anything changes in it.
 - Files takes Windows paths, from a drive or a share, and hides files Windows marks hidden.
 - The terminal runs PowerShell on Windows, unless `terminal.shell` names another shell.
+- Each ended turn shows when it finished and how long it ran; its details show tokens and more.
 
 ### Removed
 
@@ -510,7 +513,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Light and dark themes, narrow layouts, and collapsible, resizable session panels.
 - Hosting at the root or a subpath, with GitHub Pages deployment on version tags.
 
-[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.25.0...HEAD
+[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.26.0...HEAD
+[0.26.0]: https://github.com/k4yt3x/mekaweb/compare/0.25.0...0.26.0
 [0.25.0]: https://github.com/k4yt3x/mekaweb/compare/0.24.1...0.25.0
 [0.24.1]: https://github.com/k4yt3x/mekaweb/compare/0.24.0...0.24.1
 [0.24.0]: https://github.com/k4yt3x/mekaweb/compare/0.23.1...0.24.0

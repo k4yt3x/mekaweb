@@ -20,6 +20,7 @@ See the [captured schema and generation instructions](api/README.md) for the wir
 | GET    | `/v1/sessions/{id}/messages`               | Paged history, revision, compaction markers, and `ETag` for history edits       |
 | GET    | `/v1/sessions/{id}/blobs/{hash}`           | Authenticated image display/download                                            |
 | POST   | `/v1/sessions/{id}/turn`                   | Detached idle turns, images, skills, retention, and safe retries                |
+| GET    | `/v1/sessions/{id}/turns`                  | Each ended turn's summary: when it ended, how long it ran, and what it spent    |
 | GET    | `/v1/sessions/{id}/turns/{turn_id}`        | The ending of a sent turn whose terminal the feed did not deliver               |
 | POST   | `/v1/sessions/{id}/cancel`                 | Cancel the observed turn id                                                     |
 | POST   | `/v1/sessions/{id}/inbox`                  | Steer, follow-up, interrupt, and durable idempotency                            |

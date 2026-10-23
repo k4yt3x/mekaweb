@@ -40,6 +40,7 @@ import { useTextDraft } from '../session/drafts';
 import { subagentsQuery, useSessionStates } from '../session/hooks';
 import { problemText } from '../session/notices';
 import { useMarkSeen } from '../session/unread';
+import { useTurnRecords } from '../session/turn-records';
 import { Button } from '../components/ui/button';
 import { Empty, ErrorNotice, Loading } from '../components/common';
 import { NoticeMessage, TurnNotice } from '../components/notice-message';
@@ -69,6 +70,7 @@ import {
 import { MessageComposer } from '../components/message-composer';
 import { CopyAction, HistoryAction, MessageEditor, TurnActions } from './turn-actions';
 import { ChecklistStrip } from './checklist-strip';
+import { TurnSummary } from './turn-summary';
 import { useMentions } from '../components/workspace';
 import {
   DEFAULT_INPUT_HEIGHT,
@@ -180,6 +182,16 @@ export function Conversation({ state }: { state: SessionState }) {
   const saved = useMemo(() => state.saved?.messages ?? [], [state.saved]);
   const turns = useMemo(() => turnIndex(saved, state.offset), [saved, state.offset]);
   const kinds = useMemo(() => messages.map(turnKind), [messages]);
+  // Each turn closes under the last group it added, once its record says how it ended.
+  const records = useTurnRecords(state);
+  const turnEnds = useMemo(() => {
+    const ends = new Map<string, number>();
+    messages.forEach((group, position) => {
+      const turnId = group.at(-1)?.message.turn_id;
+      if (turnId) ends.set(turnId, position);
+    });
+    return ends;
+  }, [messages]);
   const latestInput = kinds.lastIndexOf('input');
   const latestReply = kinds.lastIndexOf('reply');
   // History edits are decided on the saved conversation, so none while a turn adds to it.
@@ -215,7 +227,11 @@ export function Conversation({ state }: { state: SessionState }) {
     const kind = kinds[position];
     const label = first.message.turn_label;
     const turn = label ? turns.get(label) : undefined;
-    if (!kind) return {};
+    const turnId = group.at(-1)?.message.turn_id;
+    const record = turnId && turnEnds.get(turnId) === position ? records?.get(turnId) : undefined;
+    const summary = record?.ended_at ? <TurnSummary turn={record} /> : undefined;
+    if (!kind)
+      return summary ? { actions: <TurnActions label="Turn" latest summary={summary} /> } : {};
     const later = (turn?.turns ?? 1) - 1;
     const removed = `${later} later turn${later === 1 ? '' : 's'}`;
     const files = 'Files the agent changed stay changed.';
@@ -245,7 +261,7 @@ export function Conversation({ state }: { state: SessionState }) {
           />
         ),
         actions: (
-          <TurnActions label="Message actions" latest={position === latestInput}>
+          <TurnActions label="Message actions" latest={position === latestInput} summary={summary}>
             <CopyAction text={text} label="Copy message" onError={setFeedbackError} />
             {canWithdraw && turn && opens && (
               <>
@@ -282,7 +298,7 @@ export function Conversation({ state }: { state: SessionState }) {
     const again = opening && !opening.compaction ? resendable(opening) : undefined;
     return {
       actions: (
-        <TurnActions label="Reply actions" latest={position === latestReply}>
+        <TurnActions label="Reply actions" latest={position === latestReply} summary={summary}>
           <CopyAction text={text} label="Copy reply" onError={setFeedbackError} />
           {canWithdraw && turn && (
             <>

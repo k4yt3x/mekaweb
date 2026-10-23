@@ -1401,10 +1401,13 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_tree_is_removed_whatever_its_names_and_without_following_links() {
+        #[cfg(not(target_os = "macos"))]
         use std::os::unix::ffi::OsStrExt;
         let dir = tempfile::tempdir().unwrap();
         let tree = dir.path().join("tree");
         std::fs::create_dir_all(tree.join("a/b")).unwrap();
+        // APFS takes only names that are valid UTF-8.
+        #[cfg(not(target_os = "macos"))]
         std::fs::write(tree.join(OsStr::from_bytes(b"not-utf8-\xff")), "x").unwrap();
         std::fs::write(tree.join("a/b/c"), "x").unwrap();
         std::fs::write(dir.path().join("kept"), "x").unwrap();

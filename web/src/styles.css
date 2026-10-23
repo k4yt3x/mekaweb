@@ -2047,7 +2047,8 @@ progress::-moz-progress-bar {
 .menu-panel,
 .permission-popup,
 .profile-popup,
-.reading-options {
+.reading-options,
+.turn-details {
   z-index: 80;
   border: 1px solid var(--border);
   border-radius: var(--radius-card);
@@ -3134,21 +3135,55 @@ select option {
 .turn-actions .button-icon:is(:hover, :focus-visible) {
   color: var(--text);
 }
-/* Hidden by opacity, not visibility, so tabbing to an action still reveals the row. */
-.turn-actions[data-reveal] {
+/* Hidden by opacity, not visibility, so tabbing to an action still reveals the row. The turn's
+   summary stays in sight. */
+.turn-actions[data-reveal] > :not(.turn-summary) {
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.15s;
 }
-.message:is(:hover, :focus-within) > .turn-actions[data-reveal] {
+.message:is(:hover, :focus-within) > .turn-actions[data-reveal] > :not(.turn-summary) {
   opacity: 1;
   pointer-events: auto;
 }
 @media (hover: none) {
-  .turn-actions[data-reveal] {
+  .turn-actions[data-reveal] > :not(.turn-summary) {
     opacity: 1;
     pointer-events: auto;
   }
+}
+.turn-summary {
+  margin-right: auto;
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.75rem;
+  text-align: left;
+  cursor: pointer;
+}
+.turn-summary:is(:hover, :focus-visible, [aria-expanded='true']) {
+  color: var(--text);
+}
+.turn-details {
+  max-width: min(320px, calc(100vw - 20px));
+  padding: 8px 10px;
+  font-size: 0.75rem;
+}
+.turn-details dl {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 3px 14px;
+  margin: 0;
+}
+.turn-details dt {
+  color: var(--muted);
+}
+.turn-details dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
 }
 .message-editor textarea {
   font-size: var(--conversation-font-size, 0.85rem);

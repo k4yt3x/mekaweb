@@ -11,11 +11,14 @@ import { Dialog } from '../components/ui/dialog';
 export function TurnActions({
   label,
   latest,
+  summary,
   children,
 }: {
   label: string;
   latest: boolean;
-  children: ReactNode;
+  /** The row that closes the turn, when this ends one; it shows whether the actions do or not. */
+  summary?: ReactNode;
+  children?: ReactNode;
 }) {
   return (
     <div
@@ -24,6 +27,7 @@ export function TurnActions({
       aria-label={label}
       data-reveal={latest ? undefined : ''}
     >
+      {summary}
       {children}
     </div>
   );
