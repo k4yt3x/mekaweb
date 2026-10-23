@@ -640,6 +640,8 @@ export interface components {
     /** @description A folder's entries. */
     Listing: {
       entries: components['schemas']['Entry'][];
+      /** @description The home folder, absolute, which `~` names; none where it is not known. */
+      home?: string | null;
       /** @description The folder, absolute. */
       path: string;
     };
@@ -2097,6 +2099,8 @@ export interface operations {
     parameters: {
       query: {
         path: string;
+        /** @description Only these names in the folder, separated by `/`, which no name holds. */
+        only?: string | null;
       };
       header?: never;
       path?: never;

@@ -275,6 +275,8 @@ pub(crate) struct Listing {
     /// The folder, absolute.
     pub(crate) path: String,
     pub(crate) entries: Vec<Entry>,
+    /// The home folder, absolute, which `~` names; none where it is not known.
+    pub(crate) home: Option<String>,
 }
 
 /// A text file's contents, for a preview.
@@ -362,6 +364,7 @@ impl Files {
             Ok(Listing {
                 path: shown(&path),
                 entries,
+                home: resolve("~").ok().map(|home| shown(&home)),
             })
         })
         .await

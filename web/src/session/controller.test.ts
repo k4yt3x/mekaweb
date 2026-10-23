@@ -273,6 +273,105 @@ it('does not show an opening again when the feed hands it over again on rejoinin
   expect(f.state().blocks.filter((block) => block.kind === 'message')).toHaveLength(1);
 });
 
+it.each(['before', 'after'])(
+  'does not show an opening the earlier history holds, handed over %s the history is read',
+  async (order) => {
+    const f = await fixture();
+    // The running turn did more than a page holds, so its opening is behind Load earlier.
+    const rows: Schema['MessageView'][] = [
+      ...Array.from({ length: 10 }, (_, i) => ({
+        role: i % 2 ? 'assistant' : 'user',
+        content: [{ type: 'text' as const, text: `old ${i}` }],
+        turn_id: `old-${Math.floor(i / 2)}`,
+      })),
+      remoteOpening,
+      ...Array.from({ length: 109 }, (_, i) => ({
+        role: 'assistant',
+        content: [{ type: 'text' as const, text: `step ${i}` }],
+        turn_id: 'remote',
+      })),
+    ];
+    vi.spyOn(f.api, 'get').mockImplementation(async <T>(path: string, query?: Query) => {
+      if (!path.endsWith('/messages')) return f.session as T;
+      const offset = Number(query?.offset ?? 0);
+      const limit = Number(query?.limit ?? 100);
+      return {
+        session_id: 's',
+        total: rows.length,
+        revision: 1,
+        messages: structuredClone(rows.slice(offset, offset + limit)),
+      } as T;
+    });
+    f.session.turn_in_flight = true;
+    // Rejoining, as after mekaweb restarts, the feed hands over the turn's opening.
+    const rejoin = async () => {
+      await f.event('turn.started', { turn_id: 'remote', resumed: true }, true);
+      await f.event(
+        'message.appended',
+        { turn_id: 'remote', role: 'user', content: remoteOpening.content, resumed: true },
+        true,
+      );
+    };
+    if (order === 'before') await rejoin();
+    await f.controller.refresh('s');
+    if (order === 'after') await rejoin();
+    expect(f.state().offset).toBe(20);
+    expect(f.state().blocks).toEqual([]);
+    await f.controller.earlier('s');
+    expect(f.state().offset).toBe(0);
+    expect(f.state().saved?.messages.filter((message) => message.role === 'user')).toContainEqual(
+      remoteOpening,
+    );
+    expect(f.state().blocks).toEqual([]);
+  },
+);
+
+it('opens history on the calls whose results would begin it, loaded at first or earlier', async () => {
+  const f = await fixture();
+  // A tool round at each page's edge: a call at 19 answered at 20, and one at 119 answered at 120.
+  const rows: Schema['MessageView'][] = Array.from({ length: 220 }, (_, i) => {
+    const id = `call-${i}`;
+    if (i === 19 || i === 119)
+      return {
+        role: 'assistant',
+        content: [{ type: 'tool_use', id, name: 'shell_execute', input: { command: 'true' } }],
+      };
+    if (i === 20 || i === 120)
+      return {
+        role: 'user',
+        content: [
+          {
+            type: 'tool_result',
+            tool_use_id: `call-${i - 1}`,
+            is_error: false,
+            content: [{ type: 'text', text: 'ok' }],
+          },
+        ],
+      };
+    return { role: i % 2 ? 'assistant' : 'user', content: [{ type: 'text', text: `row ${i}` }] };
+  });
+  vi.mocked(f.api.get).mockImplementation(async <T>(path: string, query?: Query) => {
+    if (!path.endsWith('/messages')) return structuredClone(f.session) as T;
+    const offset = Number(query?.offset ?? 0);
+    const limit = Number(query?.limit ?? rows.length);
+    return {
+      session_id: 's',
+      messages: structuredClone(rows.slice(offset, offset + limit)),
+      total: rows.length,
+      revision: 1,
+    } as T;
+  });
+  await f.controller.refresh('s');
+  expect(f.state().offset).toBe(119);
+  expect(f.state().saved?.messages[0]).toEqual(rows[119]);
+  await f.controller.earlier('s');
+  expect(f.state().offset).toBe(19);
+  expect(f.state().saved?.messages).toEqual(rows.slice(19));
+  await f.controller.earlier('s');
+  expect(f.state().offset).toBe(0);
+  expect(f.state().saved?.messages).toEqual(rows);
+});
+
 it('drops a shown interrupt once a refresh finds it saved, whatever order its keys come in', async () => {
   const f = await fixture();
   f.session.turn_in_flight = true;
@@ -2125,7 +2224,8 @@ it('reads only the messages after those it holds, checking the last one is still
     .mocked(f.api.get)
     .mock.calls.filter(([path]) => path.endsWith('/messages'))
     .map(([, query]) => query);
-  expect(again).toContainEqual({ offset: 50, limit: 92 });
+  // From one before, in case the page opens on results whose calls that one made.
+  expect(again).toContainEqual({ offset: 49, limit: 93 });
   expect(f.state().saved?.messages[0]).toEqual(message(60));
 });
 

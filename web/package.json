@@ -1,6 +1,6 @@
 {
   "name": "mekaweb",
-  "version": "0.24.1",
+  "version": "0.25.0",
   "private": true,
   "description": "The web interface for meka",
   "license": "AGPL-3.0-or-later",
@@ -22,6 +22,7 @@
     "api:generate": "cargo run --quiet --manifest-path ../Cargo.toml -p mekaweb -- openapi > src/api/mekaweb-openapi.json && npm run generate --workspace @mekaweb/schema"
   },
   "dependencies": {
+    "@radix-ui/react-context-menu": "2.3.7",
     "@radix-ui/react-dialog": "1.1.23",
     "@radix-ui/react-dropdown-menu": "2.1.24",
     "@radix-ui/react-popover": "1.1.23",

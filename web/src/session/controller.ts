@@ -205,16 +205,34 @@ function sameMessage(a: Schema['MessageView'], b: Schema['MessageView']) {
   );
 }
 /**
- * Whether saved history holds a message the feed announced. An opening is found by its turn
- * alone, since an interrupt joined onto an opening nothing answered rewrites it in place.
+ * Whether saved history, read from `offset`, holds a message the feed announced. An opening is
+ * found by its turn alone, since an interrupt joined onto an opening nothing answered rewrites it
+ * in place; a turn the history read begins inside opened in the earlier history not read yet.
  */
 function holds(
   saved: readonly Schema['MessageView'][],
+  offset: number,
   message: Schema['MessageView'],
   opening: boolean,
 ) {
   if (!opening || !message.turn_id) return saved.some((item) => sameMessage(item, message));
-  return saved.find((item) => item.turn_id === message.turn_id)?.role === 'user';
+  const first = saved.findIndex((item) => item.turn_id === message.turn_id);
+  return first >= 0 && (saved[first]!.role === 'user' || (first === 0 && offset > 0));
+}
+/** Whether a message answers tool calls, which the message before it made. */
+function answersCalls(message: Schema['MessageView'] | undefined) {
+  return message?.role === 'user' && message.content.some((block) => block.type === 'tool_result');
+}
+/**
+ * The messages read from `start`, one before `offset`, and where they begin: the one before is kept
+ * only when the first at `offset` answers its calls, so history never opens on results whose calls
+ * are not shown.
+ */
+function fromCalls(messages: Schema['MessageView'][], start: number, offset: number) {
+  if (start === offset) return { messages, offset };
+  return answersCalls(messages[1])
+    ? { messages, offset: start }
+    : { messages: messages.slice(1), offset };
 }
 function turnBody(message: string, options: ComposerOptions): Schema['TurnRequest'] {
   return {
@@ -706,7 +724,7 @@ export class SessionController {
       // and a reconnect may hand over again one this feed already showed.
       if (
         !(seen && data.resumed === true) &&
-        (!state.saved || !holds(state.saved.messages, message, opening))
+        (!state.saved || !holds(state.saved.messages, state.offset, message, opening))
       )
         this.publish(entry, {
           textStreaming: false,
@@ -1200,7 +1218,8 @@ export class SessionController {
         block.kind === 'submission'
           ? pendingPreviews.has(block.key)
           : !reconciled &&
-            (block.kind !== 'message' || !holds(saved.messages, block.message, block.opening)),
+            (block.kind !== 'message' ||
+              !holds(saved.messages, offset, block.message, block.opening)),
       );
       this.publish(entry, {
         saved,
@@ -1271,7 +1290,8 @@ export class SessionController {
       const messages: Schema['MessageView'][] = [];
       let changed = false;
       let ambiguous = false;
-      for (let position = offset; position < head.total;) {
+      const start = Math.max(0, offset - 1);
+      for (let position = start; position < head.total;) {
         const page = await this.api.get<Schema['MessagesResponse']>(
           path,
           { offset: position, limit: Math.min(1000, head.total - position) },
@@ -1285,7 +1305,10 @@ export class SessionController {
         messages.push(...page.messages);
         position += page.messages.length;
       }
-      if (!changed) return { saved: { ...head, messages }, offset, ambiguous };
+      if (!changed) {
+        const read = fromCalls(messages, start, offset);
+        return { saved: { ...head, messages: read.messages }, offset: read.offset, ambiguous };
+      }
     }
     throw new Error(
       'The conversation changed repeatedly while loading. Refresh after the current rewrite completes.',
@@ -1295,15 +1318,17 @@ export class SessionController {
     const entry = this.entries.get(id);
     if (!entry?.state.saved || entry.state.offset === 0) return;
     const previous = entry.state.saved;
-    const offset = Math.max(0, entry.state.offset - this.pageSize());
+    const wanted = Math.max(0, entry.state.offset - this.pageSize());
     // One message more, to check the page ends where the shown ones begin: meka's turn retention
-    // deletes old turns without moving the revision, which moves every later message up.
+    // deletes old turns without moving the revision, which moves every later message up. And one
+    // before it, in case the page opens on results that answer it.
     const first = previous.messages[0];
+    const start = Math.max(0, wanted - 1);
     const request = ++entry.snapshotEpoch;
     try {
       const page = await this.api.get<Schema['MessagesResponse']>(
         sessionPath(id) + '/messages',
-        { offset, limit: entry.state.offset - offset + (first ? 1 : 0) },
+        { offset: start, limit: entry.state.offset - start + (first ? 1 : 0) },
         entry.abort.signal,
       );
       if (request !== entry.snapshotEpoch) return;
@@ -1315,10 +1340,14 @@ export class SessionController {
         await this.refresh(id);
         return;
       }
-      this.publish(entry, {
-        saved: { ...page, messages: [...page.messages, ...previous.messages] },
-        offset,
-      });
+      const { messages, offset } = fromCalls(page.messages, start, wanted);
+      const saved = { ...page, messages: [...messages, ...previous.messages] };
+      // What the feed showed may be in the page just read.
+      const blocks = entry.state.blocks.filter(
+        (block) =>
+          block.kind !== 'message' || !holds(saved.messages, offset, block.message, block.opening),
+      );
+      this.publish(entry, { saved, offset, blocks });
     } catch (error) {
       this.publish(entry, { error: asError(error) });
     }

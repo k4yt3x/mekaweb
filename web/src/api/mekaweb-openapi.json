@@ -6,7 +6,7 @@
     "license": {
       "name": "AGPL-3.0-or-later"
     },
-    "version": "0.24.1"
+    "version": "0.25.0"
   },
   "paths": {
     "/api/account/devices": {
@@ -1275,6 +1275,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "only",
+            "in": "query",
+            "description": "Only these names in the folder, separated by `/`, which no name holds.",
+            "required": false,
+            "schema": {
+              "type": ["string", "null"]
+            }
           }
         ],
         "responses": {
@@ -1775,6 +1784,10 @@
             "items": {
               "$ref": "#/components/schemas/Entry"
             }
+          },
+          "home": {
+            "type": ["string", "null"],
+            "description": "The home folder, absolute, which `~` names; none where it is not known."
           },
           "path": {
             "type": "string",

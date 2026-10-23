@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-10-22
+
+### Added
+
+- Files uploads folders, dropped or picked with Upload folder in the folder's … menu.
+- Files goes up with `..` at the top of the list; a home button replaces the Up button.
+- Files selects entries with a click, Ctrl-click and Shift-click, or a long press on touch screens.
+- Files opens an entry with a double click or Enter; a tap still opens it on a touch screen.
+- Several selected entries can be mentioned, downloaded as one zip, moved, trashed or deleted.
+- A right click on an entry in Files opens its menu, or the selection's on one of several selected.
+- A file's preview is sized to it: pictures and video fit, sound or a PDF's link is a small card.
+- Files uploads ten files at a time; the rest wait their turn.
+- Files that already exist can be replaced or skipped once for the whole upload.
+
+### Fixed
+
+- Files picked or dropped together are one upload, with a Mention for each file and one Dismiss.
+- An upload's status no longer wraps beside a long file name.
+- A large upload scrolls in its own box, so the folder stays in sight below it.
+- A replaced upload no longer says the file already exists.
+- Many files landing together refresh the folder once, not once for each.
+- A running turn's prompt no longer shows twice after mekaweb restarts with older history unloaded.
+- After a reconnect, the live preview leaves out what history shows, with no second Agent heading.
+- History never opens on a tool result apart from its call, under a heading of its own.
+- Zips from Files open in 7-Zip, bsdtar and xarchiver; headers no longer carry bad ZIP64 sizes.
+- Dialogs opened from Files on a phone dim the sheet behind them.
+
 ## [0.24.1] - 2026-10-22
 
 ### Fixed
@@ -471,7 +498,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Light and dark themes, narrow layouts, and collapsible, resizable session panels.
 - Hosting at the root or a subpath, with GitHub Pages deployment on version tags.
 
-[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.24.1...HEAD
+[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.25.0...HEAD
+[0.25.0]: https://github.com/k4yt3x/mekaweb/compare/0.24.1...0.25.0
 [0.24.1]: https://github.com/k4yt3x/mekaweb/compare/0.24.0...0.24.1
 [0.24.0]: https://github.com/k4yt3x/mekaweb/compare/0.23.1...0.24.0
 [0.23.1]: https://github.com/k4yt3x/mekaweb/compare/0.23.0...0.23.1

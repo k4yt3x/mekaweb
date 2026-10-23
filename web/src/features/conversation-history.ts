@@ -219,6 +219,48 @@ export function groupLiveMessages(blocks: LiveBlock[], submissions: Submission[]
   return groups;
 }
 
+export type LiveGroup = ReturnType<typeof groupLiveMessages>[number];
+
+/**
+ * The live groups without the agent's output that saved history shows already: a turn replayed on
+ * reconnect starts again from its beginning, so what came up to the last tool call history holds
+ * is left out. Notices stay, which history does not keep. `continued` says whether what is left
+ * starts by carrying on that saved output.
+ */
+export function liveAfterSaved(
+  groups: readonly LiveGroup[],
+  saved: readonly Schema['MessageView'][],
+): { groups: LiveGroup[]; continued: boolean } {
+  const savedCalls = new Set(
+    saved.flatMap((message) =>
+      message.role === 'assistant'
+        ? message.content.flatMap((block) =>
+            block.type === 'tool_use' && block.id ? [block.id] : [],
+          )
+        : [],
+    ),
+  );
+  let last: { group: number; block: number } | undefined;
+  groups.forEach((group, groupIndex) => {
+    if (group.kind === 'agent')
+      group.blocks.forEach(({ block }, blockIndex) => {
+        if (block.kind === 'tool' && savedCalls.has(block.id))
+          last = { group: groupIndex, block: blockIndex };
+      });
+  });
+  if (!last) return { groups: [...groups], continued: false };
+  const through = last;
+  const left = groups.flatMap((group, groupIndex): LiveGroup[] => {
+    if (group.kind !== 'agent' || groupIndex > through.group) return [group];
+    const blocks = group.blocks.filter(
+      ({ block }, blockIndex) =>
+        block.kind === 'notice' || (groupIndex === through.group && blockIndex > through.block),
+    );
+    return blocks.length ? [{ ...group, blocks }] : [];
+  });
+  return { groups: left, continued: left[0]?.kind === 'agent' };
+}
+
 /**
  * The submissions whose outcome the user must see: any whose outcome is unknown, and the latest if
  * it failed, unless its turn's failure is reported below and its words stay in history. A queued

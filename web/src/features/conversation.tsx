@@ -52,6 +52,7 @@ import { ComposerSettingsForm } from './session-settings';
 import {
   groupAgentMessages,
   groupLiveMessages,
+  liveAfterSaved,
   groupToolResults,
   isInput,
   messageText,
@@ -125,9 +126,14 @@ export function Conversation({ state }: { state: SessionState }) {
   }
   const history = useMemo(() => groupToolResults(state.saved?.messages ?? []), [state.saved]);
   const messages = useMemo(() => groupAgentMessages(history.messages), [history.messages]);
-  const live = useMemo(
-    () => groupLiveMessages(state.blocks, state.submissions),
-    [state.blocks, state.submissions],
+  // What saved history shows already is not shown again; what is left may carry on its reply.
+  const { groups: live, continued } = useMemo(
+    () =>
+      liveAfterSaved(
+        groupLiveMessages(state.blocks, state.submissions),
+        state.saved?.messages ?? [],
+      ),
+    [state.blocks, state.submissions, state.saved],
   );
   const activity = responseActivityIndicator(state, live);
   const waiting =
@@ -450,11 +456,15 @@ export function Conversation({ state }: { state: SessionState }) {
                           showTurnContext={showTurnContext}
                         />
                       ) : (
-                        <article className="message message-assistant">
-                          <MessageHeader
-                            author="Agent"
-                            status={isSessionRunning(state) ? 'Live' : 'Saving…'}
-                          />
+                        <article
+                          className={`message message-assistant${index === 0 && continued ? ' message-continued' : ''}`}
+                        >
+                          {!(index === 0 && continued) && (
+                            <MessageHeader
+                              author="Agent"
+                              status={isSessionRunning(state) ? 'Live' : 'Saving…'}
+                            />
+                          )}
                           {group.blocks.map(({ block, index }) =>
                             block.kind === 'tool' ? (
                               <Tool

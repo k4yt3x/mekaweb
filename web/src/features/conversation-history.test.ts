@@ -5,6 +5,7 @@ import {
   groupLiveMessages,
   groupToolResults,
   isInput,
+  liveAfterSaved,
   messageText,
   pendingInboxMessages,
   recoverableSubmissions,
@@ -304,6 +305,41 @@ it('interleaves sent messages with live output and removes only reconciled previ
   const reconciled = groupLiveMessages([...blocks], [{ ...submission, preview: false }]);
   expect(reconciled).toHaveLength(1);
   expect(reconciled[0]?.kind).toBe('agent');
+});
+
+it('leaves out of a replayed turn what saved history shows, so the rest carries it on', () => {
+  const blocks: LiveBlock[] = [
+    { kind: 'text', text: 'Step 1.' },
+    { kind: 'tool', id: 'one' },
+    { kind: 'notice', level: 'warning', text: 'The provider is slow.' },
+    { kind: 'text', text: 'Step 2.' },
+    { kind: 'tool', id: 'two' },
+    { kind: 'text', text: 'Waiting.' },
+    { kind: 'tool', id: 'three' },
+  ];
+  const saved = [
+    message('assistant', { type: 'text', text: 'Step 1.' }, call('one')),
+    message('user', result('one')),
+    message('assistant', { type: 'text', text: 'Step 2.' }, call('two')),
+    message('user', result('two')),
+  ];
+  const { groups, continued } = liveAfterSaved(groupLiveMessages(blocks, []), saved);
+  expect(continued).toBe(true);
+  expect(groups).toHaveLength(1);
+  expect(groups[0]?.kind === 'agent' && groups[0].blocks.map(({ block }) => block)).toEqual([
+    { kind: 'notice', level: 'warning', text: 'The provider is slow.' },
+    { kind: 'text', text: 'Waiting.' },
+    { kind: 'tool', id: 'three' },
+  ]);
+  // Nothing in common with history: all of it shows, under its own heading.
+  const fresh = liveAfterSaved(groupLiveMessages(blocks.slice(5), []), saved);
+  expect(fresh.continued).toBe(false);
+  expect(fresh.groups[0]?.kind === 'agent' && fresh.groups[0].blocks).toHaveLength(2);
+  // All of it saved, with nothing after: nothing is left to show.
+  expect(liveAfterSaved(groupLiveMessages(blocks.slice(0, 2), []), saved)).toEqual({
+    groups: [],
+    continued: false,
+  });
 });
 
 const words: Schema['ContentBlockView'] = { type: 'text', text: 'Hello.' };

@@ -17,9 +17,10 @@ type Entry = Gateway['Entry'];
 const MAX_RICH_CHARS = 256 * 1024;
 
 /**
- * A file, opened from Files: a fixed frame with its name, details and actions, and the file
- * filling the rest, scrolling within it. Text shows with line numbers, Markdown rendered or as
- * source, and pictures, sound and video in place.
+ * A file, opened from Files: a frame with its name, details and actions, and the file below,
+ * scrolling within it. Text shows with line numbers, Markdown rendered or as source, in a frame
+ * of most of the window; a picture or video in one its size, up to that; sound, a PDF's link, or
+ * what is not text, in a small one.
  */
 export function FileViewer({
   entry,
@@ -35,6 +36,18 @@ export function FileViewer({
   const workspace = useWorkspace();
   const name = entry?.name ?? '';
   const kind = entry ? previewKind(name) : 'text';
+  // The same read the text below shows, to know whether there is text to give room to.
+  const text = useGateway<Gateway['Text']>(
+    '/api/files/text',
+    { path },
+    Boolean(entry) && kind === 'text',
+  );
+  const fit =
+    kind === 'image' || kind === 'video'
+      ? 'media'
+      : kind === 'text' && !text.data?.binary && !text.error
+        ? 'page'
+        : 'compact';
   return (
     <Dialog
       open={Boolean(entry)}
@@ -42,7 +55,7 @@ export function FileViewer({
         if (!open) onClose();
       }}
       title={name}
-      className="file-viewer"
+      className={`file-viewer file-viewer-fit-${fit}`}
       headerActions={
         entry && (
           <>

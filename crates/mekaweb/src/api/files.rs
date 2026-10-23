@@ -47,6 +47,14 @@ pub(crate) struct Location {
     pub(crate) path: String,
 }
 
+/// A folder to download as a zip.
+#[derive(Debug, Deserialize, IntoParams)]
+pub(crate) struct ZipQuery {
+    pub(crate) path: String,
+    /// Only these names in the folder, separated by `/`, which no name holds.
+    pub(crate) only: Option<String>,
+}
+
 /// A file to download or show.
 #[derive(Debug, Deserialize, IntoParams)]
 pub(crate) struct RawQuery {
@@ -349,13 +357,13 @@ fn encode_filename(name: &str) -> String {
     get,
     path = "/api/files/zip",
     tag = "files",
-    params(Location),
+    params(ZipQuery),
     responses((status = 200, description = "The folder as a zip", content_type = "application/zip"), (status = 404, body = crate::error::Problem), (status = 400, body = crate::error::Problem), (status = 403, body = crate::error::Problem))
 )]
 pub(crate) async fn zip(
     State(app): State<App>,
     _signed: Signed,
-    Query(query): Query<Location>,
+    Query(query): Query<ZipQuery>,
 ) -> ApiResult<Response> {
     let folder = path(&query.path)?;
     let dir = app.files.open_folder(folder.clone()).await?;
@@ -365,7 +373,10 @@ pub(crate) async fn zip(
     );
     let (sender, receiver) = mpsc::channel(8);
     let prefix = name.clone();
-    tokio::task::spawn_blocking(move || crate::files::zip::write(dir, prefix, sender));
+    let only = query
+        .only
+        .map(|names| names.split('/').map(str::to_owned).collect());
+    tokio::task::spawn_blocking(move || crate::files::zip::write(dir, prefix, only, sender));
     let disposition = format!(
         "attachment; filename*=UTF-8''{}",
         encode_filename(&format!("{name}.zip"))

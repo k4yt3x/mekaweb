@@ -557,6 +557,10 @@ async fn files_list_and_uploads_land_through_the_api() {
     assert_eq!(listing.status(), StatusCode::OK);
     let listing = json(listing).await;
     assert_eq!(listing["path"], work.display().to_string());
+    assert_eq!(
+        listing["home"],
+        crate::files::resolve("~").unwrap().display().to_string()
+    );
     let names: Vec<&str> = listing["entries"]
         .as_array()
         .unwrap()

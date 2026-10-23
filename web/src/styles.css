@@ -1144,7 +1144,8 @@ pre.bounded {
   inset: 0;
   background: #0006;
   backdrop-filter: blur(2px);
-  z-index: 60;
+  /* Level with dialogs, so one opened over another, as a file over the Files sheet, dims it. */
+  z-index: 61;
 }
 .dialog-content {
   position: fixed;
@@ -2560,6 +2561,10 @@ progress::-moz-progress-bar {
 .replay-notice {
   /* Match the bottom gap, which includes the next message's 16px top padding. */
   margin-top: 28px;
+}
+/* The rest of a reply shown above, as it arrives. */
+.message.message-continued {
+  padding-top: 0;
 }
 .agent-waiting-status {
   display: flex;
@@ -4134,6 +4139,22 @@ details > summary:has(.inline-heading) {
 .file-toolbar-gap {
   flex: 1;
 }
+.file-selection {
+  min-height: 36px;
+}
+.file-selection-count {
+  margin-left: 9px;
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+.file-select {
+  flex-shrink: 0;
+  width: 15px;
+  height: 15px;
+  margin: 0 0 0 12px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
 .file-list {
   display: flex;
   flex-direction: column;
@@ -4152,6 +4173,16 @@ details > summary:has(.inline-heading) {
 .file-entry:last-child {
   border-bottom: 0;
 }
+/* As tall as the rows beside it, which have a menu button. */
+.file-entry.file-parent {
+  min-height: 37px;
+}
+.file-entry[data-selected] {
+  background: var(--accent-soft);
+}
+.file-entry[data-selected] .file-entry-open:hover {
+  background: none;
+}
 .file-entry-open {
   flex: 1;
   min-width: 0;
@@ -4163,6 +4194,10 @@ details > summary:has(.inline-heading) {
   padding: 8px 4px 8px 10px;
   color: var(--text);
   text-align: left;
+  /* A double click or a long press selects the entry, not its name's text. */
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
 }
 .file-entry-open:hover {
   background: var(--surface);
@@ -4219,50 +4254,101 @@ a.menu-item {
   gap: 8px;
   margin-bottom: 14px;
 }
-.upload-item {
+.upload-batch {
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 10px 12px;
+  padding: 6px 6px 6px 12px;
   font-size: 0.8rem;
 }
-.upload-item[data-state='failed'],
-.upload-item[data-state='exists'] {
+.upload-batch:has(.notice-inline) {
   border-color: color-mix(in srgb, var(--danger) 40%, var(--border));
+}
+.upload-batch > .notice-inline {
+  margin: 4px 8px 4px 0;
+}
+/* A large batch scrolls within, so the folder stays in sight below it. */
+.upload-items {
+  max-height: 260px;
+  overflow-y: auto;
+}
+.upload-item {
+  padding: 2px 0;
 }
 .upload-heading {
   display: flex;
-  justify-content: space-between;
-  gap: 10px;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
 }
 .upload-heading strong {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.upload-heading > span {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.upload-heading > svg {
+  flex-shrink: 0;
+  color: var(--muted);
+}
+.upload-existing {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 0 6px;
+}
+.upload-existing span {
+  flex: 1;
+}
 .upload-item progress {
-  width: 100%;
+  display: block;
+  width: calc(100% - 8px);
   height: 6px;
-  margin: 8px 0 2px;
+  margin: 2px 0 6px;
   accent-color: var(--accent);
 }
-.upload-item .actions {
+.upload-item .notice-inline {
+  margin: 0 8px 6px 0;
+}
+.upload-batch > .actions {
   justify-content: flex-end;
-  margin-top: 4px;
 }
 .notice-inline {
   color: var(--danger);
   margin: 6px 0 0;
 }
-/* Files' viewer: a fixed frame whose file fills it and scrolls within, under a header that stays. */
+/* Files' viewer: a frame whose file scrolls within it, under a header that stays. Text has most of
+   the window; a picture or video as much as it shows, up to that; sound or a link a small card. */
 .dialog-content.file-viewer {
+  /* The largest it gets, and what its header and the media's margin take of that. */
+  --viewer-width: min(1180px, calc(var(--app-width) - 48px));
+  --viewer-height: min(88dvh, calc(var(--app-height) - 48px));
+  --viewer-chrome: 126px;
   max-width: none;
-  width: min(1180px, calc(var(--app-width) - 48px));
-  height: min(88dvh, calc(var(--app-height) - 48px));
-  max-height: none;
+  width: var(--viewer-width);
+  max-height: var(--viewer-height);
   padding: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+.dialog-content.file-viewer-fit-page {
+  height: var(--viewer-height);
+}
+.dialog-content.file-viewer-fit-media {
+  width: fit-content;
+  min-width: min(420px, var(--viewer-width));
+}
+/* A long path is cut short rather than widening a picture's frame; its name may. */
+.file-viewer-fit-media .file-viewer-path {
+  contain: inline-size;
+}
+.dialog-content.file-viewer-fit-compact {
+  width: min(560px, calc(var(--app-width) - 32px));
 }
 .file-viewer > .dialog-heading {
   margin: 0;
@@ -4335,13 +4421,13 @@ a.menu-item {
 .file-viewer-media img,
 .file-viewer-media video {
   display: block;
-  max-width: 100%;
-  max-height: 100%;
+  max-width: calc(var(--viewer-width) - 40px);
+  max-height: calc(var(--viewer-height) - var(--viewer-chrome));
   object-fit: contain;
   border-radius: 4px;
 }
 .file-viewer-media audio {
-  width: min(100%, 480px);
+  width: 100%;
 }
 .file-viewer-empty {
   display: flex;
@@ -4449,14 +4535,22 @@ a.menu-item {
   }
 }
 @media (max-width: 820px) {
-  .dialog-content.file-viewer {
+  /* On a phone, text, pictures and video take the screen; a small card stays a card. */
+  .dialog-content.file-viewer:not(.file-viewer-fit-compact) {
     top: var(--app-top);
     left: var(--safe-left);
     transform: none;
     width: var(--app-width);
+    min-width: 0;
     height: var(--app-height);
+    max-height: none;
     border: 0;
     border-radius: 0;
+  }
+  .file-viewer-media img,
+  .file-viewer-media video {
+    max-width: 100%;
+    max-height: 100%;
   }
   .file-viewer-label {
     display: none;
