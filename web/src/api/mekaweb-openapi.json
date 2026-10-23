@@ -916,172 +916,6 @@
         }
       }
     },
-    "/api/files/trash": {
-      "get": {
-        "tags": ["files"],
-        "operationId": "trashed",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/Trashed"
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
-      "post": {
-        "tags": ["files"],
-        "operationId": "trash_entry",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/Target"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {},
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "It cannot go to a trash; delete it permanently instead",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/files/trash/purge": {
-      "post": {
-        "tags": ["files"],
-        "operationId": "purge",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/TrashedId"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {},
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/files/trash/restore": {
-      "post": {
-        "tags": ["files"],
-        "operationId": "restore",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/TrashedId"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {},
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/files/uploads": {
       "post": {
         "tags": ["files"],
@@ -1252,6 +1086,58 @@
             }
           },
           "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/files/watch": {
+      "get": {
+        "tags": ["files"],
+        "summary": "Changes to a folder, as an event stream: a `change` event whenever what it holds may have\nchanged, at most about once a second, after which it is to be listed again. Events missed while\nthe stream was not open are not told, so a folder is listed again on reconnecting.",
+        "operationId": "watch",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "`change` events",
+            "content": {
+              "text/event-stream": {}
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
             "content": {
               "application/json": {
                 "schema": {
@@ -1748,11 +1634,11 @@
       "Entry": {
         "type": "object",
         "description": "An entry in a folder.",
-        "required": ["name", "kind", "size", "permissions", "hidden"],
+        "required": ["name", "kind", "size", "hidden"],
         "properties": {
           "hidden": {
             "type": "boolean",
-            "description": "Whether its name starts with a dot."
+            "description": "Whether its name starts with a dot, or the system marks it hidden."
           },
           "kind": {
             "$ref": "#/components/schemas/Kind"
@@ -1765,8 +1651,8 @@
             "type": "string"
           },
           "permissions": {
-            "type": "string",
-            "description": "Its permissions, as `ls` writes them: `rwxr-xr-x`."
+            "type": ["string", "null"],
+            "description": "Its permissions, as `ls` writes them: `rwxr-xr-x`. Windows has none."
           },
           "size": {
             "type": "integer",
@@ -2291,7 +2177,7 @@
       },
       "Target": {
         "type": "object",
-        "description": "An entry to throw away or delete.",
+        "description": "An entry to delete.",
         "required": ["path"],
         "properties": {
           "path": {
@@ -2362,48 +2248,6 @@
           "truncated": {
             "type": "boolean",
             "description": "Whether the file is longer than what was read."
-          }
-        }
-      },
-      "Trashed": {
-        "type": "object",
-        "description": "Something in a trash.",
-        "required": ["id", "name", "path", "deleted_at", "kind", "size"],
-        "properties": {
-          "deleted_at": {
-            "type": "string",
-            "description": "When it was thrown away, as the info file says, in local time."
-          },
-          "id": {
-            "type": "string",
-            "description": "What names it to restore or delete it."
-          },
-          "kind": {
-            "$ref": "#/components/schemas/Kind"
-          },
-          "name": {
-            "type": "string",
-            "description": "Its name where it was."
-          },
-          "path": {
-            "type": "string",
-            "description": "Where it was, absolute."
-          },
-          "size": {
-            "type": "integer",
-            "format": "int64",
-            "description": "Its size; a folder's is what the file system says of it.",
-            "minimum": 0
-          }
-        }
-      },
-      "TrashedId": {
-        "type": "object",
-        "description": "A trashed item.",
-        "required": ["id"],
-        "properties": {
-          "id": {
-            "type": "string"
           }
         }
       },

@@ -4225,22 +4225,6 @@ details > summary:has(.inline-heading) {
   padding: 18px 12px;
   margin: 0;
 }
-.trash-view {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.trash-item {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 10px 0;
-  border-bottom: 1px solid var(--border);
-  font-size: 0.8rem;
-}
-.trash-item p {
-  margin: 4px 0 0;
-}
 .menu-item.danger {
   color: var(--danger);
 }

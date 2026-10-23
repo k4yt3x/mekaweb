@@ -232,7 +232,15 @@ impl Config {
     }
 
     /// The file holding meka's token, this config at `config` or the token file, if others than
+    /// its owner may read it. Windows guards files with access lists, which this does not read.
+    #[cfg(windows)]
+    pub(crate) const fn exposed_token(&self, _config: &Path) -> Option<PathBuf> {
+        None
+    }
+
+    /// The file holding meka's token, this config at `config` or the token file, if others than
     /// its owner may read it.
+    #[cfg(unix)]
     pub(crate) fn exposed_token(&self, config: &Path) -> Option<PathBuf> {
         use std::os::unix::fs::PermissionsExt;
         let holder = match &self.meka.token {
@@ -272,26 +280,29 @@ fn parse_net(value: &str) -> anyhow::Result<IpNet> {
     Ok(IpNet::from(address))
 }
 
-/// `path` with a leading `~/` made the home folder.
+/// `path` with a leading `~/`, or on Windows `~\`, made the home folder.
 pub(crate) fn expand(path: &str) -> anyhow::Result<PathBuf> {
     if path == "~" {
         return home();
     }
-    match path.strip_prefix("~/") {
-        Some(rest) => Ok(home()?.join(rest)),
+    match path
+        .strip_prefix('~')
+        .filter(|rest| rest.starts_with(std::path::is_separator))
+    {
+        Some(rest) => Ok(home()?.join(rest.trim_start_matches(std::path::is_separator))),
         None => Ok(PathBuf::from(path)),
     }
 }
 
-/// The user's home folder.
+/// The user's home folder: `$HOME`, or on Windows `%USERPROFILE%`.
 pub(crate) fn home() -> anyhow::Result<PathBuf> {
-    std::env::var_os("HOME")
-        .filter(|home| !home.is_empty())
-        .map(PathBuf::from)
-        .context("HOME is not set")
+    std::env::home_dir()
+        .filter(|home| !home.as_os_str().is_empty())
+        .context("the home folder is not known; set HOME")
 }
 
 /// `$XDG_STATE_HOME/mekaweb`, or `~/.local/state/mekaweb`.
+#[cfg(not(windows))]
 fn default_state_dir() -> anyhow::Result<PathBuf> {
     match std::env::var_os("XDG_STATE_HOME").filter(|dir| !dir.is_empty()) {
         Some(dir) => Ok(PathBuf::from(dir).join("mekaweb")),
@@ -299,12 +310,34 @@ fn default_state_dir() -> anyhow::Result<PathBuf> {
     }
 }
 
+/// `%LOCALAPPDATA%\mekaweb`.
+#[cfg(windows)]
+fn default_state_dir() -> anyhow::Result<PathBuf> {
+    Ok(known_folder("LOCALAPPDATA")?.join("mekaweb"))
+}
+
 /// `$XDG_CONFIG_HOME/mekaweb/config.toml`, or `~/.config/mekaweb/config.toml`.
+#[cfg(not(windows))]
 pub(crate) fn default_path() -> anyhow::Result<PathBuf> {
     match std::env::var_os("XDG_CONFIG_HOME").filter(|dir| !dir.is_empty()) {
         Some(dir) => Ok(PathBuf::from(dir).join("mekaweb/config.toml")),
         None => Ok(home()?.join(".config/mekaweb/config.toml")),
     }
+}
+
+/// `%APPDATA%\mekaweb\config.toml`.
+#[cfg(windows)]
+pub(crate) fn default_path() -> anyhow::Result<PathBuf> {
+    Ok(known_folder("APPDATA")?.join("mekaweb").join("config.toml"))
+}
+
+/// The folder the environment variable `name` gives, as Windows sets it for each user.
+#[cfg(windows)]
+fn known_folder(name: &str) -> anyhow::Result<PathBuf> {
+    std::env::var_os(name)
+        .filter(|dir| !dir.is_empty())
+        .map(PathBuf::from)
+        .with_context(|| format!("{name} is not set"))
 }
 
 #[cfg(test)]
@@ -421,6 +454,7 @@ mod tests {
         assert!(Config::parse(&empty).is_err());
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_token_others_can_read_is_noticed() {
         use std::os::unix::fs::PermissionsExt;

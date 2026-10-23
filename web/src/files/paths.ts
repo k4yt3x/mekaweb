@@ -1,27 +1,91 @@
-/** `name` within the folder `path`, both absolute. */
-export function join(path: string, name: string): string {
-  return path.endsWith('/') ? `${path}${name}` : `${path}/${name}`;
+/**
+ * Paths as the server writes them: on Unix from `/`, on Windows from a drive, `C:\`, or a share,
+ * `\\server\share\`, with `\` between names, though `/` is taken too.
+ */
+function isWindows(path: string): boolean {
+  return /^[A-Za-z]:[\\/]/.test(path) || /^\\\\[^\\]/.test(path);
 }
 
-/** The folder the absolute `path` is in; the root folder is its own. */
+/** Whether `path` is absolute. */
+export function isAbsolute(path: string): boolean {
+  return path.startsWith('/') || isWindows(path);
+}
+
+/** The separator `path` is written with. */
+export function separator(path: string): string {
+  return isWindows(path) ? '\\' : '/';
+}
+
+/** Whether `char` separates names in `path`. */
+function separates(path: string, char: string | undefined): boolean {
+  return char === '/' || (char === '\\' && isWindows(path));
+}
+
+/** The folder the absolute `path` starts from: `/`, `C:\` or `\\server\share\`. */
+function root(path: string): string {
+  const drive = /^[A-Za-z]:[\\/]/.exec(path);
+  if (drive) return drive[0];
+  const share = /^\\\\[^\\/]+[\\/][^\\/]+/.exec(path);
+  if (share) return `${share[0]}\\`;
+  return path.startsWith('/') ? '/' : '';
+}
+
+/** `path`, whose root is `top`, without separators at its end, short of its root. */
+function trimmed(path: string, top: string): string {
+  let end = path.length;
+  while (end > top.length && separates(path, path[end - 1])) end--;
+  return path.slice(0, end);
+}
+
+/** Where the last separator in `path`, whose root is `top`, is past its root; -1 if none is. */
+function lastSeparator(path: string, top: string): number {
+  for (let index = path.length - 1; index >= top.length; index--)
+    if (separates(path, path[index])) return index;
+  return -1;
+}
+
+/** `name` within the folder `path`, both absolute; a name may hold `/` between its parts. */
+export function join(path: string, name: string): string {
+  const between = separator(path);
+  const parts = between === '/' ? name : name.replaceAll('/', between);
+  return separates(path, path.at(-1)) ? `${path}${parts}` : `${path}${between}${parts}`;
+}
+
+/** The folder the absolute `path` is in; a root folder is its own. */
 export function parent(path: string): string {
-  const trimmed = path.length > 1 ? path.replace(/\/+$/, '') : path;
-  const index = trimmed.lastIndexOf('/');
-  return index <= 0 ? '/' : trimmed.slice(0, index);
+  const top = root(path);
+  const rest = trimmed(path, top);
+  if (rest.length <= top.length) return top || path;
+  const index = lastSeparator(rest, top);
+  return index < 0 ? top : rest.slice(0, index);
+}
+
+/** Whether `path` is a root folder, with no folder above it. */
+export function isRoot(path: string): boolean {
+  return parent(path) === path;
 }
 
 /** The last name of `path`. */
 export function basename(path: string): string {
-  const trimmed = path.length > 1 ? path.replace(/\/+$/, '') : path;
-  return trimmed.slice(trimmed.lastIndexOf('/') + 1);
+  const top = root(path);
+  const rest = trimmed(path, top);
+  return rest.slice(Math.max(lastSeparator(rest, top), top.length - 1) + 1);
 }
 
-/** The folders of the absolute `path`, from the root down, each with the path to it. */
+/** The folders of the absolute `path`, from its root down, each with the path to it. */
 export function crumbs(path: string): { name: string; path: string }[] {
-  const names = path.split('/').filter(Boolean);
+  const top = root(path);
+  const between = separator(path);
+  const names = path
+    .slice(top.length)
+    .split(between === '/' ? '/' : /[\\/]/)
+    .filter(Boolean);
   return [
-    { name: '/', path: '/' },
-    ...names.map((name, index) => ({ name, path: '/' + names.slice(0, index + 1).join('/') })),
+    { name: top, path: top },
+    ...names.map((name, index) => ({
+      name,
+      path: top + names.slice(0, index + 1).join(between),
+    })),
   ];
 }
 
@@ -110,5 +174,5 @@ const FILE_TOOLS = new Set(['file_read', 'file_write', 'file_edit']);
 export function toolPath(name: string, input: unknown): string | undefined {
   if (!FILE_TOOLS.has(name) || !input || typeof input !== 'object') return undefined;
   const path = (input as Record<string, unknown>).path;
-  return typeof path === 'string' && path.startsWith('/') ? path : undefined;
+  return typeof path === 'string' && isAbsolute(path) ? path : undefined;
 }

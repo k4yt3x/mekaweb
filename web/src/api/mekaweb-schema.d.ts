@@ -340,54 +340,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  '/api/files/trash': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get: operations['trashed'];
-    put?: never;
-    post: operations['trash_entry'];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/api/files/trash/purge': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    post: operations['purge'];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/api/files/trash/restore': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    post: operations['restore'];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   '/api/files/uploads': {
     parameters: {
       query?: never;
@@ -430,6 +382,27 @@ export interface paths {
     get?: never;
     put?: never;
     post: operations['finish_upload'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/files/watch': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Changes to a folder, as an event stream: a `change` event whenever what it holds may have
+     *     changed, at most about once a second, after which it is to be listed again. Events missed while
+     *     the stream was not open are not told, so a folder is listed again on reconnecting.
+     */
+    get: operations['watch'];
+    put?: never;
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -623,14 +596,14 @@ export interface components {
     };
     /** @description An entry in a folder. */
     Entry: {
-      /** @description Whether its name starts with a dot. */
+      /** @description Whether its name starts with a dot, or the system marks it hidden. */
       hidden: boolean;
       kind: components['schemas']['Kind'];
       /** Format: date-time */
       modified?: string | null;
       name: string;
-      /** @description Its permissions, as `ls` writes them: `rwxr-xr-x`. */
-      permissions: string;
+      /** @description Its permissions, as `ls` writes them: `rwxr-xr-x`. Windows has none. */
+      permissions?: string | null;
       /**
        * Format: int64
        * @description Its size in bytes; a folder's is what the file system says of it.
@@ -874,7 +847,7 @@ export interface components {
       auth: string;
       p256dh: string;
     };
-    /** @description An entry to throw away or delete. */
+    /** @description An entry to delete. */
     Target: {
       path: string;
     };
@@ -911,27 +884,6 @@ export interface components {
       text: string;
       /** @description Whether the file is longer than what was read. */
       truncated: boolean;
-    };
-    /** @description Something in a trash. */
-    Trashed: {
-      /** @description When it was thrown away, as the info file says, in local time. */
-      deleted_at: string;
-      /** @description What names it to restore or delete it. */
-      id: string;
-      kind: components['schemas']['Kind'];
-      /** @description Its name where it was. */
-      name: string;
-      /** @description Where it was, absolute. */
-      path: string;
-      /**
-       * Format: int64
-       * @description Its size; a folder's is what the file system says of it.
-       */
-      size: number;
-    };
-    /** @description A trashed item. */
-    TrashedId: {
-      id: string;
     };
     /** @description An upload's state. */
     UploadView: {
@@ -1810,169 +1762,6 @@ export interface operations {
       };
     };
   };
-  trashed: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['Trashed'][];
-        };
-      };
-    };
-  };
-  trash_entry: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        'application/json': components['schemas']['Target'];
-      };
-    };
-    responses: {
-      204: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-      400: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['Problem'];
-        };
-      };
-      403: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['Problem'];
-        };
-      };
-      404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['Problem'];
-        };
-      };
-      /** @description It cannot go to a trash; delete it permanently instead */
-      409: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['Problem'];
-        };
-      };
-    };
-  };
-  purge: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        'application/json': components['schemas']['TrashedId'];
-      };
-    };
-    responses: {
-      204: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-      403: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['Problem'];
-        };
-      };
-      404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['Problem'];
-        };
-      };
-    };
-  };
-  restore: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        'application/json': components['schemas']['TrashedId'];
-      };
-    };
-    responses: {
-      204: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-      400: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['Problem'];
-        };
-      };
-      403: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['Problem'];
-        };
-      };
-      404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['Problem'];
-        };
-      };
-      409: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['Problem'];
-        };
-      };
-    };
-  };
   start_upload: {
     parameters: {
       query?: never;
@@ -2117,6 +1906,52 @@ export interface operations {
         };
       };
       409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  watch: {
+    parameters: {
+      query: {
+        path: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description `change` events */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'text/event-stream': unknown;
+        };
+      };
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Problem'];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Problem'];
+        };
+      };
+      404: {
         headers: {
           [name: string]: unknown;
         };

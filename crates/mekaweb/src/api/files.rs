@@ -2,14 +2,19 @@
 //! running any of it: everything is sandboxed and unsniffed, and only types a browser shows
 //! without running anything (pictures, sound, video, PDFs, plain text) are shown in place rather
 //! than downloaded. HTML and SVG in particular never run on mekaweb's address, where a script
-//! would reach the terminal.
+//! would reach the terminal. `/api/files/watch` tells of changes to a folder as they happen.
+
+use std::{convert::Infallible, time::Duration};
 
 use axum::{
     Json,
     body::{Body, Bytes},
     extract::{Path, Query, State},
     http::{HeaderMap, HeaderValue, StatusCode, header},
-    response::{IntoResponse, Response},
+    response::{
+        IntoResponse, Response,
+        sse::{Event, KeepAlive, Sse},
+    },
 };
 use serde::Deserialize;
 use tokio::{io::AsyncReadExt, sync::mpsc};
@@ -23,9 +28,20 @@ use crate::{
     error::{ApiError, ApiResult},
     files::{
         Entry, FilesError, Listing, Range, Text, UploadView, parse_range, range_reader, resolve,
-        trash::Trashed,
+        watch::Watching,
     },
 };
+
+/// How long a folder's changes are gathered before they are told, so a file written in several
+/// steps is told once.
+const GATHER: Duration = Duration::from_millis(250);
+
+/// The least time between two changes told, so a folder changing all the time is not listed all
+/// the time.
+const SPACING: Duration = Duration::from_secs(1);
+
+/// How often an idle change stream sends a comment, so proxies keep it open.
+const KEEP_ALIVE: Duration = Duration::from_secs(25);
 
 /// What a raw file is sent with when it is shown in place: content types a browser displays
 /// without running anything.
@@ -105,16 +121,10 @@ pub(crate) struct Move {
     pub(crate) to: String,
 }
 
-/// An entry to throw away or delete.
+/// An entry to delete.
 #[derive(Debug, Deserialize, ToSchema)]
 pub(crate) struct Target {
     pub(crate) path: String,
-}
-
-/// A trashed item.
-#[derive(Debug, Deserialize, ToSchema)]
-pub(crate) struct TrashedId {
-    pub(crate) id: String,
 }
 
 /// An upload to start.
@@ -162,6 +172,53 @@ pub(crate) async fn list(
     Query(query): Query<Location>,
 ) -> ApiResult<Json<Listing>> {
     Ok(Json(app.files.list(path(&query.path)?).await?))
+}
+
+/// Changes to a folder, as an event stream: a `change` event whenever what it holds may have
+/// changed, at most about once a second, after which it is to be listed again. Events missed while
+/// the stream was not open are not told, so a folder is listed again on reconnecting.
+#[utoipa::path(
+    get,
+    path = "/api/files/watch",
+    tag = "files",
+    params(Location),
+    responses((status = 200, description = "`change` events", content_type = "text/event-stream"), (status = 404, body = crate::error::Problem), (status = 400, body = crate::error::Problem), (status = 403, body = crate::error::Problem))
+)]
+pub(crate) async fn watch(
+    State(app): State<App>,
+    signed: Signed,
+    Query(query): Query<Location>,
+) -> ApiResult<Response> {
+    let mut watching = app.files.watch(path(&query.path)?).await?;
+    let (sender, receiver) = mpsc::channel::<Result<Event, Infallible>>(4);
+    let device = signed.session.id;
+    tokio::spawn(async move {
+        tokio::select! {
+            () = tell_changes(&mut watching, &sender) => {}
+            () = app.auth.until_ended(&device) => {}
+            () = sender.closed() => {}
+        }
+    });
+    let stream =
+        Sse::new(ReceiverStream::new(receiver)).keep_alive(KeepAlive::new().interval(KEEP_ALIVE));
+    // Proxies that buffer, such as nginx, are told not to.
+    Ok(([("x-accel-buffering", "no")], stream).into_response())
+}
+
+/// Sends a `change` event for each burst of changes to the folder `watching` follows.
+async fn tell_changes(watching: &mut Watching, sender: &mpsc::Sender<Result<Event, Infallible>>) {
+    loop {
+        if watching.changes.changed().await.is_err() {
+            return;
+        }
+        tokio::time::sleep(GATHER).await;
+        watching.changes.mark_unchanged();
+        let change = Event::default().event("change").data("");
+        if sender.send(Ok(change)).await.is_err() {
+            return;
+        }
+        tokio::time::sleep(SPACING).await;
+    }
 }
 
 #[utoipa::path(
@@ -474,22 +531,6 @@ pub(crate) async fn move_entry(
 
 #[utoipa::path(
     post,
-    path = "/api/files/trash",
-    tag = "files",
-    request_body = Target,
-    responses((status = 204), (status = 409, description = "It cannot go to a trash; delete it permanently instead", body = crate::error::Problem), (status = 400, body = crate::error::Problem), (status = 403, body = crate::error::Problem), (status = 404, body = crate::error::Problem))
-)]
-pub(crate) async fn trash_entry(
-    State(app): State<App>,
-    _signed: Signed,
-    Json(body): Json<Target>,
-) -> ApiResult<StatusCode> {
-    app.files.trash(path(&body.path)?).await?;
-    Ok(StatusCode::NO_CONTENT)
-}
-
-#[utoipa::path(
-    post,
     path = "/api/files/delete",
     tag = "files",
     request_body = Target,
@@ -501,51 +542,6 @@ pub(crate) async fn delete_entry(
     Json(body): Json<Target>,
 ) -> ApiResult<StatusCode> {
     app.files.delete(path(&body.path)?).await?;
-    Ok(StatusCode::NO_CONTENT)
-}
-
-#[utoipa::path(
-    get,
-    path = "/api/files/trash",
-    tag = "files",
-    responses((status = 200, body = Vec<Trashed>))
-)]
-pub(crate) async fn trashed(
-    State(app): State<App>,
-    _signed: Signed,
-) -> ApiResult<Json<Vec<Trashed>>> {
-    Ok(Json(app.files.trashed().await?))
-}
-
-#[utoipa::path(
-    post,
-    path = "/api/files/trash/restore",
-    tag = "files",
-    request_body = TrashedId,
-    responses((status = 204), (status = 409, body = crate::error::Problem), (status = 400, body = crate::error::Problem), (status = 403, body = crate::error::Problem), (status = 404, body = crate::error::Problem))
-)]
-pub(crate) async fn restore(
-    State(app): State<App>,
-    _signed: Signed,
-    Json(body): Json<TrashedId>,
-) -> ApiResult<StatusCode> {
-    app.files.restore(&body.id).await?;
-    Ok(StatusCode::NO_CONTENT)
-}
-
-#[utoipa::path(
-    post,
-    path = "/api/files/trash/purge",
-    tag = "files",
-    request_body = TrashedId,
-    responses((status = 204), (status = 404, body = crate::error::Problem), (status = 403, body = crate::error::Problem))
-)]
-pub(crate) async fn purge(
-    State(app): State<App>,
-    _signed: Signed,
-    Json(body): Json<TrashedId>,
-) -> ApiResult<StatusCode> {
-    app.files.purge(&body.id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

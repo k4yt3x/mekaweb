@@ -1,6 +1,6 @@
 import { ApiError, ConnectionError, errorMessage, pause } from '../api/client';
 import type { Gateway, GatewayClient } from '../api/gateway';
-import { join } from './paths';
+import { join, parent } from './paths';
 
 export interface UploadItem {
   key: string;
@@ -172,7 +172,7 @@ export class Uploads {
       let folder = item.dir;
       while (folder.length > dir.length && !filled.has(folder)) {
         filled.add(folder);
-        folder = folder.slice(0, folder.lastIndexOf('/'));
+        folder = parent(folder);
       }
     }
     const empty = folders

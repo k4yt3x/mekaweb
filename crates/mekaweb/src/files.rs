@@ -1,43 +1,38 @@
 //! Files: browsing, reading, downloading, uploading to and tidying any folder mekaweb's user may
 //! reach. Signing in is the boundary: whoever is signed in drives meka's agent and a terminal as
 //! that user, so Files keeps no folders of its own. The interface opens it at a session's working
-//! directory.
+//! directory, and watches the folder it shows to list it again as it changes.
 //!
 //! Paths are absolute, or start with `~`; `.` and `..` are resolved as written, before the file
-//! system sees them. A path's last name is acted on itself: a symlink is listed, moved, trashed or
-//! deleted, never what it points to, while the folders leading to it may be symlinks.
+//! system sees them. A path's last name is acted on itself: a symlink is listed, moved or deleted,
+//! never what it points to, while the folders leading to it may be symlinks. Deleting is for good:
+//! there is no trash.
 //!
 //! Files are read only when they are regular files, opened so that a named pipe cannot hold a
 //! thread waiting for a writer. Deleting a folder, or zipping one, stays on its disk: a disk
 //! mounted inside is left alone, as `rm --one-file-system` would.
 
-pub(crate) mod trash;
+mod folder;
+pub(crate) mod watch;
 pub(crate) mod zip;
 
 use std::{
     collections::HashMap,
-    ffi::OsStr,
+    ffi::{OsStr, OsString},
     fs::{File, Metadata},
-    io::{Read, Seek, SeekFrom, Write},
-    os::{
-        fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd},
-        unix::{
-            ffi::OsStrExt,
-            fs::{FileExt, MetadataExt},
-        },
-    },
-    path::{Component, Path, PathBuf},
+    io::{Read, Seek, SeekFrom},
+    path::{Component, Path, PathBuf, Prefix},
     sync::{Mutex, PoisonError},
     time::{Duration, Instant},
 };
 
 use axum::http::StatusCode;
-use chrono::{DateTime, TimeZone, Utc};
-use rustix::fs::{AtFlags, Mode, OFlags, RenameFlags};
+use chrono::{DateTime, Utc};
 use serde::Serialize;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
+pub(crate) use self::folder::{Folder, prepare};
 use crate::{
     error::ApiError,
     store::{Store, UploadRow},
@@ -57,7 +52,7 @@ const SNIFF_BYTES: usize = 8 * 1024;
 const UPLOAD_LIFETIME: Duration = Duration::from_secs(24 * 60 * 60);
 
 /// What an upload's file is called until it is finished, before its id.
-const UPLOAD_PREFIX: &str = ".mekaweb-upload-";
+pub(crate) const UPLOAD_PREFIX: &str = ".mekaweb-upload-";
 
 /// The largest upload: as much as a file may hold.
 const MAX_UPLOAD_BYTES: u64 = i64::MAX as u64;
@@ -78,8 +73,6 @@ pub(crate) enum FilesError {
     Refused(String),
     #[error("{0}")]
     Conflict(String),
-    #[error("{0}")]
-    NoTrash(String),
     #[error(transparent)]
     Io(std::io::Error),
     #[error(transparent)]
@@ -89,26 +82,44 @@ pub(crate) enum FilesError {
 impl FilesError {
     /// An I/O error about `what`, told apart where it says something people can act on.
     pub(crate) fn io(error: std::io::Error, what: &str) -> Self {
-        match error.raw_os_error() {
-            Some(libc::ENOENT) => Self::NotFound(what.to_owned()),
-            Some(libc::EEXIST) => Self::Exists(what.to_owned()),
-            Some(libc::ENOTEMPTY) => Self::Conflict(format!("{what} is not empty")),
-            Some(libc::EBUSY) => {
+        use std::io::ErrorKind;
+        #[cfg(unix)]
+        if error.raw_os_error() == Some(libc::ELOOP) {
+            return Self::BadPath(format!("{what} leads through too many symlinks"));
+        }
+        #[cfg(windows)]
+        {
+            use windows_sys::Win32::Foundation::{ERROR_LOCK_VIOLATION, ERROR_SHARING_VIOLATION};
+            let code = error
+                .raw_os_error()
+                .and_then(|code| u32::try_from(code).ok());
+            if matches!(code, Some(ERROR_SHARING_VIOLATION | ERROR_LOCK_VIOLATION)) {
+                return Self::Refused(format!("{what} is in use by another program"));
+            }
+        }
+        match error.kind() {
+            ErrorKind::NotFound => Self::NotFound(what.to_owned()),
+            ErrorKind::AlreadyExists => Self::Exists(what.to_owned()),
+            ErrorKind::DirectoryNotEmpty => Self::Conflict(format!("{what} is not empty")),
+            ErrorKind::ResourceBusy => {
                 Self::Refused(format!("{what} is in use, or a disk is mounted there"))
             }
-            Some(libc::EACCES | libc::EPERM) => {
+            ErrorKind::PermissionDenied => {
                 Self::Refused(format!("mekaweb is not allowed to do that to {what}"))
             }
-            Some(libc::EXDEV) => Self::Conflict(format!(
+            ErrorKind::CrossesDevices => Self::Conflict(format!(
                 "{what} is on another disk; download and upload it instead"
             )),
-            Some(libc::ENOTDIR) => Self::BadPath(format!("a part of {what} is not a folder")),
-            Some(libc::EISDIR) => Self::BadPath(format!("{what} is a folder")),
-            Some(libc::ELOOP) => Self::BadPath(format!("{what} leads through too many symlinks")),
-            Some(libc::ENAMETOOLONG) => Self::BadPath(format!("the name of {what} is too long")),
-            Some(libc::EINVAL) => Self::BadPath(format!("that cannot be done to {what}")),
-            Some(libc::ENOSPC) => Self::Refused("the disk is full".to_owned()),
-            Some(libc::EROFS) => Self::Refused(format!("{what} is on a read-only disk")),
+            ErrorKind::NotADirectory => Self::BadPath(format!("a part of {what} is not a folder")),
+            ErrorKind::IsADirectory => Self::BadPath(format!("{what} is a folder")),
+            ErrorKind::InvalidFilename => {
+                Self::BadPath(format!("the name of {what} is too long or not allowed"))
+            }
+            ErrorKind::InvalidInput => Self::BadPath(format!("that cannot be done to {what}")),
+            ErrorKind::StorageFull => Self::Refused("the disk is full".to_owned()),
+            ErrorKind::ReadOnlyFilesystem => {
+                Self::Refused(format!("{what} is on a read-only disk"))
+            }
             _ => Self::Io(error),
         }
     }
@@ -120,12 +131,6 @@ impl From<FilesError> for ApiError {
             FilesError::NotFound(_) => Self::not_found(error.to_string()),
             FilesError::BadPath(_) => Self::bad_request(error.to_string()),
             FilesError::Exists(_) | FilesError::Conflict(_) => Self::conflict(error.to_string()),
-            FilesError::NoTrash(_) => Self::new(
-                StatusCode::CONFLICT,
-                "no-trash",
-                "No trash there",
-                error.to_string(),
-            ),
             FilesError::Refused(_) => Self::new(
                 StatusCode::FORBIDDEN,
                 "refused",
@@ -139,14 +144,15 @@ impl From<FilesError> for ApiError {
 }
 
 /// `path` as Files takes it: absolute, or from the home folder with `~`, its `.` and `..` resolved
-/// as written. Nothing is trimmed: a name may begin or end with a space.
+/// as written. On Windows it starts with a drive, `C:\`, or a share, `\\server\share\`, and
+/// either slash separates. Nothing is trimmed: a name may begin or end with a space.
 pub(crate) fn resolve(path: &str) -> Result<PathBuf, FilesError> {
     if path.contains('\0') {
         return Err(FilesError::BadPath("a path cannot hold a NUL".to_owned()));
     }
     let expanded = match path.strip_prefix('~') {
-        Some(rest) if rest.is_empty() || rest.starts_with('/') => {
-            crate::config::home()?.join(rest.trim_start_matches('/'))
+        Some(rest) if rest.is_empty() || rest.starts_with(std::path::is_separator) => {
+            crate::config::home()?.join(rest.trim_start_matches(std::path::is_separator))
         }
         _ => PathBuf::from(path),
     };
@@ -155,14 +161,34 @@ pub(crate) fn resolve(path: &str) -> Result<PathBuf, FilesError> {
             "give an absolute path, or one starting with ~/".to_owned(),
         ));
     }
-    let mut resolved = PathBuf::from("/");
+    let mut resolved = PathBuf::new();
     for component in expanded.components() {
         match component {
+            Component::Prefix(prefix) => match prefix.kind() {
+                Prefix::Disk(_) | Prefix::UNC(..) => resolved.push(prefix.as_os_str()),
+                // The long form names the same drive or share, written plainly.
+                Prefix::VerbatimDisk(drive) => {
+                    resolved.push(format!("{}:", char::from(drive)));
+                }
+                Prefix::VerbatimUNC(server, share) => {
+                    let mut plain = OsString::from(r"\\");
+                    plain.push(server);
+                    plain.push(r"\");
+                    plain.push(share);
+                    resolved.push(plain);
+                }
+                Prefix::Verbatim(_) | Prefix::DeviceNS(_) => {
+                    return Err(FilesError::BadPath(
+                        "a device's path is not a folder's".to_owned(),
+                    ));
+                }
+            },
+            Component::RootDir => resolved.push(Component::RootDir),
             Component::ParentDir => {
                 resolved.pop();
             }
             Component::Normal(name) => resolved.push(name),
-            Component::RootDir | Component::CurDir | Component::Prefix(_) => {}
+            Component::CurDir => {}
         }
     }
     Ok(resolved)
@@ -184,34 +210,68 @@ fn shown(path: &Path) -> String {
 }
 
 /// Opens the folder `path`, its symlinks followed.
-fn open_dir(path: &Path, flags: OFlags) -> Result<OwnedFd, FilesError> {
-    rustix::fs::open(
-        path,
-        flags | OFlags::DIRECTORY | OFlags::CLOEXEC,
-        Mode::empty(),
-    )
-    .map_err(|error| FilesError::io(error.into(), &shown(path)))
+fn open_folder(path: &Path) -> Result<Folder, FilesError> {
+    Folder::open(path).map_err(|error| FilesError::io(error, &shown(path)))
 }
+
+/// Names Windows keeps for devices, with or without an extension.
+#[cfg(windows)]
+const DEVICE_NAMES: &[&str] = &[
+    "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+    "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+];
 
 /// Checks a name for a new file or folder, taken as it is written.
 pub(crate) fn check_name(name: &OsStr) -> Result<&OsStr, FilesError> {
-    let bytes = name.as_bytes();
-    if bytes.is_empty() || bytes == b"." || bytes == b".." {
+    let Some(text) = name.to_str() else {
+        return Err(FilesError::BadPath("a name must be valid text".to_owned()));
+    };
+    if text.is_empty() || text == "." || text == ".." {
         return Err(FilesError::BadPath(
             "a name cannot be empty, . or ..".to_owned(),
         ));
     }
-    if bytes.contains(&b'/') || bytes.contains(&0) {
+    if text.contains(['/', '\0']) {
         return Err(FilesError::BadPath(
             "a name cannot hold a / or a NUL".to_owned(),
         ));
     }
-    if bytes.len() > 255 {
+    #[cfg(unix)]
+    if text.len() > 255 {
         return Err(FilesError::BadPath(
             "a name is at most 255 bytes".to_owned(),
         ));
     }
-    if bytes.starts_with(UPLOAD_PREFIX.as_bytes()) {
+    #[cfg(windows)]
+    {
+        if text.contains(['\\', ':', '*', '?', '"', '<', '>', '|'])
+            || text.chars().any(char::is_control)
+        {
+            return Err(FilesError::BadPath(
+                r#"a name cannot hold \ : * ? " < > | or a control character"#.to_owned(),
+            ));
+        }
+        if text.ends_with(['.', ' ']) {
+            return Err(FilesError::BadPath(
+                "a name cannot end with a dot or a space".to_owned(),
+            ));
+        }
+        let stem = text.split('.').next().unwrap_or_default().trim_end();
+        if DEVICE_NAMES
+            .iter()
+            .any(|device| device.eq_ignore_ascii_case(stem))
+        {
+            return Err(FilesError::BadPath(format!(
+                "{stem} names a device on Windows"
+            )));
+        }
+        if text.encode_utf16().count() > 255 {
+            return Err(FilesError::BadPath(
+                "a name is at most 255 characters".to_owned(),
+            ));
+        }
+    }
+    if text.starts_with(UPLOAD_PREFIX) {
         return Err(FilesError::BadPath(format!(
             "a name cannot start with {UPLOAD_PREFIX}, which unfinished uploads use"
         )));
@@ -229,30 +289,6 @@ pub(crate) enum Kind {
     Other,
 }
 
-impl Kind {
-    fn of(metadata: &Metadata) -> Self {
-        let file_type = metadata.file_type();
-        if file_type.is_symlink() {
-            Self::Symlink
-        } else if file_type.is_dir() {
-            Self::Folder
-        } else if file_type.is_file() {
-            Self::File
-        } else {
-            Self::Other
-        }
-    }
-
-    fn of_stat(stat: &rustix::fs::Stat) -> Self {
-        match rustix::fs::FileType::from_raw_mode(stat.st_mode) {
-            rustix::fs::FileType::Symlink => Self::Symlink,
-            rustix::fs::FileType::Directory => Self::Folder,
-            rustix::fs::FileType::RegularFile => Self::File,
-            _ => Self::Other,
-        }
-    }
-}
-
 /// An entry in a folder.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub(crate) struct Entry {
@@ -261,13 +297,13 @@ pub(crate) struct Entry {
     /// Its size in bytes; a folder's is what the file system says of it.
     pub(crate) size: u64,
     pub(crate) modified: Option<DateTime<Utc>>,
-    /// Its permissions, as `ls` writes them: `rwxr-xr-x`.
-    pub(crate) permissions: String,
+    /// Its permissions, as `ls` writes them: `rwxr-xr-x`. Windows has none.
+    pub(crate) permissions: Option<String>,
     /// Where a symlink points, as written.
     pub(crate) target: Option<String>,
     /// What a symlink leads to, if anything.
     pub(crate) target_kind: Option<Kind>,
-    /// Whether its name starts with a dot.
+    /// Whether its name starts with a dot, or the system marks it hidden.
     pub(crate) hidden: bool,
 }
 
@@ -316,10 +352,10 @@ pub(crate) struct UploadView {
 /// Files, with unfinished uploads kept in the store.
 pub(crate) struct Files {
     store: Store,
-    /// The home folder's trash, if there is a home folder.
-    home_trash: Option<PathBuf>,
     /// Entries chosen to download as one zip, by the id their download names them by.
     selections: Mutex<HashMap<String, Selection>>,
+    /// The folders watched for changes.
+    watcher: watch::Watcher,
 }
 
 /// Entries chosen in a folder, to download as one zip.
@@ -339,10 +375,11 @@ const MAX_SELECTIONS: usize = 64;
 impl Files {
     /// Files, with uploads kept in `store`.
     pub(crate) fn new(store: Store) -> Self {
+        folder::prepare();
         Self {
             store,
-            home_trash: trash::home_trash().ok(),
             selections: Mutex::new(HashMap::new()),
+            watcher: watch::Watcher::new(),
         }
     }
 
@@ -387,33 +424,23 @@ impl Files {
             })
     }
 
-    fn home_trash(&self) -> Result<PathBuf, FilesError> {
-        self.home_trash.clone().ok_or_else(|| {
-            FilesError::Refused("there is no home folder to keep a trash in".to_owned())
-        })
-    }
-
     /// Lists the folder `path`.
     pub(crate) async fn list(&self, path: PathBuf) -> Result<Listing, FilesError> {
         blocking(move || {
-            let dir = open_dir(&path, OFlags::RDONLY)?;
+            let folder = open_folder(&path)?;
+            let names = folder
+                .names()
+                .map_err(|error| FilesError::io(error, &shown(&path)))?;
             let mut entries = Vec::new();
-            for item in rustix::fs::Dir::read_from(&dir)
-                .map_err(|error| FilesError::io(error.into(), &shown(&path)))?
-            {
-                let item = item.map_err(|error| FilesError::io(error.into(), &shown(&path)))?;
-                let name = OsStr::from_bytes(item.file_name().to_bytes());
-                if name == "."
-                    || name == ".."
-                    || name.as_bytes().starts_with(UPLOAD_PREFIX.as_bytes())
-                {
-                    continue;
-                }
+            for name in names {
+                // A name that is not valid text cannot be named back in a request.
                 let Some(name) = name.to_str() else {
-                    // A name that is not UTF-8 cannot be named back in a request.
                     continue;
                 };
-                match entry(dir.as_fd(), name) {
+                if name.starts_with(UPLOAD_PREFIX) {
+                    continue;
+                }
+                match entry(&folder, name) {
                     Ok(entry) => entries.push(entry),
                     // Gone between reading the folder and looking at it.
                     Err(FilesError::NotFound(_)) => {}
@@ -493,9 +520,19 @@ impl Files {
         .await
     }
 
-    /// Opens a folder to download as a zip.
-    pub(crate) async fn open_folder(&self, path: PathBuf) -> Result<OwnedFd, FilesError> {
-        blocking(move || open_dir(&path, OFlags::RDONLY)).await
+    /// Opens a folder to download as a zip, which must be one mekaweb may read: the download
+    /// starts once it is open, past when it could say so.
+    pub(crate) async fn open_folder(&self, path: PathBuf) -> Result<Folder, FilesError> {
+        blocking(move || {
+            Folder::open_readable(&path).map_err(|error| FilesError::io(error, &shown(&path)))
+        })
+        .await
+    }
+
+    /// Follows the folder `path` for changes.
+    pub(crate) async fn watch(&self, path: PathBuf) -> Result<watch::Watching, FilesError> {
+        let watcher = self.watcher.clone();
+        blocking(move || watcher.follow(&path)).await
     }
 
     /// Makes the folder `path`, and with `parents` any folders above it that are missing.
@@ -506,30 +543,27 @@ impl Files {
     ) -> Result<Entry, FilesError> {
         blocking(move || {
             let (parent, name) = split(&path)?;
-            let name = check_name(name)?.to_owned();
+            let name = check_name(name)?;
             if parents {
-                std::fs::DirBuilder::new()
-                    .recursive(true)
-                    .create(parent)
+                std::fs::create_dir_all(parent)
                     .map_err(|error| FilesError::io(error, &shown(parent)))?;
             }
-            let dir = open_dir(parent, OFlags::PATH)?;
-            rustix::fs::mkdirat(&dir, &name, Mode::from_raw_mode(0o777)).or_else(|error| {
+            let folder = open_folder(parent)?;
+            folder.make_folder(name).or_else(|error| {
                 // Asked for with its parents, a folder that is there already is made, as with
                 // `mkdir -p`; anything else there is not a folder made.
-                let folder = || {
-                    rustix::fs::statat(&dir, &name, AtFlags::empty()).is_ok_and(|stat| {
-                        rustix::fs::FileType::from_raw_mode(stat.st_mode)
-                            == rustix::fs::FileType::Directory
-                    })
+                let there = || {
+                    folder
+                        .stat_followed(name)
+                        .is_ok_and(|stat| stat.kind == Kind::Folder)
                 };
-                if parents && error == rustix::io::Errno::EXIST && folder() {
+                if parents && error.kind() == std::io::ErrorKind::AlreadyExists && there() {
                     Ok(())
                 } else {
-                    Err(FilesError::io(error.into(), &shown(&path)))
+                    Err(FilesError::io(error, &shown(&path)))
                 }
             })?;
-            entry(dir.as_fd(), &name.to_string_lossy())
+            entry(&folder, &name.to_string_lossy())
         })
         .await
     }
@@ -548,12 +582,13 @@ impl Files {
             let (from_parent, from_name) = split(&from)?;
             let (to_parent, to_name) = split(&to)?;
             let to_name = check_name(to_name)?;
-            let source = open_dir(from_parent, OFlags::PATH)?;
-            let target = open_dir(to_parent, OFlags::PATH)?;
-            rustix::fs::renameat_with(&source, from_name, &target, to_name, RenameFlags::NOREPLACE)
-                .map_err(|error| match error.raw_os_error() {
-                    libc::EEXIST => FilesError::Exists(shown(&to)),
-                    _ => FilesError::io(error.into(), &shown(&from)),
+            let source = open_folder(from_parent)?;
+            let target = open_folder(to_parent)?;
+            source
+                .rename(from_name, &target, to_name, false)
+                .map_err(|error| match error.kind() {
+                    std::io::ErrorKind::AlreadyExists => FilesError::Exists(shown(&to)),
+                    _ => FilesError::io(error, &shown(&from)),
                 })
         })
         .await
@@ -563,71 +598,17 @@ impl Files {
     pub(crate) async fn delete(&self, path: PathBuf) -> Result<(), FilesError> {
         blocking(move || {
             let (parent, name) = split(&path)?;
-            let dir = open_dir(parent, OFlags::PATH)?;
-            if is_mount(dir.as_fd(), name)? {
+            let folder = open_folder(parent)?;
+            if folder
+                .is_mount(name)
+                .map_err(|error| FilesError::io(error, &shown(&path)))?
+            {
                 return Err(FilesError::Refused(format!(
                     "{} is another disk, mounted there; unmount it rather than delete it",
                     shown(&path)
                 )));
             }
-            remove_tree(dir.as_fd(), name)
-        })
-        .await
-    }
-
-    /// Moves `path` to the trash on its disk.
-    pub(crate) async fn trash(&self, path: PathBuf) -> Result<(), FilesError> {
-        let home = self.home_trash()?;
-        blocking(move || {
-            let (parent, name) = split(&path)?;
-            let dir = open_dir(parent, OFlags::PATH)?;
-            if is_mount(dir.as_fd(), name)? {
-                return Err(FilesError::NoTrash(format!(
-                    "{} is a disk mounted there, which no trash can hold",
-                    shown(&path)
-                )));
-            }
-            trash::trash(&home, dir.as_fd(), name, &path)
-        })
-        .await
-    }
-
-    /// What the trashes hold.
-    pub(crate) async fn trashed(&self) -> Result<Vec<trash::Trashed>, FilesError> {
-        let home = self.home_trash()?;
-        blocking(move || Ok(trash::list(&home))).await
-    }
-
-    /// Puts the trashed item `id` back where it was.
-    pub(crate) async fn restore(&self, id: &str) -> Result<(), FilesError> {
-        let id = id.to_owned();
-        let home = self.home_trash()?;
-        blocking(move || {
-            let item = trash::find(&home, &id)?;
-            let original = item.original.clone();
-            let plain = original.is_absolute()
-                && !original
-                    .components()
-                    .any(|part| matches!(part, Component::ParentDir | Component::CurDir));
-            if !plain {
-                return Err(FilesError::BadPath(
-                    "the trash does not say plainly where it was".to_owned(),
-                ));
-            }
-            let (parent, name) = split(&original)?;
-            let dir = open_dir(parent, OFlags::PATH)?;
-            trash::restore(&item, dir.as_fd(), name)
-        })
-        .await
-    }
-
-    /// Deletes the trashed item `id` for good.
-    pub(crate) async fn purge(&self, id: &str) -> Result<(), FilesError> {
-        let id = id.to_owned();
-        let home = self.home_trash()?;
-        blocking(move || {
-            let item = trash::find(&home, &id)?;
-            trash::purge(&item)
+            remove_tree(&folder, name)
         })
         .await
     }
@@ -651,20 +632,14 @@ impl Files {
         let created = temp.clone();
         let checked = name.clone();
         let folder = blocking(move || {
-            let folder = open_dir(&folder_path, OFlags::PATH)?;
-            if !replace
-                && rustix::fs::statat(&folder, checked.as_str(), AtFlags::SYMLINK_NOFOLLOW).is_ok()
-            {
+            let folder = open_folder(&folder_path)?;
+            if !replace && folder.stat(OsStr::new(&checked)).is_ok() {
                 return Err(FilesError::Exists(checked));
             }
             // Only its owner reads it while it arrives; it takes its proper mode when finished.
-            rustix::fs::openat(
-                &folder,
-                created.as_str(),
-                OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::CLOEXEC,
-                Mode::from_raw_mode(0o600),
-            )
-            .map_err(|error| FilesError::io(error.into(), &created))?;
+            folder
+                .create_new(OsStr::new(&created))
+                .map_err(|error| FilesError::io(error, &created))?;
             Ok(folder)
         })
         .await?;
@@ -677,7 +652,7 @@ impl Files {
             active_at: Utc::now(),
         };
         if let Err(error) = self.store.add_upload(&row).await {
-            if let Err(error) = rustix::fs::unlinkat(&folder, temp.as_str(), AtFlags::empty()) {
+            if let Err(error) = folder.remove_file(OsStr::new(&temp)) {
                 tracing::warn!("could not remove an upload that did not start: {error}");
             }
             return Err(error.into());
@@ -697,18 +672,13 @@ impl Files {
             .ok_or_else(|| FilesError::NotFound("the upload".to_owned()))
     }
 
-    /// Opens an upload's unfinished file, which must be a regular file of its own.
-    fn open_upload(row: &UploadRow, flags: OFlags) -> Result<File, FilesError> {
-        let folder = open_dir(Path::new(&row.dir), OFlags::PATH)?;
-        let file = File::from(
-            rustix::fs::openat(
-                &folder,
-                row.temp.as_str(),
-                flags | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::NOCTTY | OFlags::CLOEXEC,
-                Mode::empty(),
-            )
-            .map_err(|error| FilesError::io(error.into(), "the upload"))?,
-        );
+    /// Opens an upload's unfinished file, to read or with `write` to write, which must be a
+    /// regular file of its own.
+    fn open_upload(row: &UploadRow, write: bool) -> Result<File, FilesError> {
+        let folder = open_folder(Path::new(&row.dir))?;
+        let file = folder
+            .open_file(OsStr::new(&row.temp), write)
+            .map_err(|error| FilesError::io(error, "the upload"))?;
         let metadata = file
             .metadata()
             .map_err(|error| FilesError::io(error, "the upload"))?;
@@ -725,7 +695,7 @@ impl Files {
         let row = self.upload_row(id).await?;
         let size = row.size;
         let (id, offset) = blocking(move || {
-            let file = Self::open_upload(&row, OFlags::RDONLY)?;
+            let file = Self::open_upload(&row, false)?;
             let offset = file
                 .metadata()
                 .map_err(|error| FilesError::io(error, "the upload"))?
@@ -752,7 +722,7 @@ impl Files {
         let size = row.size;
         let upload = row.clone();
         let written = blocking(move || {
-            let file = Self::open_upload(&upload, OFlags::WRONLY)?;
+            let file = Self::open_upload(&upload, true)?;
             let current = file
                 .metadata()
                 .map_err(|error| FilesError::io(error, "the upload"))?
@@ -767,7 +737,7 @@ impl Files {
                     "that is more than the upload's size".to_owned(),
                 ));
             }
-            file.write_all_at(&bytes, offset)
+            folder::write_all_at(&file, &bytes, offset)
                 .map_err(|error| FilesError::io(error, "the upload"))?;
             Ok(offset + bytes.len() as u64)
         })
@@ -786,57 +756,37 @@ impl Files {
         let row = self.upload_row(id).await?;
         let finished = row.clone();
         let entry = blocking(move || {
-            let folder = open_dir(Path::new(&finished.dir), OFlags::PATH)?;
+            let folder = open_folder(Path::new(&finished.dir))?;
+            let temp = OsStr::new(&finished.temp);
+            let name = OsStr::new(&finished.name);
             // The upload as opened, never through a symlink put in its place, is checked and
             // given its mode through that one handle.
-            let upload = rustix::fs::openat(
-                &folder,
-                finished.temp.as_str(),
-                OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
-                Mode::empty(),
-            )
-            .map_err(|error| FilesError::io(error.into(), "the upload"))?;
-            let metadata = rustix::fs::fstat(&upload)
-                .map_err(|error| FilesError::io(error.into(), "the upload"))?;
-            if rustix::fs::FileType::from_raw_mode(metadata.st_mode)
-                != rustix::fs::FileType::RegularFile
-            {
+            let upload = folder
+                .open_file(temp, false)
+                .map_err(|error| FilesError::io(error, "the upload"))?;
+            let metadata = upload
+                .metadata()
+                .map_err(|error| FilesError::io(error, "the upload"))?;
+            if !metadata.is_file() {
                 return Err(FilesError::Conflict("the upload is not a file".to_owned()));
             }
-            let have = u64::try_from(metadata.st_size).unwrap_or_default();
-            if have != finished.size {
+            if metadata.len() != finished.size {
                 return Err(FilesError::Conflict(format!(
-                    "the upload has {have} of its {} bytes",
+                    "the upload has {} of its {} bytes",
+                    metadata.len(),
                     finished.size
                 )));
             }
             // A file replaced keeps its mode; a new one takes the one new files get.
-            let mode =
-                rustix::fs::statat(&folder, finished.name.as_str(), AtFlags::SYMLINK_NOFOLLOW)
-                    .ok()
-                    .filter(|_| replace)
-                    .filter(|existing| {
-                        rustix::fs::FileType::from_raw_mode(existing.st_mode)
-                            == rustix::fs::FileType::RegularFile
-                    })
-                    .map_or_else(new_file_mode, |existing| existing.st_mode & 0o7777);
-            rustix::fs::fchmod(&upload, Mode::from_raw_mode(mode))
-                .map_err(|error| FilesError::io(error.into(), "the upload"))?;
+            folder
+                .give_mode(&upload, name, replace)
+                .map_err(|error| FilesError::io(error, "the upload"))?;
+            // Closed first: Windows renames no file held open.
             drop(upload);
-            let flags = if replace {
-                RenameFlags::empty()
-            } else {
-                RenameFlags::NOREPLACE
-            };
-            rustix::fs::renameat_with(
-                &folder,
-                finished.temp.as_str(),
-                &folder,
-                finished.name.as_str(),
-                flags,
-            )
-            .map_err(|error| FilesError::io(error.into(), &finished.name))?;
-            entry(folder.as_fd(), &finished.name)
+            folder
+                .rename(temp, &folder, name, replace)
+                .map_err(|error| FilesError::io(error, &finished.name))?;
+            entry(&folder, &finished.name)
         })
         .await?;
         self.store.delete_upload(&row.id).await?;
@@ -853,11 +803,11 @@ impl Files {
         let dir = PathBuf::from(&row.dir);
         let temp = row.temp.clone();
         let removed = blocking(move || {
-            let folder = open_dir(&dir, OFlags::PATH)?;
-            match rustix::fs::unlinkat(&folder, temp.as_str(), AtFlags::empty()) {
+            let folder = open_folder(&dir)?;
+            match folder.remove_file(OsStr::new(&temp)) {
                 Ok(()) => Ok(()),
-                Err(error) if error == rustix::io::Errno::NOENT => Ok(()),
-                Err(error) => Err(FilesError::io(error.into(), "the upload")),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                Err(error) => Err(FilesError::io(error, "the upload")),
             }
         })
         .await;
@@ -889,39 +839,39 @@ async fn blocking<T: Send + 'static>(
         .map_err(|error| FilesError::Internal(anyhow::anyhow!("a file task failed: {error}")))?
 }
 
-/// The entry `name` in the folder `dir`, a symlink as itself.
-fn entry(dir: BorrowedFd<'_>, name: &str) -> Result<Entry, FilesError> {
-    let stat = rustix::fs::statat(dir, name, AtFlags::SYMLINK_NOFOLLOW)
-        .map_err(|error| FilesError::io(error.into(), name))?;
-    let kind = Kind::of_stat(&stat);
-    let (target, target_kind) = if kind == Kind::Symlink {
-        let target = rustix::fs::readlinkat(dir, name, Vec::new())
+/// The entry `name` in `folder`, a symlink as itself.
+fn entry(folder: &Folder, name: &str) -> Result<Entry, FilesError> {
+    let stat = folder
+        .stat(OsStr::new(name))
+        .map_err(|error| FilesError::io(error, name))?;
+    let (target, target_kind) = if stat.kind == Kind::Symlink {
+        let target = folder
+            .read_link(OsStr::new(name))
             .ok()
             .map(|target| target.to_string_lossy().into_owned());
-        let followed = rustix::fs::statat(dir, name, AtFlags::empty())
+        let followed = folder
+            .stat_followed(OsStr::new(name))
             .ok()
-            .map(|stat| Kind::of_stat(&stat));
+            .map(|stat| stat.kind);
         (target, followed)
     } else {
         (None, None)
     };
-    let nanos = u32::try_from(stat.st_mtime_nsec).unwrap_or_default();
     Ok(Entry {
         name: name.to_owned(),
-        kind,
-        size: u64::try_from(stat.st_size).unwrap_or_default(),
-        modified: Utc.timestamp_opt(stat.st_mtime, nanos).single(),
-        permissions: permissions(stat.st_mode),
+        kind: stat.kind,
+        size: stat.size,
+        modified: stat.modified,
+        permissions: stat.mode.map(permissions),
         target,
         target_kind,
-        hidden: name.starts_with('.'),
+        hidden: name.starts_with('.') || stat.hidden,
     })
 }
 
 /// When `metadata` says its file was last changed.
 fn modified(metadata: &Metadata) -> Option<DateTime<Utc>> {
-    let nanos = u32::try_from(metadata.mtime_nsec()).unwrap_or_default();
-    Utc.timestamp_opt(metadata.mtime(), nanos).single()
+    metadata.modified().ok().map(DateTime::<Utc>::from)
 }
 
 /// Permission bits as `ls` writes them.
@@ -942,131 +892,57 @@ fn permissions(mode: u32) -> String {
         .collect()
 }
 
-/// Opens `path` to read, if it is a regular file. It is looked at before it is opened to read, so
-/// neither a named pipe nor a device, which can act on being opened, is.
+/// Opens `path`, its symlinks followed, to read, if it is a regular file: neither a named pipe nor
+/// a device, which can act on being opened, is.
 fn open_regular(path: &Path) -> Result<(File, Metadata), FilesError> {
-    let handle = rustix::fs::open(path, OFlags::PATH | OFlags::CLOEXEC, Mode::empty())
-        .map_err(|error| FilesError::io(error.into(), &shown(path)))?;
-    let stat =
-        rustix::fs::fstat(&handle).map_err(|error| FilesError::io(error.into(), &shown(path)))?;
-    if rustix::fs::FileType::from_raw_mode(stat.st_mode) != rustix::fs::FileType::RegularFile {
-        return Err(FilesError::BadPath(format!(
-            "{} is not a file",
-            shown(path)
-        )));
-    }
-    // Opened again through the handle: the file looked at, whatever the path names by now.
-    let fd = rustix::fs::open(
-        format!("/proc/self/fd/{}", handle.as_raw_fd()),
-        OFlags::RDONLY | OFlags::NONBLOCK | OFlags::NOCTTY | OFlags::CLOEXEC,
-        Mode::empty(),
-    )
-    .map_err(|error| FilesError::io(error.into(), &shown(path)))?;
-    let file = File::from(fd);
+    let file = folder::open_regular(path)
+        .map_err(|error| FilesError::io(error, &shown(path)))?
+        .ok_or_else(|| FilesError::BadPath(format!("{} is not a file", shown(path))))?;
     let metadata = file
         .metadata()
         .map_err(|error| FilesError::io(error, &shown(path)))?;
-    if !metadata.is_file() {
-        return Err(FilesError::BadPath(format!(
-            "{} is not a file",
-            shown(path)
-        )));
-    }
     Ok((file, metadata))
-}
-
-/// The device the file `fd` is open on is on.
-fn device(fd: BorrowedFd<'_>) -> Result<u64, FilesError> {
-    rustix::fs::fstat(fd)
-        .map(|stat| stat.st_dev)
-        .map_err(|error| FilesError::io(error.into(), "the folder"))
-}
-
-/// Whether `name` in `dir` is a mount point: another disk, or a bind mount, which is on the same
-/// disk and so cannot be told by its device.
-pub(crate) fn is_mount(dir: BorrowedFd<'_>, name: &OsStr) -> Result<bool, FilesError> {
-    if let Some(root) = mount_root(dir, name) {
-        return Ok(root);
-    }
-    let item = rustix::fs::statat(dir, name, AtFlags::SYMLINK_NOFOLLOW)
-        .map_err(|error| FilesError::io(error.into(), &name.to_string_lossy()))?;
-    Ok(item.st_dev != device(dir)?)
-}
-
-/// Whether `name` in `dir` is the root of a mount, where the kernel says (Linux 5.8 on).
-pub(crate) fn mount_root(dir: BorrowedFd<'_>, name: &OsStr) -> Option<bool> {
-    let stat = rustix::fs::statx(
-        dir,
-        name,
-        AtFlags::SYMLINK_NOFOLLOW | AtFlags::NO_AUTOMOUNT,
-        rustix::fs::StatxFlags::empty(),
-    )
-    .ok()?;
-    let flag = rustix::fs::StatxAttributes::MOUNT_ROOT;
-    stat.stx_attributes_mask
-        .contains(flag)
-        .then(|| stat.stx_attributes.contains(flag))
-}
-
-/// The mode a new file gets: read and write for all, less the process's umask.
-fn new_file_mode() -> u32 {
-    let umask = std::fs::read_to_string("/proc/self/status")
-        .ok()
-        .and_then(|status| {
-            status
-                .lines()
-                .find_map(|line| line.strip_prefix("Umask:"))
-                .and_then(|value| u32::from_str_radix(value.trim(), 8).ok())
-        })
-        .unwrap_or(0o022);
-    0o666 & !umask
 }
 
 /// A folder being removed: what it is called in its parent, and the names in it left to remove.
 struct Removing {
-    fd: OwnedFd,
-    name: Vec<u8>,
-    left: Vec<Vec<u8>>,
+    folder: Folder,
+    name: OsString,
+    left: Vec<OsString>,
 }
 
 impl Removing {
-    fn open(dir: BorrowedFd<'_>, name: &[u8]) -> Result<Self, FilesError> {
-        let shown = String::from_utf8_lossy(name).into_owned();
-        let fd = rustix::fs::openat(
-            dir,
-            OsStr::from_bytes(name),
-            OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
-            Mode::empty(),
-        )
-        .map_err(|error| FilesError::io(error.into(), &shown))?;
+    fn open(parent: &Folder, name: &OsStr) -> Result<Self, FilesError> {
+        let shown = name.to_string_lossy();
+        let folder = parent
+            .open_folder(name)
+            .map_err(|error| FilesError::io(error, &shown))?;
         // A folder that cannot be read to its end is not removed: what was missed would stay.
-        let left = rustix::fs::Dir::read_from(&fd)
-            .map_err(|error| FilesError::io(error.into(), &shown))?
-            .map(|item| item.map(|item| item.file_name().to_bytes().to_vec()))
-            .filter(|item| !matches!(item.as_deref(), Ok(b".") | Ok(b"..")))
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|error| FilesError::io(error.into(), &shown))?;
+        let left = folder
+            .names()
+            .map_err(|error| FilesError::io(error, &shown))?;
         Ok(Self {
-            fd,
-            name: name.to_vec(),
+            folder,
+            name: name.to_owned(),
             left,
         })
     }
 }
 
-/// Removes `name` in `dir`, and everything in it, without following a symlink, and without
+/// Removes `name` in `parent`, and everything in it, without following a symlink, and without
 /// going into another disk mounted inside: what is on one is left, and the folders holding it.
-pub(crate) fn remove_tree(dir: BorrowedFd<'_>, name: &OsStr) -> Result<(), FilesError> {
-    let shown = |name: &[u8]| String::from_utf8_lossy(name).into_owned();
-    let top = rustix::fs::statat(dir, name, AtFlags::SYMLINK_NOFOLLOW)
-        .map_err(|error| FilesError::io(error.into(), &shown(name.as_bytes())))?;
-    if rustix::fs::FileType::from_raw_mode(top.st_mode) != rustix::fs::FileType::Directory {
-        return rustix::fs::unlinkat(dir, name, AtFlags::empty())
-            .map_err(|error| FilesError::io(error.into(), &shown(name.as_bytes())));
+pub(crate) fn remove_tree(parent: &Folder, name: &OsStr) -> Result<(), FilesError> {
+    let shown = |name: &OsStr| name.to_string_lossy().into_owned();
+    let top = parent
+        .stat(name)
+        .map_err(|error| FilesError::io(error, &shown(name)))?;
+    if top.kind != Kind::Folder {
+        return parent
+            .remove_file(name)
+            .map_err(|error| FilesError::io(error, &shown(name)));
     }
-    let disk = top.st_dev;
     let mut mounts_left = false;
-    let mut stack = vec![Removing::open(dir, name.as_bytes())?];
+    let mut stack = vec![Removing::open(parent, name)?];
     loop {
         let depth = stack.len();
         let Some(current) = stack.last_mut() else {
@@ -1076,48 +952,45 @@ pub(crate) fn remove_tree(dir: BorrowedFd<'_>, name: &OsStr) -> Result<(), Files
             let Some(done) = stack.pop() else {
                 break;
             };
-            let parent = stack.last().map_or(dir, |parent| parent.fd.as_fd());
-            match rustix::fs::unlinkat(parent, OsStr::from_bytes(&done.name), AtFlags::REMOVEDIR) {
+            let holder = stack.last().map_or(parent, |above| &above.folder);
+            match holder.remove_folder(&done.name) {
                 Ok(()) => {}
                 // What holds a mounted disk stays.
-                Err(error) if mounts_left && error == rustix::io::Errno::NOTEMPTY => {}
-                Err(error) => return Err(FilesError::io(error.into(), &shown(&done.name))),
+                Err(error)
+                    if mounts_left && error.kind() == std::io::ErrorKind::DirectoryNotEmpty => {}
+                Err(error) => return Err(FilesError::io(error, &shown(&done.name))),
             }
             continue;
         };
-        let stat = match rustix::fs::statat(
-            &current.fd,
-            OsStr::from_bytes(&item),
-            AtFlags::SYMLINK_NOFOLLOW,
-        ) {
+        let stat = match current.folder.stat(&item) {
             Ok(stat) => stat,
-            Err(error) if error == rustix::io::Errno::NOENT => continue,
-            Err(error) => return Err(FilesError::io(error.into(), &shown(&item))),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(FilesError::io(error, &shown(&item))),
         };
-        if rustix::fs::FileType::from_raw_mode(stat.st_mode) != rustix::fs::FileType::Directory {
-            rustix::fs::unlinkat(&current.fd, OsStr::from_bytes(&item), AtFlags::empty())
-                .map_err(|error| FilesError::io(error.into(), &shown(&item)))?;
+        if stat.kind != Kind::Folder {
+            current
+                .folder
+                .remove_file(&item)
+                .map_err(|error| FilesError::io(error, &shown(&item)))?;
             continue;
         }
-        if stat.st_dev != disk
-            || mount_root(current.fd.as_fd(), OsStr::from_bytes(&item)) == Some(true)
-        {
+        if current.folder.leaves_disk(&item, &stat, top.disk) {
             mounts_left = true;
             continue;
         }
         if depth >= MAX_DEPTH {
             return Err(FilesError::Refused(format!(
                 "{} holds folders more than {MAX_DEPTH} deep; delete it from a terminal",
-                shown(name.as_bytes())
+                shown(name)
             )));
         }
-        let next = Removing::open(current.fd.as_fd(), &item)?;
+        let next = Removing::open(&current.folder, &item)?;
         stack.push(next);
     }
     if mounts_left {
         return Err(FilesError::Refused(format!(
             "another disk is mounted inside {}; it and the folders holding it were left",
-            shown(name.as_bytes())
+            shown(name)
         )));
     }
     Ok(())
@@ -1180,56 +1053,98 @@ pub(crate) fn parse_range(header: &str, size: u64) -> Range {
     }
 }
 
-/// Writes `text` to a new file `name` in `dir`, for tests and the trash's info files.
-pub(crate) fn write_new(dir: BorrowedFd<'_>, name: &str, text: &[u8]) -> std::io::Result<()> {
-    let fd = rustix::fs::openat(
-        dir,
-        name,
-        OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::CLOEXEC,
-        Mode::from_raw_mode(0o600),
-    )?;
-    let mut file = File::from(fd);
-    file.write_all(text)?;
-    file.sync_all()
-}
-
 #[cfg(test)]
 mod tests {
-    use std::os::unix::fs::{PermissionsExt, symlink};
-
     use super::*;
 
     fn files() -> Files {
         Files::new(Store::in_memory().unwrap())
     }
 
+    /// Makes a named pipe at `path`, with `mkfifo`: rustix has no `mkfifoat` on macOS.
+    #[cfg(unix)]
+    pub(crate) fn make_pipe(path: &Path) {
+        let made = std::process::Command::new("mkfifo")
+            .arg(path)
+            .status()
+            .unwrap();
+        assert!(made.success());
+    }
+
+    #[cfg(unix)]
     #[test]
     fn paths_are_absolute_with_their_dots_resolved() {
         assert_eq!(resolve("/a/b/").unwrap(), Path::new("/a/b"));
         assert_eq!(resolve("/a/./b/../c").unwrap(), Path::new("/a/c"));
         assert_eq!(resolve("/../..").unwrap(), Path::new("/"));
         assert_eq!(
-            resolve("~/x").unwrap(),
-            crate::config::home().unwrap().join("x")
-        );
-        assert_eq!(resolve("~").unwrap(), crate::config::home().unwrap());
-        assert_eq!(
             resolve("/a/report ").unwrap(),
             Path::new("/a/report "),
             "a name's spaces are its own"
         );
-        for bad in ["relative", "~user/x", "", " /a", "/a\0b"] {
+        for bad in ["relative", "~user/x", "", " /a", "/a\0b", "~\\x"] {
             assert!(resolve(bad).is_err(), "{bad:?}");
         }
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn paths_start_at_a_drive_or_share_with_their_dots_resolved() {
+        assert_eq!(resolve(r"C:\a\b\").unwrap(), Path::new(r"C:\a\b"));
+        assert_eq!(resolve("C:/a/./b/../c").unwrap(), Path::new(r"C:\a\c"));
+        assert_eq!(resolve(r"C:\..\..").unwrap(), Path::new(r"C:\"));
+        assert_eq!(resolve(r"\\?\D:\x").unwrap(), Path::new(r"D:\x"));
+        assert_eq!(
+            resolve(r"\\server\share\a\..\..").unwrap(),
+            Path::new(r"\\server\share\")
+        );
+        assert_eq!(
+            resolve(r"\\?\UNC\server\share\a").unwrap(),
+            Path::new(r"\\server\share\a")
+        );
+        for bad in ["relative", r"\a", "C:a", r"\\.\COM1", "", "C:\\a\0b"] {
+            assert!(resolve(bad).is_err(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn home_is_where_a_tilde_starts() {
+        let home = crate::config::home().unwrap();
+        assert_eq!(resolve("~").unwrap(), home);
+        assert_eq!(resolve("~/x").unwrap(), home.join("x"));
+    }
+
+    #[test]
+    fn names_are_checked_as_written() {
+        for good in ["a.txt", " spaced", ".env", "naïve"] {
+            assert!(check_name(OsStr::new(good)).is_ok(), "{good:?}");
+        }
+        for bad in ["", ".", "..", "a/b", "a\0b", ".mekaweb-upload-x"] {
+            assert!(check_name(OsStr::new(bad)).is_err(), "{bad:?}");
+        }
+        #[cfg(windows)]
+        for bad in [
+            r"a\b",
+            "a:b",
+            "a?",
+            "trailing.",
+            "trailing ",
+            "con",
+            "NUL.txt",
+            "lpt1 ",
+        ] {
+            assert!(check_name(OsStr::new(bad)).is_err(), "{bad:?}");
+        }
+    }
+
+    #[cfg(unix)]
     #[tokio::test]
     async fn a_symlink_is_listed_as_itself_and_acted_on_as_itself() {
         let dir = tempfile::tempdir().unwrap();
         let work = dir.path().join("work");
         std::fs::create_dir_all(&work).unwrap();
         std::fs::write(dir.path().join("secret"), "keys").unwrap();
-        symlink(dir.path().join("secret"), work.join("link")).unwrap();
+        std::os::unix::fs::symlink(dir.path().join("secret"), work.join("link")).unwrap();
         let files = files();
         let listing = files.list(work.clone()).await.unwrap();
         let link = &listing.entries[0];
@@ -1240,6 +1155,29 @@ mod tests {
             dir.path().join("secret").exists(),
             "the link went, not what it led to"
         );
+    }
+
+    #[tokio::test]
+    async fn a_listing_says_what_each_entry_is() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("inner")).unwrap();
+        std::fs::write(dir.path().join("a.txt"), "hello").unwrap();
+        std::fs::write(dir.path().join(".hidden"), "").unwrap();
+        let listing = files().list(dir.path().to_path_buf()).await.unwrap();
+        let names: Vec<(&str, Kind, bool)> = listing
+            .entries
+            .iter()
+            .map(|entry| (entry.name.as_str(), entry.kind, entry.hidden))
+            .collect();
+        assert_eq!(names, [
+            (".hidden", Kind::File, true),
+            ("a.txt", Kind::File, false),
+            ("inner", Kind::Folder, false)
+        ]);
+        let file = &listing.entries[1];
+        assert_eq!(file.size, 5);
+        assert!(file.modified.is_some());
+        assert_eq!(file.permissions.is_some(), cfg!(unix));
     }
 
     #[tokio::test]
@@ -1262,7 +1200,7 @@ mod tests {
     async fn moves_never_replace_and_folders_stay_out_of_themselves() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path();
-        std::fs::create_dir_all(path.join("a/b")).unwrap();
+        std::fs::create_dir_all(path.join("a").join("b")).unwrap();
         std::fs::write(path.join("x"), "x").unwrap();
         std::fs::write(path.join("y"), "y").unwrap();
         let files = files();
@@ -1271,14 +1209,27 @@ mod tests {
             Err(FilesError::Exists(_))
         ));
         assert!(matches!(
-            files.move_entry(path.join("a"), path.join("a/b/a")).await,
+            files
+                .move_entry(path.join("a"), path.join("a").join("b").join("a"))
+                .await,
             Err(FilesError::BadPath(_))
         ));
         files
-            .move_entry(path.join("x"), path.join("a/b/z"))
+            .move_entry(path.join("x"), path.join("a").join("b").join("z"))
             .await
             .unwrap();
-        assert_eq!(std::fs::read_to_string(path.join("a/b/z")).unwrap(), "x");
+        assert_eq!(
+            std::fs::read_to_string(path.join("a").join("b").join("z")).unwrap(),
+            "x"
+        );
+        files
+            .move_entry(path.join("a"), path.join("c"))
+            .await
+            .unwrap();
+        assert!(
+            path.join("c").join("b").join("z").exists(),
+            "a folder moves"
+        );
     }
 
     #[tokio::test]
@@ -1294,21 +1245,11 @@ mod tests {
             files.make_folder(dir.path().join("one"), false).await,
             Err(FilesError::Exists(_))
         ));
-        assert!(
-            files
-                .make_folder(dir.path().join("p/q"), false)
-                .await
-                .is_err()
-        );
-        files
-            .make_folder(dir.path().join("p/q"), true)
-            .await
-            .unwrap();
-        files
-            .make_folder(dir.path().join("p/q"), true)
-            .await
-            .unwrap();
-        assert!(dir.path().join("p/q").is_dir());
+        let deep = dir.path().join("p").join("q");
+        assert!(files.make_folder(deep.clone(), false).await.is_err());
+        files.make_folder(deep.clone(), true).await.unwrap();
+        files.make_folder(deep.clone(), true).await.unwrap();
+        assert!(deep.is_dir());
     }
 
     #[tokio::test]
@@ -1350,10 +1291,26 @@ mod tests {
             files.start_upload(work.clone(), "data.bin", 1, false).await,
             Err(FilesError::Exists(_))
         ));
+        let again = files
+            .start_upload(work.clone(), "data.bin", 3, true)
+            .await
+            .unwrap();
+        files
+            .write_chunk(&again.id, 0, bytes::Bytes::from_static(b"new"))
+            .await
+            .unwrap();
+        files.finish_upload(&again.id, true).await.unwrap();
+        assert_eq!(
+            std::fs::read(work.join("data.bin")).unwrap(),
+            b"new",
+            "an upload replaces a file when asked to"
+        );
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn an_upload_takes_the_mode_of_the_file_it_replaces() {
+        use std::os::unix::fs::PermissionsExt;
         let dir = tempfile::tempdir().unwrap();
         let work = dir.path().to_path_buf();
         std::fs::write(work.join(".env"), "old").unwrap();
@@ -1384,7 +1341,7 @@ mod tests {
                 .mode()
         };
         assert_eq!(mode(".env") & 0o777, 0o600);
-        assert_eq!(mode("new.txt") & 0o777, new_file_mode());
+        assert_eq!(mode("new.txt") & 0o777, folder::new_file_mode());
     }
 
     #[tokio::test]
@@ -1410,11 +1367,12 @@ mod tests {
         assert_eq!(std::fs::read_dir(&work).unwrap().count(), 0);
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn a_named_pipe_is_never_read() {
         let dir = tempfile::tempdir().unwrap();
         let pipe = dir.path().join("pipe");
-        rustix::fs::mkfifoat(rustix::fs::CWD, &pipe, Mode::from_raw_mode(0o600)).unwrap();
+        make_pipe(&pipe);
         let files = files();
         let wait = Duration::from_secs(5);
         let text = tokio::time::timeout(wait, files.text(pipe.clone())).await;
@@ -1423,18 +1381,36 @@ mod tests {
         assert!(matches!(raw, Ok(Err(FilesError::BadPath(_)))));
     }
 
+    #[tokio::test]
+    async fn a_tree_is_deleted_with_its_read_only_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let tree = dir.path().join("tree");
+        std::fs::create_dir_all(tree.join("a").join("b")).unwrap();
+        std::fs::write(tree.join("a").join("b").join("c"), "x").unwrap();
+        let locked = tree.join("a").join("locked");
+        std::fs::write(&locked, "x").unwrap();
+        let mut permissions = std::fs::metadata(&locked).unwrap().permissions();
+        permissions.set_readonly(true);
+        std::fs::set_permissions(&locked, permissions).unwrap();
+        std::fs::write(dir.path().join("kept"), "x").unwrap();
+        files().delete(tree.clone()).await.unwrap();
+        assert!(!tree.exists());
+        assert!(dir.path().join("kept").exists());
+    }
+
+    #[cfg(unix)]
     #[test]
     fn a_tree_is_removed_whatever_its_names_and_without_following_links() {
+        use std::os::unix::ffi::OsStrExt;
         let dir = tempfile::tempdir().unwrap();
         let tree = dir.path().join("tree");
         std::fs::create_dir_all(tree.join("a/b")).unwrap();
         std::fs::write(tree.join(OsStr::from_bytes(b"not-utf8-\xff")), "x").unwrap();
         std::fs::write(tree.join("a/b/c"), "x").unwrap();
         std::fs::write(dir.path().join("kept"), "x").unwrap();
-        symlink(dir.path(), tree.join("a/up")).unwrap();
-        let parent =
-            rustix::fs::open(dir.path(), OFlags::PATH | OFlags::DIRECTORY, Mode::empty()).unwrap();
-        remove_tree(parent.as_fd(), OsStr::new("tree")).unwrap();
+        std::os::unix::fs::symlink(dir.path(), tree.join("a/up")).unwrap();
+        let parent = Folder::open(dir.path()).unwrap();
+        remove_tree(&parent, OsStr::new("tree")).unwrap();
         assert!(!tree.exists());
         assert!(
             dir.path().join("kept").exists(),
@@ -1450,10 +1426,9 @@ mod tests {
             deep.push("d");
         }
         std::fs::create_dir_all(&deep).unwrap();
-        let parent =
-            rustix::fs::open(dir.path(), OFlags::PATH | OFlags::DIRECTORY, Mode::empty()).unwrap();
+        let parent = Folder::open(dir.path()).unwrap();
         assert!(matches!(
-            remove_tree(parent.as_fd(), OsStr::new("tree")),
+            remove_tree(&parent, OsStr::new("tree")),
             Err(FilesError::Refused(_))
         ));
     }

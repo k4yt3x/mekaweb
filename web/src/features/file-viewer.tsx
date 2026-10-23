@@ -100,8 +100,7 @@ export function FileViewer({
                   <Timestamp value={entry.modified} />
                 </>
               )}
-              {' · '}
-              {entry.permissions}
+              {entry.permissions && ` · ${entry.permissions}`}
             </span>
           </p>
           {kind === 'text' ? (

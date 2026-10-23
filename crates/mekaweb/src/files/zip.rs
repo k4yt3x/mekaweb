@@ -7,24 +7,17 @@
 use std::{
     cell::RefCell,
     collections::HashSet,
-    ffi::OsStr,
-    fs::File,
+    ffi::OsString,
     io::{Read, Write},
-    os::{
-        fd::{AsFd, OwnedFd},
-        unix::{
-            ffi::OsStrExt,
-            fs::{MetadataExt, PermissionsExt},
-        },
-    },
     rc::Rc,
 };
 
 use bytes::Bytes;
-use chrono::{Datelike, TimeZone, Timelike, Utc};
-use rustix::fs::{AtFlags, FileType, Mode, OFlags};
+use chrono::{Datelike, Timelike, Utc};
 use tokio::sync::mpsc;
 use zip::{CompressionMethod, ZipWriter, write::SimpleFileOptions};
+
+use super::{Folder, Kind, folder::mode_of};
 
 /// How many bytes are gathered before they are sent on.
 const SEND_BYTES: usize = 256 * 1024;
@@ -87,7 +80,7 @@ impl Write for ChannelWriter {
 /// Writes the folder `dir` as a zip into `sender`, its entries under `prefix/`; with `only`, just
 /// those names in it. Runs until the archive ends or the download stops.
 pub(crate) fn write(
-    dir: OwnedFd,
+    dir: Folder,
     prefix: String,
     only: Option<Vec<String>>,
     sender: mpsc::Sender<std::io::Result<Bytes>>,
@@ -125,29 +118,25 @@ fn entry_name(name: &str) -> String {
 
 /// A folder being added: its path in the archive, and the names in it left to add.
 struct Adding {
-    fd: OwnedFd,
+    folder: Folder,
     path: String,
-    left: std::vec::IntoIter<Vec<u8>>,
+    left: std::vec::IntoIter<OsString>,
 }
 
 impl Adding {
-    /// Adds the folder `fd` as `path/`, and reads what it holds.
+    /// Adds `folder`, which holds `names`, as `path/`.
     fn start<W: Write>(
         zip: &mut ZipWriter<zip::write::StreamWriter<W>>,
-        fd: OwnedFd,
+        folder: Folder,
         path: String,
+        mut names: Vec<OsString>,
     ) -> std::io::Result<Self> {
         // A folder's entry has no data descriptor, so it is never ZIP64 in its local header.
         zip.add_directory(format!("{path}/"), options(None, 0o755, false))
             .map_err(std::io::Error::other)?;
-        let mut names: Vec<Vec<u8>> = rustix::fs::Dir::read_from(&fd)?
-            .filter_map(Result::ok)
-            .map(|item| item.file_name().to_bytes().to_vec())
-            .filter(|name| name != b"." && name != b"..")
-            .collect();
         names.sort();
         Ok(Self {
-            fd,
+            folder,
             path,
             left: names.into_iter(),
         })
@@ -159,16 +148,17 @@ impl Adding {
 fn add_tree<W: Write>(
     zip: &mut ZipWriter<zip::write::StreamWriter<W>>,
     pending: &RefCell<Pending>,
-    dir: OwnedFd,
+    dir: Folder,
     prefix: &str,
     only: Option<Vec<String>>,
 ) -> std::io::Result<usize> {
-    let disk = rustix::fs::fstat(&dir)?.st_dev;
+    let disk = dir.disk()?;
     let mut left_out = 0;
-    let mut top = Adding::start(zip, dir, prefix.to_owned())?;
+    let names = dir.names()?;
+    let mut top = Adding::start(zip, dir, prefix.to_owned(), names)?;
     if let Some(only) = only {
         // A name gone since it was chosen is not there to add.
-        let only: HashSet<Vec<u8>> = only.into_iter().map(String::into_bytes).collect();
+        let only: HashSet<OsString> = only.into_iter().map(OsString::from).collect();
         top.left = top
             .left
             .filter(|name| only.contains(name))
@@ -185,7 +175,6 @@ fn add_tree<W: Write>(
             stack.pop();
             continue;
         };
-        let name = OsStr::from_bytes(&name);
         let Some(text) = name.to_str() else {
             left_out += 1;
             continue;
@@ -193,55 +182,44 @@ fn add_tree<W: Write>(
         if text.starts_with(super::UPLOAD_PREFIX) {
             continue;
         }
-        let Ok(stat) = rustix::fs::statat(&current.fd, name, AtFlags::SYMLINK_NOFOLLOW) else {
+        let Ok(stat) = current.folder.stat(&name) else {
             left_out += 1;
             continue;
         };
         let path = format!("{}/{}", current.path, entry_name(text));
-        match FileType::from_raw_mode(stat.st_mode) {
-            FileType::Symlink => {}
-            FileType::Directory => {
-                if stat.st_dev != disk
-                    || depth >= super::MAX_DEPTH
-                    || super::mount_root(current.fd.as_fd(), name) == Some(true)
-                {
+        match stat.kind {
+            Kind::Symlink => {}
+            Kind::Folder => {
+                if depth >= super::MAX_DEPTH || current.folder.leaves_disk(&name, &stat, disk) {
                     left_out += 1;
                     continue;
                 }
-                let Ok(fd) = rustix::fs::openat(
-                    &current.fd,
-                    name,
-                    OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
-                    Mode::empty(),
-                ) else {
+                // One that cannot be read to its end is left out, rather than ending the zip.
+                let Some((folder, names)) = current
+                    .folder
+                    .open_folder(&name)
+                    .and_then(|folder| folder.names().map(|names| (folder, names)))
+                    .ok()
+                else {
                     left_out += 1;
                     continue;
                 };
-                let next = Adding::start(zip, fd, path)?;
+                let next = Adding::start(zip, folder, path, names)?;
                 stack.push(next);
             }
-            FileType::RegularFile => {
-                let Ok(fd) = rustix::fs::openat(
-                    &current.fd,
-                    name,
-                    OFlags::RDONLY
-                        | OFlags::NOFOLLOW
-                        | OFlags::NONBLOCK
-                        | OFlags::NOCTTY
-                        | OFlags::CLOEXEC,
-                    Mode::empty(),
-                ) else {
+            Kind::File => {
+                let Ok(mut file) = current.folder.open_file(&name, false) else {
                     left_out += 1;
                     continue;
                 };
-                let mut file = File::from(fd);
                 let metadata = file.metadata()?;
                 // Replaced since it was looked at.
                 if !metadata.is_file() {
                     left_out += 1;
                     continue;
                 }
-                let modified = Utc.timestamp_opt(metadata.mtime(), 0).single();
+                let modified = super::modified(&metadata);
+                let mode = mode_of(&metadata).unwrap_or(0o644);
                 // A file past 4 GiB into the archive is ZIP64 too: its offset makes its central
                 // record ZIP64, and UnZip then takes its data descriptor to be ZIP64 as well. The
                 // entry before still has to write its end first, which the margin leaves room for.
@@ -250,10 +228,7 @@ fn add_tree<W: Write>(
                 // Its header is written after the end of the entry before, all of it kept back
                 // so the header can be corrected.
                 pending.borrow_mut().holding = true;
-                let started = zip.start_file(
-                    &path,
-                    options(modified, metadata.permissions().mode(), zip64),
-                );
+                let started = zip.start_file(&path, options(modified, mode, zip64));
                 let mut held = pending.borrow_mut();
                 held.holding = false;
                 started.map_err(std::io::Error::other)?;
@@ -265,7 +240,7 @@ fn add_tree<W: Write>(
                 // otherwise outgrow the form its entry was started in.
                 std::io::copy(&mut (&mut file).take(metadata.len()), zip)?;
             }
-            _ => left_out += 1,
+            Kind::Other => left_out += 1,
         }
     }
     Ok(left_out)
@@ -347,6 +322,21 @@ mod tests {
 
     use super::*;
 
+    /// What a zip of `folder` holds, with `only` just those names in it.
+    async fn zipped(folder: &std::path::Path, only: Option<Vec<String>>) -> Vec<u8> {
+        let dir = Folder::open(folder).unwrap();
+        let (sender, mut receiver) = mpsc::channel(4);
+        let writing =
+            tokio::task::spawn_blocking(move || write(dir, "folder".to_owned(), only, sender));
+        let mut archive = Vec::new();
+        while let Some(chunk) = receiver.recv().await {
+            archive.extend_from_slice(&chunk.unwrap());
+        }
+        writing.await.unwrap();
+        archive
+    }
+
+    #[cfg(unix)]
     #[tokio::test]
     async fn a_folder_zips_without_its_symlinks_or_pipes() {
         let dir = tempfile::tempdir().unwrap();
@@ -357,23 +347,9 @@ mod tests {
         std::fs::write(dir.path().join("secret"), "keys").unwrap();
         std::os::unix::fs::symlink(dir.path().join("secret"), folder.join("link")).unwrap();
         // A named pipe with no writer: reading it would wait for ever.
-        rustix::fs::mkfifoat(
-            rustix::fs::CWD,
-            folder.join("pipe"),
-            Mode::from_raw_mode(0o600),
-        )
-        .unwrap();
+        crate::files::tests::make_pipe(&folder.join("pipe"));
         std::fs::write(folder.join("back\\slash"), "x").unwrap();
-        let fd =
-            rustix::fs::open(&folder, OFlags::RDONLY | OFlags::DIRECTORY, Mode::empty()).unwrap();
-        let (sender, mut receiver) = mpsc::channel(4);
-        let writing =
-            tokio::task::spawn_blocking(move || write(fd, "folder".to_owned(), None, sender));
-        let mut archive = Vec::new();
-        while let Some(chunk) = receiver.recv().await {
-            archive.extend_from_slice(&chunk.unwrap());
-        }
-        writing.await.unwrap();
+        let archive = zipped(&folder, None).await;
         let mut zip = zip::ZipArchive::new(std::io::Cursor::new(archive)).unwrap();
         let mut names: Vec<String> = zip
             .file_names()
@@ -403,18 +379,8 @@ mod tests {
         std::fs::write(folder.join("a.txt"), "alpha").unwrap();
         std::fs::write(folder.join("b.txt"), "beta").unwrap();
         std::fs::write(folder.join("inner/c.txt"), "gamma").unwrap();
-        let fd =
-            rustix::fs::open(&folder, OFlags::RDONLY | OFlags::DIRECTORY, Mode::empty()).unwrap();
-        let (sender, mut receiver) = mpsc::channel(4);
         let only = vec!["a.txt".to_owned(), "inner".to_owned(), "gone".to_owned()];
-        let writing = tokio::task::spawn_blocking(move || {
-            write(fd, "folder".to_owned(), Some(only), sender);
-        });
-        let mut archive = Vec::new();
-        while let Some(chunk) = receiver.recv().await {
-            archive.extend_from_slice(&chunk.unwrap());
-        }
-        writing.await.unwrap();
+        let archive = zipped(&folder, Some(only)).await;
         let zip = zip::ZipArchive::new(std::io::Cursor::new(archive)).unwrap();
         let mut names: Vec<String> = zip
             .file_names()

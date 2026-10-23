@@ -2,8 +2,8 @@
 //! passes their requests to meka on loopback, and adds what meka leaves to the host: Files, a
 //! terminal, push notifications, and meka's status.
 
-#[cfg(not(target_os = "linux"))]
-compile_error!("mekaweb runs on Linux: Files reads /proc and moves with renameat2");
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+compile_error!("mekaweb runs on Linux, macOS and Windows");
 
 mod api;
 mod app;
@@ -24,7 +24,6 @@ mod tests;
 
 use std::{
     io::{BufRead, IsTerminal},
-    os::unix::fs::DirBuilderExt,
     path::PathBuf,
 };
 
@@ -42,7 +41,8 @@ use crate::{
 #[derive(Parser)]
 #[command(version)]
 struct Cli {
-    /// The config file [default: ~/.config/mekaweb/config.toml]
+    /// The config file [default: ~/.config/mekaweb/config.toml, or on Windows
+    /// %APPDATA%\mekaweb\config.toml]
     #[arg(long, global = true, value_name = "PATH")]
     config: Option<PathBuf>,
     #[command(subcommand)]
@@ -86,6 +86,8 @@ enum UserCommand {
 }
 
 fn main() -> anyhow::Result<()> {
+    // Before any thread starts, or anything makes a file: on macOS this sets the umask to read it.
+    files::prepare();
     let cli = Cli::parse();
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -132,9 +134,11 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
 
 /// Opens the database in the state folder, making the folder if it is not there.
 fn open_store(config: &Config) -> anyhow::Result<Store> {
-    std::fs::DirBuilder::new()
-        .recursive(true)
-        .mode(0o700)
+    let mut folder = std::fs::DirBuilder::new();
+    folder.recursive(true);
+    #[cfg(unix)]
+    std::os::unix::fs::DirBuilderExt::mode(&mut folder, 0o700);
+    folder
         .create(&config.state_dir)
         .with_context(|| format!("could not make {}", config.state_dir.display()))?;
     Store::open(&config.state_dir.join("mekaweb.db"))

@@ -1,13 +1,16 @@
-//! Terminals: the user's login shell on a pseudo-terminal, run by mekaweb and reached over a
-//! WebSocket. A shell outlives the connections to it, keeping its recent output, since iOS
-//! suspends the app whenever it is out of sight: coming back, from that device or another,
-//! replays what was missed and carries on. A shell nobody is attached to or typing in is closed
-//! after the configured idle time.
+//! Terminals: the user's login shell on a pseudo-terminal, or PowerShell on a pseudo console on
+//! Windows, run by mekaweb and reached over a WebSocket. A shell outlives the connections to it,
+//! keeping its recent output, since iOS suspends the app whenever it is out of sight: coming back,
+//! from that device or another, replays what was missed and carries on. A shell nobody is attached
+//! to or typing in is closed after the configured idle time.
 //!
 //! Closing a terminal hangs it up, as closing a terminal window does: the shell's process group is
 //! sent `SIGHUP` and the pseudo-terminal is closed, which hangs up whatever else holds it, and the
-//! shell's process group is killed if the shell has not ended a few seconds on. The terminal ends
-//! when its shell does, even if jobs it started still hold the pseudo-terminal.
+//! shell's process group is killed if the shell has not ended a few seconds on. On Windows closing
+//! the console tells what is attached to it to close, and the shell is killed if it has not. The
+//! terminal ends when its shell does, even if jobs it started still hold the pseudo-terminal.
+
+mod pty;
 
 use std::{
     collections::{HashMap, VecDeque},
@@ -21,10 +24,8 @@ use std::{
 
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
-use rustix::process::{Pid, Signal};
 use serde::Serialize;
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
     sync::{broadcast, watch},
     task::AbortHandle,
 };
@@ -93,13 +94,13 @@ pub(crate) struct Terminal {
     session: Option<String>,
     created_at: DateTime<Utc>,
     /// The pseudo-terminal's writing half, until the terminal is closed.
-    writer: tokio::sync::Mutex<Option<pty_process::OwnedWritePty>>,
+    writer: tokio::sync::Mutex<Option<pty::Input>>,
     screen: Mutex<Screen>,
     active: Mutex<(Instant, DateTime<Utc>)>,
     size: Mutex<(u16, u16)>,
     attached: AtomicUsize,
-    /// The shell's process id, which is also its session's and process group's.
-    pid: Option<Pid>,
+    /// The shell, to hang up or kill.
+    process: pty::Process,
     /// The task reading the pseudo-terminal, which holds its reading half.
     reader: Mutex<Option<AbortHandle>>,
     /// Whether the shell has ended.
@@ -168,11 +169,7 @@ impl Terminal {
         let Some(writer) = guard.as_mut() else {
             return Err(std::io::ErrorKind::BrokenPipe.into());
         };
-        let write = async {
-            writer.write_all(data).await?;
-            writer.flush().await
-        };
-        let written = tokio::time::timeout(INPUT_TIMEOUT, write)
+        let written = tokio::time::timeout(INPUT_TIMEOUT, writer.write_all(data))
             .await
             .unwrap_or_else(|_| Err(std::io::ErrorKind::TimedOut.into()));
         drop(guard);
@@ -188,7 +185,7 @@ impl Terminal {
             .await
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("the terminal is closed"))?
-            .resize(pty_process::Size::new(rows, cols))?;
+            .resize(cols, rows)?;
         *self
             .size
             .lock()
@@ -215,15 +212,9 @@ impl Terminal {
         {
             reader.abort();
         }
-        drop(self.writer.lock().await.take());
-    }
-
-    /// Sends `signal` to the shell's process group.
-    fn signal(&self, signal: Signal) {
-        if let Some(pid) = self.pid
-            && let Err(error) = rustix::process::kill_process_group(pid, signal)
-        {
-            tracing::debug!("could not signal a terminal's shell: {error}");
+        let writer = self.writer.lock().await.take();
+        if let Some(writer) = writer {
+            writer.close().await;
         }
     }
 
@@ -231,7 +222,7 @@ impl Terminal {
     /// later. Closing the pseudo-terminal waits for input being written, which counts against
     /// that moment, so a program that stops reading cannot keep the shell from being killed.
     async fn kill(&self) {
-        self.signal(Signal::HUP);
+        self.process.hang_up();
         let mut ended = self.ended.clone();
         let hung_up = async {
             self.close_pty().await;
@@ -239,7 +230,7 @@ impl Terminal {
             let _ended = ended.wait_for(|ended| *ended).await;
         };
         if tokio::time::timeout(HANG_UP_GRACE, hung_up).await.is_err() {
-            self.signal(Signal::KILL);
+            self.process.kill();
         }
     }
 }
@@ -312,25 +303,13 @@ impl Terminals {
             anyhow::bail!("{} is not a folder", cwd.display());
         }
         let (cols, rows) = (cols.clamp(2, 1000), rows.clamp(2, 500));
-        let (pty, pts) = pty_process::open()?;
-        pty.resize(pty_process::Size::new(rows, cols))?;
-        let shell = self.config.shell.clone().unwrap_or_else(login_shell);
-        let name = shell
-            .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "sh".to_owned());
-        let mut child = pty_process::Command::new(&shell)
-            .arg0(format!("-{name}"))
-            .current_dir(cwd)
-            .env("TERM", "xterm-256color")
-            .env("COLORTERM", "truecolor")
-            .kill_on_drop(true)
-            .spawn(pts)?;
-        let pid = child
-            .id()
-            .and_then(|pid| i32::try_from(pid).ok())
-            .and_then(Pid::from_raw);
-        let (mut reader, writer) = pty.into_split();
+        let shell = self.config.shell.clone().unwrap_or_else(pty::default_shell);
+        let pty::Started {
+            output: mut reader,
+            input: writer,
+            shell,
+            process,
+        } = pty::start(&shell, cwd, cols, rows)?;
         let (output, _) = broadcast::channel(OUTPUT_BACKLOG);
         let (ended_sender, ended) = watch::channel(false);
         let terminal = Arc::new(Terminal {
@@ -347,7 +326,7 @@ impl Terminals {
             active: Mutex::new((Instant::now(), Utc::now())),
             size: Mutex::new((cols, rows)),
             attached: AtomicUsize::new(0),
-            pid,
+            process,
             reader: Mutex::new(None),
             ended,
         });
@@ -384,7 +363,7 @@ impl Terminals {
         let terminals = Arc::clone(self);
         let ending = Arc::clone(&terminal);
         tokio::spawn(async move {
-            let code = child.wait().await.ok().and_then(|status| status.code());
+            let code = shell.wait().await;
             // Give the reader a moment to pass on the shell's last words.
             if tokio::time::timeout(Duration::from_millis(200), task)
                 .await
@@ -403,7 +382,7 @@ impl Terminals {
                 drop(screen);
             }
             // Jobs left behind lose the terminal, as they would its window.
-            ending.signal(Signal::HUP);
+            ending.process.hang_up();
             ended_sender.send_replace(true);
             terminals.open_map().remove(&ending.id);
             tracing::info!("a terminal's shell ended");
@@ -497,29 +476,6 @@ fn publish(screen: &Screen, output: Output) {
     }
 }
 
-/// The user's login shell, from `/etc/passwd`, else `$SHELL`, else `/bin/sh`.
-fn login_shell() -> PathBuf {
-    let uid = rustix::process::getuid().as_raw().to_string();
-    let from_passwd = std::fs::read_to_string("/etc/passwd")
-        .ok()
-        .and_then(|text| {
-            text.lines().find_map(|line| {
-                let fields: Vec<&str> = line.split(':').collect();
-                (fields.get(2) == Some(&uid.as_str()))
-                    .then(|| fields.get(6).map(|shell| PathBuf::from(*shell)))
-                    .flatten()
-            })
-        });
-    from_passwd
-        .filter(|shell| shell.is_absolute() && shell.exists())
-        .or_else(|| {
-            std::env::var_os("SHELL")
-                .map(PathBuf::from)
-                .filter(|shell| shell.exists())
-        })
-        .unwrap_or_else(|| PathBuf::from("/bin/sh"))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -528,9 +484,30 @@ mod tests {
         TerminalConfig {
             enabled: true,
             idle_timeout: Duration::from_secs(60),
-            shell: Some(PathBuf::from("/bin/sh")),
+            shell: Some(PathBuf::from(if cfg!(windows) {
+                "cmd.exe"
+            } else {
+                "/bin/sh"
+            })),
         }
     }
+
+    /// A line that has the shell work out a sum, and what it prints: not in the line itself, which
+    /// the terminal echoes.
+    fn sum() -> (&'static [u8], &'static str) {
+        if cfg!(windows) {
+            (b"set /a 40000+2\r\n", "40002")
+        } else {
+            (b"echo hello-$((40+2))\n", "hello-42")
+        }
+    }
+
+    /// A line that ends the shell.
+    const EXIT: &[u8] = if cfg!(windows) {
+        b"exit\r\n"
+    } else {
+        b"exit\n"
+    };
 
     async fn read_until(attachment: &mut Attachment, needle: &str) -> String {
         let mut seen = String::from_utf8_lossy(&attachment.replay).into_owned();
@@ -551,18 +528,15 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let view = terminals.open(dir.path(), 80, 24, None).unwrap();
         let mut first = terminals.attach(&view.id).unwrap();
-        first
-            .terminal
-            .input(b"echo hello-$((40+2))\n")
-            .await
-            .unwrap();
-        read_until(&mut first, "hello-42").await;
+        let (line, printed) = sum();
+        first.terminal.input(line).await.unwrap();
+        read_until(&mut first, printed).await;
         assert_eq!(terminals.list(None)[0].attached, 1);
         drop(first);
         let second = terminals.attach(&view.id).unwrap();
-        assert!(String::from_utf8_lossy(&second.replay).contains("hello-42"));
+        assert!(String::from_utf8_lossy(&second.replay).contains(printed));
         let mut second = second;
-        second.terminal.input(b"exit\n").await.unwrap();
+        second.terminal.input(EXIT).await.unwrap();
         let deadline = Instant::now() + Duration::from_secs(10);
         loop {
             match tokio::time::timeout(
@@ -590,6 +564,7 @@ mod tests {
         assert!(terminals.attach(&view.id).is_none());
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn closing_a_terminal_kills_a_shell_that_ignores_hang_ups() {
         let terminals = Terminals::new(&config());
@@ -636,7 +611,8 @@ mod tests {
     }
 
     #[test]
-    fn a_login_shell_is_found() {
-        assert!(login_shell().is_absolute());
+    fn a_shell_is_found() {
+        let shell = pty::default_shell();
+        assert!(shell.is_absolute() || cfg!(windows), "{}", shell.display());
     }
 }

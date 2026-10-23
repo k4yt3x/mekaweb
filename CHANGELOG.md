@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- mekaweb runs on macOS and Windows; releases add Apple silicon and x86-64 Windows binaries.
+- Files lists the folder shown again by itself whenever anything changes in it.
+- Files takes Windows paths, from a drive or a share, and hides files Windows marks hidden.
+- The terminal runs PowerShell on Windows, unless `terminal.shell` names another shell.
+
+### Removed
+
+- **Breaking:** Files has no trash. Delete removes for good, after asking.
+- **Breaking:** The `/api/files/trash` endpoints are gone.
+
 ## [0.25.0] - 2026-10-23
 
 ### Added

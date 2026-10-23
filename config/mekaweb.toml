@@ -1,4 +1,5 @@
-# mekaweb's config, usually ~/.config/mekaweb/config.toml. Paths may start with ~/.
+# mekaweb's config, usually ~/.config/mekaweb/config.toml, or %APPDATA%\mekaweb\config.toml on
+# Windows. Paths may start with ~/. Write Windows paths in single quotes: 'C:\Users\you\token'.
 # Settings commented out are optional, shown with their default or an example.
 
 # Where mekaweb listens. Keep it on loopback, behind a TLS proxy or tunnel.
@@ -10,7 +11,7 @@ public_origin = "https://meka.example.com"
 # Proxies whose X-Forwarded-For is trusted for client addresses. None by default.
 #trusted_proxies = ["127.0.0.1", "::1"]
 
-# Where the database is kept.
+# Where the database is kept; on Windows %LOCALAPPDATA%\mekaweb unless set.
 #state_dir = "~/.local/state/mekaweb"
 
 [meka]
@@ -34,5 +35,5 @@ token_file = "~/.config/mekaweb/meka-token"
 # How long an unused terminal stays open.
 #idle_timeout = "24h"
 
-# The shell to run, instead of your login shell.
+# The shell to run, instead of your login shell, or PowerShell on Windows.
 #shell = "/bin/bash"

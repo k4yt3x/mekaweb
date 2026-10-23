@@ -125,7 +125,7 @@ async fn mekaweb() -> (App, Router, Arc<Mutex<Seen>>, tempfile::TempDir) {
     std::fs::write(dir.path().join("token"), TOKEN).unwrap();
     std::fs::create_dir_all(dir.path().join("work")).unwrap();
     let config = Config::parse(&format!(
-        "listen = \"127.0.0.1:0\"\npublic_origin = \"{ORIGIN}\"\nstate_dir = \"{0}/state\"\n[meka]\nurl = \"http://{meka}\"\ntoken_file = \"{0}/token\"\n[push]\nsubject = \"mailto:me@example.com\"\n",
+        "listen = \"127.0.0.1:0\"\npublic_origin = \"{ORIGIN}\"\nstate_dir = '{0}/state'\n[meka]\nurl = \"http://{meka}\"\ntoken_file = '{0}/token'\n[push]\nsubject = \"mailto:me@example.com\"\n",
         dir.path().display()
     ))
     .unwrap();
@@ -577,6 +577,63 @@ async fn files_list_and_uploads_land_through_the_api() {
     )
     .await;
     assert_eq!(relative.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn a_folder_watched_tells_of_its_changes_until_the_sign_in_ends() {
+    let (_app, router, _, dir) = mekaweb().await;
+    let cookie = sign_in(&router).await;
+    let work = dir.path().join("work");
+    let watch = |path: &std::path::Path| {
+        let path = percent_encoding::utf8_percent_encode(
+            &path.display().to_string(),
+            percent_encoding::NON_ALPHANUMERIC,
+        )
+        .to_string();
+        request("GET", &format!("/api/files/watch?path={path}"))
+            .header(header::COOKIE, &cookie)
+            .body(Body::empty())
+            .unwrap()
+    };
+    let missing = send(&router, watch(&work.join("missing"))).await;
+    assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+    let response = send(&router, watch(&work)).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(
+        response.headers()[header::CONTENT_TYPE]
+            .to_str()
+            .unwrap()
+            .starts_with("text/event-stream")
+    );
+    let mut body = response.into_body().into_data_stream();
+    std::fs::write(work.join("new.txt"), "x").unwrap();
+    let told = tokio::time::timeout(Duration::from_secs(10), async {
+        let mut seen = String::new();
+        while let Some(chunk) = body.next().await {
+            seen.push_str(&String::from_utf8_lossy(&chunk.unwrap()));
+            if seen.contains("event: change") {
+                break;
+            }
+        }
+        seen
+    })
+    .await
+    .unwrap();
+    assert!(told.contains("event: change"), "{told:?}");
+    let out = send(
+        &router,
+        request("POST", "/api/auth/sign-out")
+            .header(header::COOKIE, &cookie)
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(out.status(), StatusCode::NO_CONTENT);
+    let ended = tokio::time::timeout(Duration::from_secs(5), async {
+        while body.next().await.is_some() {}
+    })
+    .await;
+    assert!(ended.is_ok(), "the stream ends with the sign-in");
 }
 
 #[tokio::test]

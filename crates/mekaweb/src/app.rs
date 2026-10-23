@@ -268,8 +268,21 @@ async fn shutdown() {
             }
         }
     };
-    #[cfg(not(unix))]
-    let terminate = std::future::pending::<()>();
+    // Windows closing the console mekaweb runs in, or shutting down.
+    #[cfg(windows)]
+    let terminate = async {
+        let (Ok(mut close), Ok(mut shutdown)) = (
+            tokio::signal::windows::ctrl_close(),
+            tokio::signal::windows::ctrl_shutdown(),
+        ) else {
+            tracing::error!("could not listen for the console closing");
+            return std::future::pending::<()>().await;
+        };
+        tokio::select! {
+            _ = close.recv() => {}
+            _ = shutdown.recv() => {}
+        }
+    };
     tokio::select! {
         result = interrupt => {
             if let Err(error) = result {

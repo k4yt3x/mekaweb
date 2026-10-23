@@ -12,7 +12,6 @@ import { useQueryClient } from '@tanstack/react-query';
 import * as ContextMenu from '@radix-ui/react-context-menu';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import {
-  ArrowLeft,
   AtSign,
   Copy,
   Download,
@@ -30,7 +29,6 @@ import {
   MoreHorizontal,
   Pencil,
   RefreshCw,
-  RotateCcw,
   Trash2,
   Upload,
   X,
@@ -40,24 +38,27 @@ import { useGateway, useRuntime } from '../connections/context';
 import { useAction } from '../components/actions';
 import { Button } from '../components/ui/button';
 import { Dialog } from '../components/ui/dialog';
-import { ConfirmButton, ErrorNotice, Field, Loading } from '../components/common';
+import { ErrorNotice, Field, Loading } from '../components/common';
 import { copyText } from '../components/clipboard';
 import { scrollRegion } from '../components/scrolling';
 import { useOverlayPadding } from '../components/visual-viewport';
 import { useMediaQuery } from '../components/media-query';
-import { isProblem, type Gateway } from '../api/gateway';
+import type { Gateway } from '../api/gateway';
 import {
   basename,
   crumbs,
   formatSize,
+  isRoot,
   join,
   parent,
   rawUrl,
   selectionZipUrl,
+  separator,
   zipUrl,
 } from '../files/paths';
 import { pending, Uploads, type UploadBatch, type UploadItem } from '../files/uploader';
 import { droppedItems, pickedFolder, readDropped } from '../files/dropped';
+import { useFolderWatch } from '../files/watch';
 import { useSessionNavigation } from './session-navigation';
 import { mentionPath, useWorkspace } from '../components/workspace';
 import { FileViewer } from './file-viewer';
@@ -129,7 +130,6 @@ export function FileBrowser({
   const fresh = target && followedTargets.get(place) !== target.nonce ? target : undefined;
   const [path, setPath] = useState(() => fresh?.path ?? lastFolders.get(place) ?? start);
   const [hidden, setHidden] = useState(false);
-  const [trash, setTrash] = useState(false);
   const [preview, setPreview] = useState<{ entry?: Entry; name: string } | undefined>(
     fresh?.open ? { name: fresh.open } : undefined,
   );
@@ -149,7 +149,7 @@ export function FileBrowser({
   const [dragging, setDragging] = useState(false);
   const input = useRef<HTMLInputElement>(null);
   const folderInput = useRef<HTMLInputElement>(null);
-  const listing = useGateway<Gateway['Listing']>('/api/files/list', { path }, !trash);
+  const listing = useGateway<Gateway['Listing']>('/api/files/list', { path });
   // The working directory as the server resolves it, where it is written from home.
   const home = useGateway<Gateway['Listing']>(
     '/api/files/list',
@@ -170,13 +170,14 @@ export function FileBrowser({
   useEffect(() => {
     if (listed) lastFolders.set(place, listed);
   }, [place, listed]);
+  // What changes in the folder shown, by anything, is listed again.
+  useFolderWatch(listed, () => void listing.refetch());
   const refresh = () => void queries.invalidateQueries({ queryKey: ['gateway'] });
   // A request from elsewhere, such as a tool call's link, moves the browser.
   const [seen, setSeen] = useState(target?.nonce);
   if (target && target.nonce !== seen) {
     setSeen(target.nonce);
     setPath(target.path);
-    setTrash(false);
     setPreview(target.open ? { name: target.open } : undefined);
   }
   const entries = useMemo(() => {
@@ -258,7 +259,7 @@ export function FileBrowser({
       className="file-browser"
       data-dragging={dragging || undefined}
       onDragOver={(event) => {
-        if (!trash && event.dataTransfer.types.includes('Files')) {
+        if (event.dataTransfer.types.includes('Files')) {
           event.preventDefault();
           setDragging(true);
         }
@@ -272,181 +273,150 @@ export function FileBrowser({
         if (event.target === event.currentTarget) setSelection(undefined);
       }}
     >
-      {trash ? (
-        <>
-          <div className="file-toolbar">
-            <Button variant="ghost" size="sm" onClick={() => setTrash(false)}>
-              <ArrowLeft size={14} />
-              Back to files
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label="Refresh"
-              title="Refresh"
-              onClick={refresh}
-            >
-              <RefreshCw size={16} />
-            </Button>
-          </div>
-          <TrashView />
-        </>
+      <PathBar path={folder} onGo={go} />
+      {/* One selected with a mouse is just shown; its own menu acts on it. */}
+      {barred ? (
+        <SelectionBar
+          actions={actions}
+          all={selected.length === entries.length}
+          onSelectAll={(all) => (all ? selectAll() : setSelection(undefined))}
+        />
       ) : (
-        <>
-          <PathBar path={folder} onGo={go} />
-          {/* One selected with a mouse is just shown; its own menu acts on it. */}
-          {barred ? (
-            <SelectionBar
-              actions={actions}
-              all={selected.length === entries.length}
-              onSelectAll={(all) => (all ? selectAll() : setSelection(undefined))}
-            />
-          ) : (
-            <div className="file-toolbar">
-              <Button
-                variant="ghost"
-                size="icon"
-                aria-label="Go to the home folder"
-                title={
-                  homeFolder ? `Go to the home folder, ${homeFolder}` : 'Go to the home folder'
-                }
-                disabled={folder === homeFolder}
-                onClick={() => go('~')}
-              >
-                <House size={16} />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                aria-label="Go to the working directory"
-                title={`Go to the working directory, ${startFolder}`}
-                disabled={folder === startFolder}
-                onClick={() => go(start)}
-              >
-                <LocateFixed size={16} />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                aria-label="Refresh"
-                title="Refresh"
-                onClick={refresh}
-              >
-                <RefreshCw size={16} />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                aria-label={hidden ? 'Hide hidden files' : 'Show hidden files'}
-                title={hidden ? 'Hide hidden files' : 'Show hidden files'}
-                aria-pressed={hidden}
-                onClick={() => setHidden(!hidden)}
-              >
-                {hidden ? <Eye size={16} /> : <EyeOff size={16} />}
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                aria-label="New folder"
-                title="New folder"
-                onClick={() => setMaking(true)}
-              >
-                <FolderPlus size={16} />
-              </Button>
-              <FolderMenu
-                path={folder}
-                onTrash={() => setTrash(true)}
-                onUploadFolder={coarse ? undefined : () => folderInput.current?.click()}
-              />
-              <span className="file-toolbar-gap" />
-              <Button size="sm" onClick={() => input.current?.click()}>
-                <Upload size={14} />
-                Upload
-              </Button>
-            </div>
+        <div className="file-toolbar">
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="Go to the home folder"
+            title={homeFolder ? `Go to the home folder, ${homeFolder}` : 'Go to the home folder'}
+            disabled={folder === homeFolder}
+            onClick={() => go('~')}
+          >
+            <House size={16} />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="Go to the working directory"
+            title={`Go to the working directory, ${startFolder}`}
+            disabled={folder === startFolder}
+            onClick={() => go(start)}
+          >
+            <LocateFixed size={16} />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="Refresh"
+            title="Refresh"
+            onClick={refresh}
+          >
+            <RefreshCw size={16} />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label={hidden ? 'Hide hidden files' : 'Show hidden files'}
+            title={hidden ? 'Hide hidden files' : 'Show hidden files'}
+            aria-pressed={hidden}
+            onClick={() => setHidden(!hidden)}
+          >
+            {hidden ? <Eye size={16} /> : <EyeOff size={16} />}
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="New folder"
+            title="New folder"
+            onClick={() => setMaking(true)}
+          >
+            <FolderPlus size={16} />
+          </Button>
+          <FolderMenu
+            path={folder}
+            onUploadFolder={coarse ? undefined : () => folderInput.current?.click()}
+          />
+          <span className="file-toolbar-gap" />
+          <Button size="sm" onClick={() => input.current?.click()}>
+            <Upload size={14} />
+            Upload
+          </Button>
+        </div>
+      )}
+      <input
+        ref={input}
+        type="file"
+        multiple
+        hidden
+        onChange={(event) => {
+          store.add(
+            Array.from(event.target.files ?? [], (file) => ({ file })),
+            folder,
+          );
+          event.target.value = '';
+        }}
+      />
+      <input
+        ref={(element) => {
+          folderInput.current = element;
+          if (element) element.webkitdirectory = true;
+        }}
+        type="file"
+        hidden
+        onChange={(event) => {
+          store.add(pickedFolder(Array.from(event.target.files ?? [])), folder);
+          event.target.value = '';
+        }}
+      />
+      {barred && actions.error}
+      <UploadList batches={batches} store={store} />
+      <ErrorNotice error={listing.error} />
+      {listing.isPending && <Loading />}
+      {listing.data && (
+        <div
+          className="file-list"
+          role="list"
+          aria-label="Files"
+          onKeyDown={(event) => {
+            if (event.key === 'Escape' && selected.length) {
+              event.stopPropagation();
+              setSelection(undefined);
+            } else if (event.key === 'a' && (event.ctrlKey || event.metaKey)) {
+              event.preventDefault();
+              selectAll();
+            }
+          }}
+        >
+          {!isRoot(folder) && (
+            <ParentRow onOpen={() => go(parent(folder))} onClear={() => setSelection(undefined)} />
           )}
-          <input
-            ref={input}
-            type="file"
-            multiple
-            hidden
-            onChange={(event) => {
-              store.add(
-                Array.from(event.target.files ?? [], (file) => ({ file })),
-                folder,
-              );
-              event.target.value = '';
-            }}
-          />
-          <input
-            ref={(element) => {
-              folderInput.current = element;
-              if (element) element.webkitdirectory = true;
-            }}
-            type="file"
-            hidden
-            onChange={(event) => {
-              store.add(pickedFolder(Array.from(event.target.files ?? [])), folder);
-              event.target.value = '';
-            }}
-          />
-          {barred && actions.error}
-          <UploadList batches={batches} store={store} />
-          <ErrorNotice error={listing.error} />
-          {listing.isPending && <Loading />}
-          {listing.data && (
-            <div
-              className="file-list"
-              role="list"
-              aria-label="Files"
-              onKeyDown={(event) => {
-                if (event.key === 'Escape' && selected.length) {
-                  event.stopPropagation();
-                  setSelection(undefined);
-                } else if (event.key === 'a' && (event.ctrlKey || event.metaKey)) {
-                  event.preventDefault();
-                  selectAll();
-                }
+          {entries.map((entry) => (
+            <EntryRow
+              key={join(folder, entry.name)}
+              path={join(folder, entry.name)}
+              entry={entry}
+              selected={Boolean(selectedNames?.has(entry.name))}
+              selecting={held}
+              group={
+                selected.length > 1 && selectedNames?.has(entry.name) ? actions.items : undefined
+              }
+              onChoose={(how) => choose(entry.name, how)}
+              onOpen={() => {
+                if (isFolder(entry)) go(join(folder, entry.name));
+                else setPreview({ entry, name: entry.name });
               }}
-            >
-              {folder !== '/' && (
-                <ParentRow
-                  onOpen={() => go(parent(folder))}
-                  onClear={() => setSelection(undefined)}
-                />
-              )}
-              {entries.map((entry) => (
-                <EntryRow
-                  key={join(folder, entry.name)}
-                  path={join(folder, entry.name)}
-                  entry={entry}
-                  selected={Boolean(selectedNames?.has(entry.name))}
-                  selecting={held}
-                  group={
-                    selected.length > 1 && selectedNames?.has(entry.name)
-                      ? actions.items
-                      : undefined
-                  }
-                  onChoose={(how) => choose(entry.name, how)}
-                  onOpen={() => {
-                    if (isFolder(entry)) go(join(folder, entry.name));
-                    else setPreview({ entry, name: entry.name });
-                  }}
-                  onMove={() => setMoving(entry)}
-                  onChanged={refresh}
-                />
-              ))}
-              {!entries.length && (
-                <p className="muted small empty-folder">
-                  {listing.data.entries.length
-                    ? 'Only hidden files are here.'
-                    : 'This folder is empty.'}
-                  {!coarse && ' Drop files or folders here to upload them.'}
-                </p>
-              )}
-            </div>
+              onMove={() => setMoving(entry)}
+              onChanged={refresh}
+            />
+          ))}
+          {!entries.length && (
+            <p className="muted small empty-folder">
+              {listing.data.entries.length
+                ? 'Only hidden files are here.'
+                : 'This folder is empty.'}
+              {!coarse && ' Drop files or folders here to upload them.'}
+            </p>
           )}
-        </>
+        </div>
       )}
       <NewFolderDialog open={making} onOpenChange={setMaking} folder={folder} onMade={refresh} />
       {actions.dialogs}
@@ -533,7 +503,7 @@ function PathBar({ path, onGo }: { path: string; onGo: (path: string) => void })
       >
         {crumbs(path).map((crumb, index, all) => (
           <span key={crumb.path} className="crumb-part">
-            {index > 1 && <span className="crumb-separator">/</span>}
+            {index > 1 && <span className="crumb-separator">{separator(path)}</span>}
             <button
               type="button"
               className="crumb"
@@ -634,8 +604,6 @@ function EntryRow({
   const coarse = useMediaQuery('(pointer: coarse)');
   const action = useAction();
   const [deleting, setDeleting] = useState(false);
-  // Why it could not go to the trash, when it could not.
-  const [noTrash, setNoTrash] = useState<string>();
   const folder = isFolder(entry);
   const Icon = entry.kind === 'symlink' ? FileSymlink : folder ? Folder : FileIcon;
   /** Its menu's items, for its menu button and a right click on it. */
@@ -662,28 +630,9 @@ function EntryRow({
         Copy path
       </Item>
       <Separator className="menu-separator" />
-      <Item
-        className="menu-item"
-        onSelect={() =>
-          void action.run(async () => {
-            try {
-              await runtime.gateway.send('POST', '/api/files/trash', { path });
-              onChanged();
-            } catch (error) {
-              // A disk no trash can hold: deleting permanently is the way left.
-              if (!isProblem(error, 'no-trash')) throw error;
-              setNoTrash(error.problem.detail ?? 'It cannot go to the trash');
-              setDeleting(true);
-            }
-          })
-        }
-      >
-        <Trash2 size={14} />
-        Move to trash
-      </Item>
       <Item className="menu-item danger" onSelect={() => setDeleting(true)}>
-        <X size={14} />
-        Delete permanently
+        <Trash2 size={14} />
+        Delete
       </Item>
     </>
   );
@@ -789,12 +738,9 @@ function EntryRow({
           </DropdownMenu.Root>
           <Dialog
             open={deleting}
-            onOpenChange={(open) => {
-              setDeleting(open);
-              if (!open) setNoTrash(undefined);
-            }}
-            title="Delete permanently"
-            description={`${noTrash ? `It cannot go to the trash: ${noTrash}. ` : ''}Delete ${entry.name}${folder ? ' and everything in it' : ''} permanently? This cannot be undone.`}
+            onOpenChange={setDeleting}
+            title="Delete"
+            description={`Delete ${entry.name}${folder ? ' and everything in it' : ''}? This cannot be undone.`}
           >
             <ErrorNotice error={action.error} />
             <div className="actions">
@@ -808,12 +754,11 @@ function EntryRow({
                   void action.run(async () => {
                     await runtime.gateway.send('POST', '/api/files/delete', { path });
                     setDeleting(false);
-                    setNoTrash(undefined);
                     onChanged();
                   })
                 }
               >
-                Delete permanently
+                Delete
               </Button>
             </div>
           </Dialog>
@@ -910,11 +855,6 @@ function useSelectionActions({
         });
     },
   };
-  const trash = () =>
-    void each(
-      (path) => runtime.gateway.send('POST', '/api/files/trash', { path }),
-      'go to the trash',
-    );
   const move = () => {
     setTarget(folder);
     action.reset();
@@ -930,7 +870,6 @@ function useSelectionActions({
     busy: action.busy,
     mention,
     download,
-    trash,
     move,
     copyPaths,
     remove,
@@ -956,13 +895,9 @@ function useSelectionActions({
           Copy paths
         </Item>
         <Separator className="menu-separator" />
-        <Item className="menu-item" onSelect={trash}>
-          <Trash2 size={14} />
-          Move to trash
-        </Item>
         <Item className="menu-item danger" onSelect={remove}>
-          <X size={14} />
-          Delete permanently
+          <Trash2 size={14} />
+          Delete
         </Item>
       </>
     ),
@@ -972,11 +907,11 @@ function useSelectionActions({
         <Dialog
           open={deleting}
           onOpenChange={setDeleting}
-          title="Delete permanently"
+          title="Delete"
           description={
             one
-              ? `Delete ${one.name}${folders ? ' and everything in it' : ''} permanently? This cannot be undone.`
-              : `Delete ${count} items${folders ? ' and everything in their folders' : ''} permanently? This cannot be undone.`
+              ? `Delete ${one.name}${folders ? ' and everything in it' : ''}? This cannot be undone.`
+              : `Delete ${count} items${folders ? ' and everything in their folders' : ''}? This cannot be undone.`
           }
         >
           <ErrorNotice error={action.error} />
@@ -994,7 +929,7 @@ function useSelectionActions({
                 ).then((done) => done && setDeleting(false))
               }
             >
-              Delete permanently
+              Delete
             </Button>
           </div>
         </Dialog>
@@ -1090,10 +1025,10 @@ function SelectionBar({
       <Button
         variant="ghost"
         size="icon"
-        aria-label="Move to trash"
-        title="Move to trash"
+        aria-label="Delete"
+        title="Delete"
         disabled={actions.busy}
-        onClick={actions.trash}
+        onClick={actions.remove}
       >
         <Trash2 size={16} />
       </Button>
@@ -1118,11 +1053,6 @@ function SelectionBar({
               <Copy size={14} />
               Copy paths
             </DropdownMenu.Item>
-            <DropdownMenu.Separator className="menu-separator" />
-            <DropdownMenu.Item className="menu-item danger" onSelect={actions.remove}>
-              <X size={14} />
-              Delete permanently
-            </DropdownMenu.Item>
           </DropdownMenu.Content>
         </DropdownMenu.Portal>
       </DropdownMenu.Root>
@@ -1140,16 +1070,14 @@ function SelectionBar({
 }
 
 /**
- * The folder's menu: mention it, start a session in it, upload a folder into it, zip it, copy its
- * path, or the trash.
+ * The folder's menu: mention it, start a session in it, upload a folder into it, zip it, or copy
+ * its path.
  */
 function FolderMenu({
   path,
-  onTrash,
   onUploadFolder,
 }: {
   path: string;
-  onTrash: () => void;
   /** Where folders can be picked, which phones mostly cannot. */
   onUploadFolder: (() => void) | undefined;
 }) {
@@ -1207,11 +1135,6 @@ function FolderMenu({
           <DropdownMenu.Item className="menu-item" onSelect={() => void copyText(path)}>
             <Copy size={14} />
             Copy path
-          </DropdownMenu.Item>
-          <DropdownMenu.Separator className="menu-separator" />
-          <DropdownMenu.Item className="menu-item" onSelect={onTrash}>
-            <Trash2 size={14} />
-            Open trash
           </DropdownMenu.Item>
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
@@ -1513,60 +1436,5 @@ function MoveDialog({
         </div>
       </form>
     </Dialog>
-  );
-}
-
-function TrashView() {
-  const runtime = useRuntime();
-  const queries = useQueryClient();
-  const trashed = useGateway<Gateway['Trashed'][]>('/api/files/trash');
-  const action = useAction();
-  const refresh = () => void queries.invalidateQueries({ queryKey: ['gateway'] });
-  return (
-    <section className="trash-view">
-      <p className="muted small">Shared with this computer’s file manager.</p>
-      <ErrorNotice error={trashed.error ?? action.error} />
-      {trashed.isPending && <Loading />}
-      {trashed.data?.length === 0 && <p className="muted small">The trash is empty.</p>}
-      {trashed.data?.map((item) => (
-        <div className="trash-item" key={item.id}>
-          <div className="trash-item-details">
-            <strong className="row-title">
-              {item.kind === 'folder' ? <Folder size={14} /> : <FileIcon size={14} />} {item.name}
-            </strong>
-            <p className="muted small">
-              From {parent(item.path)} · deleted {item.deleted_at.replace('T', ' ')}
-              {item.kind !== 'folder' && ` · ${formatSize(item.size)}`}
-            </p>
-          </div>
-          <div className="actions wrap">
-            <Button
-              size="sm"
-              variant="secondary"
-              disabled={action.busy}
-              onClick={() =>
-                void action.run(async () => {
-                  await runtime.gateway.send('POST', '/api/files/trash/restore', { id: item.id });
-                  refresh();
-                })
-              }
-            >
-              <RotateCcw size={14} />
-              Restore
-            </Button>
-            <ConfirmButton
-              title="Delete permanently"
-              description={`Delete ${item.name} permanently? It cannot be restored.`}
-              onConfirm={async () => {
-                await runtime.gateway.send('POST', '/api/files/trash/purge', { id: item.id });
-                refresh();
-              }}
-            >
-              Delete permanently
-            </ConfirmButton>
-          </div>
-        </div>
-      ))}
-    </section>
   );
 }

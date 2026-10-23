@@ -24,19 +24,17 @@ hkdf = "0.13"
 http-body-util = "0.1"
 humantime-serde = "1"
 ipnet = { version = "2", features = ["serde"] }
-libc = "0.2"
 mime_guess = "2"
+notify = "8"
 # Built from source and linked in, so the binary needs no OpenSSL where it runs: webauthn-rs
 # checks passkeys with it.
 openssl = { version = "0.10", features = ["vendored"] }
 p256 = { version = "0.14", features = ["ecdh", "ecdsa"] }
 percent-encoding = "2"
-pty-process = { version = "0.5", features = ["async"] }
 reqwest = { version = "0.13", default-features = false, features = ["http2", "json", "rustls", "stream"] }
 rpassword = "7"
 rusqlite = { version = "0.40", features = ["bundled"] }
 rust-embed = { version = "8", features = ["include-exclude"] }
-rustix = { version = "1", features = ["fs", "process"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 sha2 = "0.11"
@@ -56,6 +54,15 @@ utoipa-axum = "0.3"
 uuid = { version = "1", features = ["v4", "serde"] }
 webauthn-rs = { version = "0.5", features = ["conditional-ui"] }
 zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+pty-process = { version = "0.5", features = ["async"] }
+rustix = { version = "1", features = ["fs", "process"] }
+
+[target.'cfg(windows)'.dependencies]
+portable-pty = "0.9"
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
 
 [dev-dependencies]
 tempfile = "3"

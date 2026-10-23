@@ -4,7 +4,7 @@
 
 - `crates/mekaweb`: the server, a Rust binary that signs you in, serves the interface, passes requests to meka, and runs Files, terminals, push notifications and meka's status. It is a Cargo workspace member; the workspace root is the repository root.
 - `web`: the React interface, with its own `package.json`. `web/tools/schema` generates TypeScript types from meka's OpenAPI document and from mekaweb's.
-- `config`: an example config, which goes to `~/.config/mekaweb/config.toml`; a test checks it parses. `deploy`: mekaweb's systemd unit, as a system service (`deploy/system`) or a user service (`deploy/user`).
+- `config`: an example config, which goes to `~/.config/mekaweb/config.toml`; a test checks it parses. `deploy`: mekaweb's systemd unit, as a system service (`deploy/system`) or a user service (`deploy/user`), and its macOS launch agent (`deploy/macos`).
 - `docs`: user and developer documentation, and the captured meka API in `docs/api`.
 
 ## Running it
@@ -53,7 +53,7 @@ RUSTDOCFLAGS="-D warnings" cargo doc --locked --no-deps --document-private-items
 cargo test --locked
 ```
 
-Its tests run the API in process against a stand-in meka, terminals against `/bin/sh`, and Web Push encryption against RFC 8291's example. The server is Linux-only: Files reads `/proc` for mount points and folders' paths, and moves with `renameat2`.
+Its tests run the API in process against a stand-in meka, terminals against `/bin/sh`, or `cmd.exe` on Windows, and Web Push encryption against RFC 8291's example. The server runs on Linux, macOS and Windows; what differs is kept in `files/folder` and `terminal/pty`, and CI runs clippy and the tests on macOS and Windows too. From Linux, `cargo clippy --target x86_64-pc-windows-gnu` checks Windows with mingw-w64 installed, and wine can run its tests, though its console may not start a terminal's shell.
 
 Review browser behavior and live workflows manually against a disposable meka, through mekaweb: signing in with a password and a passkey; messages, approvals, and recovery when meka or mekaweb restarts; Files and the terminal in a session, and meka's status in Settings; rich content, keyboard access, and narrow layouts. Chromium's virtual authenticator, through the DevTools protocol's `WebAuthn` domain, stands in for a passkey.
 
@@ -67,6 +67,6 @@ Record user-visible changes under `Unreleased` in [CHANGELOG.md](../CHANGELOG.md
 
 To release, run `npm version <version> --no-git-tag-version` in `web/`, set the same version in `Cargo.toml` and build once to update `Cargo.lock`, move the unreleased notes into a dated version section, and update the changelog's comparison links. Run the checks and commit before tagging. Tags use bare `major.minor.patch` numbers: no `v` prefix or prerelease suffix.
 
-Pushing a tag runs the **Release** workflow. It checks the tag against the three versions, builds the interface, builds static musl binaries for x86-64 and ARM64 on runners of each, and publishes them as `mekaweb-x86_64-linux` and `mekaweb-aarch64-linux` with `SHA256SUMS` in a GitHub release whose notes are the version's changelog section.
+Pushing a tag runs the **Release** workflow. It checks the tag against the three versions, builds the interface, builds static musl binaries for x86-64 and ARM64 Linux on runners of each, an Apple silicon binary, and an x86-64 Windows one, and publishes them as `mekaweb-x86_64-linux`, `mekaweb-aarch64-linux`, `mekaweb-aarch64-macos` and `mekaweb-x86_64-windows.exe` with `SHA256SUMS` in a GitHub release whose notes are the version's changelog section.
 
 web.meka.run, the static site of earlier releases, is retired. GitHub Pages keeps serving its last deployment, mekaweb 0.23.1, until the site is unpublished; nothing in this repository deploys it anymore.

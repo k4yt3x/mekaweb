@@ -2,7 +2,7 @@
 
 A web interface for [meka](https://github.com/k4yt3x/meka), served from the meka host.
 
-mekaweb is a server you install beside meka. It signs you in, serves the interface, and passes your requests to meka on loopback, so meka itself is never exposed to your network or the internet. Put mekaweb behind a Cloudflare Tunnel or an HTTPS proxy, and reach your meka from any browser, or install it on your phone's Home Screen.
+mekaweb is a server you install beside meka, on Linux, macOS or Windows. It signs you in, serves the interface, and passes your requests to meka on loopback, so meka itself is never exposed to your network or the internet. Put mekaweb behind a Cloudflare Tunnel or an HTTPS proxy, and reach your meka from any browser, or install it on your phone's Home Screen.
 
 Besides meka's sessions, memory, skills, schedules and MCP servers, mekaweb adds what meka leaves to the host:
 

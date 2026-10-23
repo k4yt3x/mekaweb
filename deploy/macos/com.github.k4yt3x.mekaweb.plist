@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- mekaweb as a launch agent: it runs as you while you are logged in, and again if it stops. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.github.k4yt3x.mekaweb</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/mekaweb</string>
+    <string>serve</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardErrorPath</key>
+  <string>/Users/YOU/Library/Logs/mekaweb.log</string>
+</dict>
+</plist>
