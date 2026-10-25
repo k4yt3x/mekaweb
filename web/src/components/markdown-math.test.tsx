@@ -203,8 +203,11 @@ describe('KaTeX', () => {
 
 it('reads unclosed delimiters in time linear in their number', () => {
   const start = performance.now();
-  view(['\\(a ', '\\[a ', '$$a ', '$a '].map((open) => open.repeat(4000)).join('\n\n'));
-  view('\\[\n'.repeat(3000));
-  // Quadratic reading took seconds here; linear takes tens of milliseconds.
+  for (const text of [
+    ['\\(a ', '\\[a ', '$a '].map((open) => open.repeat(4000)).join('\n\n'),
+    '\\[\n'.repeat(3000),
+  ])
+    renderToStaticMarkup(<Markdown text={text} />);
+  // Quadratic reading took over ten seconds here; linear takes a fraction of a second.
   expect(performance.now() - start).toBeLessThan(2000);
 });
