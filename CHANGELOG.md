@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-10-25
+
+### Added
+
+- Math renders however models write it, and copying a formula copies its TeX.
+
+### Fixed
+
+- Prices such as `$5` stay text, and math no longer breaks lists, quotes, tables, or later text.
+
 ## [0.26.0] - 2026-10-23
 
 ### Added
@@ -513,7 +523,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Light and dark themes, narrow layouts, and collapsible, resizable session panels.
 - Hosting at the root or a subpath, with GitHub Pages deployment on version tags.
 
-[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.26.0...HEAD
+[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.27.0...HEAD
+[0.27.0]: https://github.com/k4yt3x/mekaweb/compare/0.26.0...0.27.0
 [0.26.0]: https://github.com/k4yt3x/mekaweb/compare/0.25.0...0.26.0
 [0.25.0]: https://github.com/k4yt3x/mekaweb/compare/0.24.1...0.25.0
 [0.24.1]: https://github.com/k4yt3x/mekaweb/compare/0.24.0...0.24.1

@@ -2,7 +2,6 @@ import { useState, isValidElement, memo, type ComponentProps, type ReactElement 
 import ReactMarkdown from 'react-markdown';
 import remarkCjkFriendly from 'remark-cjk-friendly/parseOnly';
 import remarkGfm from 'remark-gfm';
-import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import { CircleAlert, Info, Lightbulb, OctagonAlert } from 'lucide-react';
 import { CopyButton, WrapButton } from './common';
@@ -12,12 +11,14 @@ import { Checkbox } from './ui/checkbox';
 import { scrollRegion } from './scrolling';
 import { useHighlight } from './use-highlight';
 import {
-  normalizeMathDelimiters,
-  remarkAdmonitions,
+  katexOptions,
+  protectTableMath,
   remarkDisplayMath,
-  rehypeTaskLabels,
+  remarkMath,
   rehypeMathAccessibility,
-} from './markdown-plugins';
+  rehypeMathSource,
+} from './markdown-math';
+import { remarkAdmonitions, rehypeTaskLabels } from './markdown-plugins';
 import 'katex/dist/katex.min.css';
 
 export function MarkdownPreview({ text }: { text: string }) {
@@ -109,16 +110,8 @@ export const Markdown = memo(function Markdown({ text }: { text: string }) {
         ]}
         rehypePlugins={[
           rehypeTaskLabels,
-          [
-            rehypeKatex,
-            {
-              trust: false,
-              strict: 'ignore',
-              maxExpand: 1000,
-              maxSize: 20,
-              errorColor: 'var(--danger)',
-            },
-          ],
+          rehypeMathSource,
+          [rehypeKatex, katexOptions],
           rehypeMathAccessibility,
         ]}
         skipHtml
@@ -190,7 +183,7 @@ export const Markdown = memo(function Markdown({ text }: { text: string }) {
           ),
         }}
       >
-        {normalizeMathDelimiters(text)}
+        {protectTableMath(text)}
       </ReactMarkdown>
     </div>
   );

@@ -2655,6 +2655,8 @@ progress::-moz-progress-bar {
 .markdown {
   line-height: 1.8;
   overflow-wrap: anywhere;
+  /* Each message numbers its equations from (1). */
+  counter-reset: katexEqnNo mmlEqnNo;
 }
 .markdown p {
   margin: 12px 0;
@@ -3931,12 +3933,14 @@ select option {
 }
 
 .katex .tag {
-  display: block;
+  /* Inline, as KaTeX has it, so an equation number sits beside its equation rather than below. */
+  display: inline;
   margin: 0;
   padding: 0;
   border: 0;
   border-radius: 0;
   background: none;
+  color: inherit;
   font: inherit;
   line-height: inherit;
   vertical-align: baseline;

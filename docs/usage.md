@@ -42,7 +42,7 @@ New sessions stream thinking when the provider supplies it. Injected context is 
 
 Withdraw and delivery-recovery controls appear inside their messages. If a submission has an uncertain outcome, inspect saved state before sending again. While it is unknown whether meka received it, **Retry same submission** sends it again under the same key, which meka answers with what the first attempt did. A turn known to have started is not offered again, since meka forgets those keys when it restarts. A queued message whose turn failed in a way waiting can help shows when meka will try it again, and why.
 
-The interface supports Markdown tables, math, diagrams, authenticated image attachments, and code blocks with highlighting for Shiki's bundled languages, copying, and optional line wrapping. Collapsed tool calls show their primary argument when available; expand a call to inspect its full arguments and result. See [API support](api-coverage.md) for available operations and backend limitations.
+The interface supports Markdown tables, math, diagrams, authenticated image attachments, and code blocks with highlighting for Shiki's bundled languages, copying, and optional line wrapping. Math sits between `$` or `$$`, `\(` and `\)`, or `\[` and `\]`, or stands alone as an environment such as `\begin{align}`; a price such as `$5` stays text, and copying a formula copies its TeX. Collapsed tool calls show their primary argument when available; expand a call to inspect its full arguments and result. See [API support](api-coverage.md) for available operations and backend limitations.
 
 Completion alerts are configured under **Settings → Notifications**, with a **Test** button for each option:
 

@@ -13,6 +13,7 @@ import { SessionRoute, ResourcesPage, SchedulesPage, McpPage } from './features/
 import { ConnectionRuntime } from './connections/runtime';
 import { browserStorage } from './connections/storage';
 import { SettingsPage } from './features/settings';
+import 'katex/contrib/copy-tex';
 import './styles.css';
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
