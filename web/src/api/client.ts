@@ -262,11 +262,13 @@ export class ApiClient {
     body?: unknown,
     idempotencyKey?: string,
     ifMatch?: string,
+    query?: Query,
   ): Promise<T> {
     const response = await this.response(method, path, {
       ...(body !== undefined ? { body } : {}),
       ...(idempotencyKey ? { idempotencyKey } : {}),
       ifMatch,
+      ...(query ? { query } : {}),
     });
     if (response.status === 204) {
       await this.readResponse(response, () => Promise.resolve());

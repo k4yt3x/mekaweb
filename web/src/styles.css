@@ -1057,6 +1057,9 @@ pre.bounded {
 .form-stack > .actions {
   justify-content: flex-end;
 }
+.editor-actions > [type='submit'] {
+  margin-left: auto;
+}
 /* In a settings panel the form keeps to a field's width, its button on the left as other panels'. */
 .password-form {
   max-width: 440px;
@@ -1229,6 +1232,14 @@ pre.bounded {
   margin-top: 7px;
   line-height: 1.65;
 }
+.resource-card .resource-snippet {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  font-style: italic;
+  overflow-wrap: anywhere;
+}
 .card-meta {
   display: flex;
   gap: 8px;
@@ -1241,12 +1252,22 @@ pre.bounded {
 }
 .search {
   display: flex;
+  flex: 1 1 240px;
   align-items: center;
   gap: 8px;
-  max-width: 380px;
-  margin-bottom: 28px;
   position: relative;
   color: var(--muted);
+}
+.resource-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 28px;
+}
+.resource-filters select {
+  width: auto;
+  max-width: 220px;
 }
 .search svg {
   position: absolute;
@@ -2431,6 +2452,9 @@ progress::-moz-progress-bar {
 .tool-card.compaction-summary {
   margin: 0;
 }
+.compaction-note {
+  min-width: 0;
+}
 .compaction-content {
   padding: 0 0 14px;
 }
@@ -3161,7 +3185,8 @@ select option {
   background: none;
   color: var(--muted);
   font: inherit;
-  font-size: 0.75rem;
+  /* The message's own size: its colour already sets it apart. */
+  font-size: var(--conversation-font-size, 0.88rem);
   text-align: left;
   cursor: pointer;
 }
@@ -3930,20 +3955,6 @@ select option {
   .connection-card {
     padding-inline: 16px;
   }
-}
-
-.katex .tag {
-  /* Inline, as KaTeX has it, so an equation number sits beside its equation rather than below. */
-  display: inline;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  background: none;
-  color: inherit;
-  font: inherit;
-  line-height: inherit;
-  vertical-align: baseline;
 }
 
 .panel-resize-handle {

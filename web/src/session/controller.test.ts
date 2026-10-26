@@ -26,6 +26,7 @@ async function fixture(
     updated_at: updatedAt,
     approvals: true,
     profile: 'mock',
+    project: '',
     title: '',
     capabilities: {
       supports_permission_prompts: true,
@@ -493,12 +494,39 @@ it('follows a compaction turn without notifying', async () => {
     replaced_count: 2,
     generation: 1,
   });
+  expect(f.state()).toMatchObject({ running: true, compacting: true });
   await f.event('turn.finished', { turn_id: 'compaction' });
   await vi.waitFor(() => expect(f.state().partial).toBe(false));
   expect(f.state()).toMatchObject({ running: false, compacting: false });
   await f.event('turn.started', { turn_id: 'joined', source: 'compaction', resumed: true });
   await f.event('turn.failed', { turn_id: 'joined' });
   expect(completed).not.toHaveBeenCalled();
+});
+
+it('shows a compaction meka opens inside a turn until it lands or fails', async () => {
+  const f = await fixture();
+  await f.event('turn.started', { turn_id: 'work' });
+  expect(f.state()).toMatchObject({ running: true, compacting: false });
+  const opened = { turn_id: 'work', compaction_id: 'c1', trigger: 'proactive' };
+  await f.event('context.compacting', opened);
+  expect(f.state().compacting).toBe(true);
+  await f.event('context.compaction_failed', {
+    ...opened,
+    error: 'Interrupted',
+    interrupted: true,
+  });
+  expect(f.state()).toMatchObject({ running: true, compacting: false });
+  await f.event('context.compacting', { ...opened, compaction_id: 'c2' });
+  await f.event('context.compacted', {
+    ...opened,
+    compaction_id: 'c2',
+    source: 'checkpoint',
+    memories_written: [],
+    kept_recent: true,
+    replaced_count: 2,
+    generation: 1,
+  });
+  expect(f.state()).toMatchObject({ running: true, compacting: false });
 });
 
 it('reads a running sub-agent’s feed without attending, and lets it go when the run ends', async () => {

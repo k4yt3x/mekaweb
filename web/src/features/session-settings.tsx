@@ -5,6 +5,7 @@ import type { Schema } from '../api/client';
 import { Field, ErrorNotice } from '../components/common';
 import { Button } from '../components/ui/button';
 import type { ComposerOptions } from '../session/controller';
+import { projectNames, useProjects } from './projects-query';
 
 export type TurnSettings = Pick<ComposerOptions, 'mode' | 'skill' | 'retention' | 'source'>;
 
@@ -120,6 +121,9 @@ function SessionForm({
   const canWrite = useCan('sessions:w') && !session?.parent_id;
   const activeTurn = running || session?.turn_in_flight;
   const [workingDirectory, setWorkingDirectory] = useState(session?.working_directory ?? '');
+  const [project, setProject] = useState(session.project);
+  const projects = useProjects();
+  const projectOptions = projectNames(projects.data, initial.project);
   const [approvals, setApprovals] = useState(String(session.approvals));
   const action = useAction();
   async function submit(event: FormEvent) {
@@ -129,6 +133,7 @@ function SessionForm({
         ...(workingDirectory !== (initial.working_directory ?? '')
           ? { working_directory: workingDirectory }
           : {}),
+        ...(project !== initial.project ? { project } : {}),
         ...(approvals !== String(initial.approvals) ? { approvals: approvals === 'true' } : {}),
       };
       if (!controller) throw new Error('Reconnect before changing session settings.');
@@ -151,6 +156,20 @@ function SessionForm({
             onChange={(event) => setWorkingDirectory(event.target.value)}
             placeholder="Server default"
           />
+        </Field>
+        <Field label="Project" hint={activeTurn ? 'Project is locked during a turn.' : undefined}>
+          <select
+            value={project}
+            disabled={!canWrite || activeTurn}
+            onChange={(event) => setProject(event.target.value)}
+          >
+            <option value="">No project</option>
+            {projectOptions.map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
         </Field>
         <Field label="Approval mode">
           <select

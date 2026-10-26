@@ -8,4 +8,7 @@ export const ResourcesPage = lazy(() =>
 export const SchedulesPage = lazy(() =>
   import('./schedules').then((module) => ({ default: module.SchedulesPage })),
 );
+export const ProjectsPage = lazy(() =>
+  import('./projects').then((module) => ({ default: module.ProjectsPage })),
+);
 export const McpPage = lazy(() => import('./mcp').then((module) => ({ default: module.McpPage })));

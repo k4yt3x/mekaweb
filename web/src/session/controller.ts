@@ -85,7 +85,7 @@ export interface SessionState {
   settingsPending: boolean;
   turnId?: string;
   running: boolean;
-  /** The running turn is a compaction's, which meka 0.68 runs as a turn. */
+  /** A compaction is under way: a compaction's turn, or one meka opened inside a turn. */
   compacting: boolean;
   textStreaming: boolean;
   partial: boolean;
@@ -146,6 +146,8 @@ interface Entry {
   inboxTurns: Map<string, string[]>;
   /** Turns whose opening this feed has announced. */
   openings: Set<string>;
+  /** The turn meka runs a compaction as, which is compacting from start to end. */
+  compactionTurn?: string | undefined;
   notificationsSince: number;
   textIdleTimer?: ReturnType<typeof setTimeout>;
   preparing?: string;
@@ -299,6 +301,10 @@ export class SessionController {
     };
   };
   getSnapshot = () => this.snapshot;
+  /** Whether a compaction's own turn is running, which stays compacting after one lands. */
+  private inCompactionTurn(entry: Entry) {
+    return entry.compactionTurn !== undefined && entry.compactionTurn === entry.state.turnId;
+  }
   private publish(entry: Entry, patch: Partial<SessionState> = {}) {
     if (this.disposed || this.entries.get(entry.state.id) !== entry) return;
     entry.state = { ...entry.state, ...patch, revision: entry.state.revision + 1 };
@@ -597,6 +603,7 @@ export class SessionController {
     if (frame.event === 'turn.started') {
       // Finishing a compaction is not the agent finishing work, so it does not notify.
       const compacting = string(data, 'source') === 'compaction';
+      entry.compactionTurn = compacting ? turnId : undefined;
       if (string(data, 'source') === 'inbox') {
         const items = Array.isArray(data.item_ids) ? data.item_ids : [];
         entry.inboxTurns.set(
@@ -841,8 +848,17 @@ export class SessionController {
       // This copy of the feed has a hole, which the saved conversation fills.
       this.publish(entry, { partial: true, textStreaming: false });
       void this.refresh(state.id);
+    } else if (frame.event === 'context.compacting') {
+      // meka compacts on its own inside a turn too, not only when asked.
+      this.publish(entry, { compacting: true });
+    } else if (frame.event === 'context.compaction_failed') {
+      this.publish(entry, { compacting: this.inCompactionTurn(entry) });
     } else if (frame.event === 'context.compacted') {
-      this.publish(entry, { partial: true, textStreaming: false });
+      this.publish(entry, {
+        compacting: this.inCompactionTurn(entry),
+        partial: true,
+        textStreaming: false,
+      });
       void this.refresh(state.id);
     } else if (frame.event === 'conversation.rewound') {
       // Rewound here or by another client; either way the shown turns may be gone.

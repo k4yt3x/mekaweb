@@ -80,7 +80,15 @@ export interface EventPayloads {
   'task.reported': Correlation & { task_ids: string[]; text: string };
   'feed.gap': { session_id?: string; dropped?: number };
   'checklist.updated': Correlation & { items: Schema['ChecklistItem'][] };
-  'context.compacted': Correlation & { source: string; replaced_count: number; generation: number };
+  // 0.84 opens a compaction under an id, then lands it or says it did not.
+  'context.compacting': Correlation & { compaction_id: string; trigger: string };
+  'context.compacted': Correlation & Schema['CompactionView'] & { compaction_id: string };
+  'context.compaction_failed': Correlation & {
+    compaction_id: string;
+    trigger: string;
+    error: string;
+    interrupted: boolean;
+  };
   progress: Correlation & {
     server_name: string;
     tool_name: string;

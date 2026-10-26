@@ -12,6 +12,7 @@ import { Dialog } from '../components/ui/dialog';
 import { useSessionNavigation } from './session-navigation';
 import { TurnSettingsFields, type TurnSettings } from './session-settings';
 import { WorkingDirectoryPicker } from './working-directory-picker';
+import { ProjectPicker } from './project-select';
 import { useMentions } from '../components/workspace';
 
 const subscribeToNothing = () => () => {};
@@ -145,6 +146,11 @@ export function NewConversation() {
                 onChange={(workingDirectory) =>
                   creation.setSettings({ ...creation.settings, workingDirectory })
                 }
+              />
+              <ProjectPicker
+                value={creation.settings.project}
+                disabled={disabled}
+                onChange={(project) => creation.setSettings({ ...creation.settings, project })}
               />
             </div>
             <Dialog open={settingsOpen} onOpenChange={setSettingsOpen} title="Session settings">

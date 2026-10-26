@@ -1,8 +1,8 @@
 # API schema maintenance
 
-`meka-0.83.0.json` was captured from meka `0.83.0`, commit `5c02b582961d2f39a9cbfe0a8605037d6370d7c9`, through `/v1/openapi.json` with `[serve].docs = true`. The generated REST types are committed in `web/src/api/schema.d.ts`; runtime connections do not require schema access.
+`meka-0.84.0.json` was captured from meka `0.84.0`, commit `b14735f9f2892578b5c54d762a0305eb14e2109e`, through `/v1/openapi.json` with `[serve].docs = true`. The generated REST types are committed in `web/src/api/schema.d.ts`; runtime connections do not require schema access.
 
-mekaweb requires meka 0.83.0 or newer and refuses older servers when it connects. Compared with 0.68.0, the 0.70.0 and 0.71.0 APIs change these shapes the client used:
+mekaweb requires meka 0.84.0 or newer and refuses older servers when it connects. Compared with 0.68.0, the 0.70.0 and 0.71.0 APIs change these shapes the client used:
 
 - `/v1/info` no longer reports `vision`; each `/v1/profiles` entry does.
 - `/v1/sessions/{id}/context` no longer reports `used_percent`. The client divides `used` by `window`, rounding down as meka did.
@@ -50,18 +50,26 @@ mekaweb requires meka 0.83.0 or newer and refuses older servers when it connects
 - `memory_edit` and `skill_edit` replace an exact string in a body, and are labeled by `name`.
 - `tool_call.completed` carries `change`: the whole text a file, memory, or skill change left before and after. It is live only, and saved history replaces the live turn when it ends, so the client does not draw it. A large file's change can carry a completion past the parser's limit with a short result, which the parser keeps when it closes within the frame's kept head.
 
+0.84.0 changes these, and the client therefore requires it:
+
+- A memory is in a project's tier or the global one, named by `project`, `""` for global. Projects may share a memory name, but a global memory's name is in no project. `GET /v1/memory` lists every tier, or one with `project`; reading or deleting a name several projects hold is a 422 unless `?project=` names one, and so is a write unless `project` does. The memory page filters by project, names a memory's tier on every request, and files a new memory in a project. A write naming another project for an existing project memory adds a memory there rather than moving it, so the editor fixes a memory's tier when it is made.
+- `/v1/projects` lists, adds, renames, and removes projects, its writes under `memory:w`; meka removes only a project nothing is on. A session carries `project`, which create and `PATCH` take. The client picks one for a new session, changes it in settings, and names it in the session list.
+- `context.compacting` opens a compaction and `context.compaction_failed` ends one that did not land; the client shows the session compacting between them, as meka's screen does. `context.compacted` and a summary's `compaction` add `trigger`, `memories_written`, and `kept_recent`, from which the summary's row says what the compaction was, in the words of meka's `CompactionRecord::note`.
+- `context_replace`, the tool a compaction's checkpoint writes its summary with, is labeled by `summary`.
+- The export archive is format 16.
+
 0.70.0 also adds turn records, the `/v1/stream` server feed, conditional rewind and fork through `ETag` and `If-Match`, `conversation.rewound`, `permission_resolved`, `approvals_pending`, the `parent` list filter, and the session's open `checklist` with `checklist.updated`. The client shows the open checklist above the message input. Notices are ephemeral: a running turn's show inline where they arrived, warnings and errors also stay below the conversation, and none survives a reload. The session feed parser ignores events it does not handle.
 
 A shell command may print 64 MiB, all of which `tool_call.completed` carries, while the saved result stays a bounded preview. The SSE parser therefore skips data past 2,000,000 characters and keeps the frame's id, so a reconnect cannot replay it. A skipped tool completion keeps its call, outcome, and correlation from the ends of its JSON, and other skipped events become a notice.
 
 The feed's 409 covers `session-not-loaded`: a token with only `sessions:r` does not load a session by attaching. The client then shows the saved conversation and retries the feed until the server loads the session. `POST /compact` runs as a turn on the feed, with `source: "compaction"` on `turn.started`; the client shows it as compacting and does not notify when it ends.
 
-Schema capture is a manual maintenance step. Choose a disposable meka instance with `[serve].docs = true`, confirm its version, and download its schema. For a 0.83.0 instance listening on port 8081:
+Schema capture is a manual maintenance step. Choose a disposable meka instance with `[serve].docs = true`, confirm its version, and download its schema. For a 0.84.0 instance listening on port 8081:
 
 ```sh
-curl --fail --silent --show-error http://127.0.0.1:8081/v1/openapi.json --output docs/api/meka-0.83.0.json
+curl --fail --silent --show-error http://127.0.0.1:8081/v1/openapi.json --output docs/api/meka-0.84.0.json
 cd web
-npx prettier --write ../docs/api/meka-0.83.0.json
+npx prettier --write ../docs/api/meka-0.84.0.json
 npm run api:generate
 ```
 

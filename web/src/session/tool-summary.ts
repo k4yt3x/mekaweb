@@ -1,6 +1,6 @@
 import { record } from './events';
 
-// meka 0.83.0: src/tools.rs::builtin_primary_param. History carries inputs, but
+// meka 0.84.0: src/tools.rs::builtin_primary_param. History carries inputs, but
 // neither resolved display summaries nor the schemas needed to label MCP calls.
 const primaryKeys: Readonly<Record<string, string>> = {
   agent_delete: 'id',
@@ -9,6 +9,7 @@ const primaryKeys: Readonly<Record<string, string>> = {
   agent_spawn: 'prompt',
   checklist_add: 'items',
   context_compact: 'instructions',
+  context_replace: 'summary',
   conversation_read: 'start',
   conversation_search: 'query',
   file_edit: 'path',

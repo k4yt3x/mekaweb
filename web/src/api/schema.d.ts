@@ -210,6 +210,46 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/v1/projects': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** `GET /v1/projects`: every project, with how many memories and sessions each holds. */
+    get: operations['projects'];
+    put?: never;
+    /**
+     * `POST /v1/projects`: add a project.
+     * @description Under `memory:w`, with the rename and the removal: a project is a memory tier and nothing
+     *     else, so the scope that writes the tiers is the one that opens and closes them.
+     */
+    post: operations['create_project'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/projects/{name}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /** `DELETE /v1/projects/{name}`: remove a project nothing is on. */
+    delete: operations['delete_project'];
+    options?: never;
+    head?: never;
+    /** `PATCH /v1/projects/{name}`: rename a project, moving every session and memory on it. */
+    patch: operations['rename_project'];
+    trace?: never;
+  };
   '/v1/schedule': {
     parameters: {
       query?: never;
@@ -902,21 +942,40 @@ export interface components {
        */
       source: string;
     };
-    CompactionMarker: {
+    /**
+     * @description One compaction as every JSON surface reports it: the `context.compacted` event, the
+     *     `compaction` marker on a summary message, and the one-shot report. `trigger` and `source` are
+     *     the spellings of [`crate::conversation::CompactionTrigger`] and
+     *     [`crate::conversation::CompactionSource`].
+     */
+    CompactionView: {
       /**
        * Format: int64
-       * @description Which compaction produced it, counting from 1. Fidelity degrades with each pass, so a
-       *     client rendering a transcript can say how far from the original it is.
+       * @description Which compaction this was, counting from 1. Fidelity degrades with each pass, so a client
+       *     rendering a transcript can say how far from the original it is.
        */
       generation: number;
+      /** @description Whether the recent turns were kept verbatim after the summary. */
+      kept_recent: boolean;
+      /** @description Memories the checkpoint turn wrote, observed from its calls rather than self-reported. */
+      memories_written: string[];
       /**
-       * @description How many materialized messages the boundary removed.
-       *
-       *     The whole pre-compaction window, including the recent tail that compaction then re-appends
-       *     verbatim, so it over-counts what the summary itself stands for. Use it to detect *that* the
-       *     view was rewritten, not to compute how much was lost.
+       * @description How many materialized messages the boundary removed: the whole pre-compaction window,
+       *     including the tail compaction re-appends verbatim, so it over-counts what the summary
+       *     itself stands for. Use it to detect *that* the view was rewritten, not to compute how much
+       *     was lost.
        */
       replaced_count: number;
+      /**
+       * @description Which strategy wrote the summary: `checkpoint` or `summarizer`. They differ in fidelity,
+       *     not just mechanism.
+       */
+      source: string;
+      /**
+       * @description What set the compaction going: `reactive`, `proactive`, `manual`, `requested`, `emergency`
+       *     or `retention`.
+       */
+      trigger: string;
     };
     ContentBlockView:
       | {
@@ -1097,6 +1156,12 @@ export interface components {
        *     `GET /v1/profiles` lists them.
        */
       profile?: string | null;
+      /**
+       * @description Project the session opens on, which decides the memory tier its writes land in and the
+       *     tiers it sees. Absent or empty, the session is on none. Must name a project the store has;
+       *     `GET /v1/projects` lists them and `POST /v1/projects` adds one.
+       */
+      project?: string | null;
       /** @description Absolute path. Defaults to the server process's `current_dir` if omitted. */
       working_directory?: string | null;
     };
@@ -1371,6 +1436,8 @@ export interface components {
        *     says how heavily to weigh a note the model is already reasoning from.
        */
       priority: number;
+      /** @description The project whose tier the memory is in; empty for the global tier. */
+      project: string;
       /**
        * Format: int32
        * @description How many times the agent has recalled this memory through `memory_read`. Feeds search
@@ -1407,7 +1474,7 @@ export interface components {
      *     typically just rendering a transcript.
      */
     MessageView: {
-      compaction?: components['schemas']['CompactionMarker'] | null;
+      compaction?: components['schemas']['CompactionView'] | null;
       content: components['schemas']['ContentBlockView'][];
       /**
        * @description RFC 3339 timestamp at which this message was persisted. `None` for messages produced by
@@ -1481,6 +1548,13 @@ export interface components {
        *     profile with `vision = false` refuses the next turn while the session holds an image.
        */
       profile?: string | null;
+      /**
+       * @description Project to move the session onto, which decides the memory tier its writes land in and the
+       *     tiers it sees. Must name a project the store has; empty takes the session off its
+       *     project. Absent → keep current. The next turn's context restates the memories the session
+       *     now sees.
+       */
+      project?: string | null;
       /**
        * @description The session's title, as every listing shows it. Empty clears it, so the session is labeled
        *     by its first words again. Absent → keep current. Does not move `updated_at`.
@@ -1585,6 +1659,36 @@ export interface components {
     };
     ProfilesResponse: {
       profiles: components['schemas']['ProfileView'][];
+    };
+    /** @description The body of `POST /v1/projects` and of `PATCH /v1/projects/{name}`. */
+    ProjectNameRequest: {
+      /**
+       * @description The project's name, `[A-Za-z0-9][A-Za-z0-9_-]*`, compared exactly and refused when it
+       *     differs from an existing name only by case. On a `PATCH`, the name the project moves to.
+       */
+      name: string;
+    };
+    /**
+     * @description A project as `meka project list` prints it and the `/v1/projects` routes answer with: its name,
+     *     when it was added, and how many memories and sessions are on it.
+     */
+    ProjectView: {
+      /** @description RFC 3339. */
+      created_at: string;
+      /**
+       * Format: int64
+       * @description Memories in the project's tier.
+       */
+      memories: number;
+      name: string;
+      /**
+       * Format: int64
+       * @description Root sessions on the project.
+       */
+      sessions: number;
+    };
+    ProjectsResponse: {
+      projects: components['schemas']['ProjectView'][];
     };
     ReadyResponse: {
       /**
@@ -1802,6 +1906,8 @@ export interface components {
       pinned_at?: string | null;
       /** @description The profile this session runs on. */
       profile: string;
+      /** @description The project the session is on; empty for none. */
+      project: string;
       /**
        * @description The title a user set, else the first user message's words, whitespace collapsed and cut to
        *     80 characters. Empty until either has happened.
@@ -2047,6 +2153,13 @@ export interface components {
        * @description 0..=9, lower first. Omit to keep an existing memory's priority; defaults to 5 on creation.
        */
       priority?: number | null;
+      /**
+       * @description The project to file the memory in, which must be one the store has; `""` is the global
+       *     tier. Omit to keep an existing memory's tier, or to file a new one as global. Naming
+       *     the other tier for an existing memory moves it; a name a global memory and a project memory
+       *     would share is refused.
+       */
+      project?: string | null;
       /**
        * @description What the memory depends on: memory names, paths, URLs or ids, one line each, at most 20.
        *     Omit to keep; send `[]` to clear.
@@ -2470,6 +2583,11 @@ export interface operations {
         unverified?: string | null;
         /** @description Only memories whose expiry has passed. */
         expired?: boolean | null;
+        /**
+         * @description Only one tier: a project's memories, or the global tier for an empty value. Absent, every
+         *     tier.
+         */
+        project?: string | null;
       };
       header?: never;
       path?: never;
@@ -2517,7 +2635,9 @@ export interface operations {
   };
   get_memory: {
     parameters: {
-      query?: never;
+      query?: {
+        project?: string | null;
+      };
       header?: never;
       path: {
         /** @description Memory name */
@@ -2556,6 +2676,15 @@ export interface operations {
       };
       /** @description No such memory */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description The name is in several projects and `project` named none */
+      422: {
         headers: {
           [name: string]: unknown;
         };
@@ -2626,7 +2755,7 @@ export interface operations {
           'application/json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description Invalid name, empty description, or an unwritable path */
+      /** @description Invalid name, empty description, an unknown project, a name another tier holds, or an inline body the budget cannot take */
       422: {
         headers: {
           [name: string]: unknown;
@@ -2648,7 +2777,9 @@ export interface operations {
   };
   delete_memory: {
     parameters: {
-      query?: never;
+      query?: {
+        project?: string | null;
+      };
       header?: never;
       path: {
         /** @description Memory name */
@@ -2692,7 +2823,7 @@ export interface operations {
           'application/json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description Invalid name, or a symlinked path */
+      /** @description Invalid name, or a name in several projects with none named */
       422: {
         headers: {
           [name: string]: unknown;
@@ -2741,6 +2872,269 @@ export interface operations {
       };
       /** @description Insufficient scope */
       403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+    };
+  };
+  projects: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Every project, with its counts */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProjectsResponse'];
+        };
+      };
+      /** @description Authorization missing or invalid */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Insufficient scope */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+    };
+  };
+  create_project: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ProjectNameRequest'];
+      };
+    };
+    responses: {
+      /** @description Project added */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProjectView'];
+        };
+      };
+      /** @description Authorization missing or invalid */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Insufficient scope */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Request body exceeds `[serve] max_body_bytes` */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Invalid name, or one a project already has, exactly or under case folding */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+    };
+  };
+  delete_project: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Project name */
+        name: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Project removed */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Authorization missing or invalid */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Insufficient scope */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description No such project */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description A memory or a session is still on the project; `detail` carries the counts */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+    };
+  };
+  rename_project: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Project name */
+        name: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ProjectNameRequest'];
+      };
+    };
+    responses: {
+      /** @description The project under its new name */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProjectView'];
+        };
+      };
+      /** @description Authorization missing or invalid */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Insufficient scope */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description No such project */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Request body exceeds `[serve] max_body_bytes` */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Invalid new name, or one another project has, exactly or under case folding */
+      422: {
         headers: {
           [name: string]: unknown;
         };
@@ -2897,6 +3291,8 @@ export interface operations {
          *     every session records.
          */
         working_directory?: string | null;
+        /** @description Only sessions on this project; an empty value, the sessions on none. */
+        project?: string | null;
         /**
          * @description Only the sub-agents this session spawned, its direct children. A tree view expands one
          *     node with one call and recurses for depth. Names sub-agents by definition, so

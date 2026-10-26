@@ -6,7 +6,7 @@ mekaweb runs on the meka host, beside meka. meka listens on loopback only; mekaw
 browser ──HTTPS──▶ Cloudflare Tunnel or Caddy ──▶ mekaweb (loopback) ──▶ meka serve (loopback)
 ```
 
-mekaweb runs on Linux, macOS and Windows. Each release states which meka versions it supports; this one needs meka 0.83.0 or newer. The steps show Linux and macOS commands, with Windows' where they differ.
+mekaweb runs on Linux, macOS and Windows. Each release states which meka versions it supports; this one needs meka 0.84.0 or newer. The steps show Linux and macOS commands, with Windows' where they differ.
 
 ## 1. Get mekaweb
 

@@ -9,7 +9,13 @@ import {
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './app';
-import { SessionRoute, ResourcesPage, SchedulesPage, McpPage } from './features/pages';
+import {
+  SessionRoute,
+  ResourcesPage,
+  SchedulesPage,
+  McpPage,
+  ProjectsPage,
+} from './features/pages';
 import { ConnectionRuntime } from './connections/runtime';
 import { browserStorage } from './connections/storage';
 import { SettingsPage } from './features/settings';
@@ -49,6 +55,7 @@ const routes = [
   indexRoute,
   sessionsRoute,
   sessionRoute,
+  createRoute({ getParentRoute: () => rootRoute, path: '/projects', component: ProjectsPage }),
   createRoute({
     getParentRoute: () => rootRoute,
     path: '/memory',

@@ -163,8 +163,12 @@ export function SessionListItem({
           <div className="session-item-meta">
             <span>
               {session.pinned_at && <Pin size={11} aria-label="Pinned" />}
-              <span className="session-item-profile" title={session.profile}>
+              <span
+                className="session-item-profile"
+                title={[session.profile, session.project].filter(Boolean).join(' · ')}
+              >
                 {session.profile}
+                {session.project ? ` · ${session.project}` : ''}
                 {session.parent_id ? ' · sub-agent' : ''}
               </span>
             </span>

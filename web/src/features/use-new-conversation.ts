@@ -7,6 +7,7 @@ import { emptyComposerOptions, remainingComposerOptions } from '../session/compo
 export interface NewSessionSettings {
   workingDirectory: string;
   profile: string;
+  project: string;
   permission: string;
   approvals: string;
 }
@@ -17,6 +18,7 @@ export function useNewConversation(onCreated: (id: string) => void) {
   const [settings, setSettings] = useState<NewSessionSettings>({
     workingDirectory: '',
     profile: '',
+    project: '',
     permission: '',
     approvals: '',
   });
@@ -47,6 +49,7 @@ export function useNewConversation(onCreated: (id: string) => void) {
           ? { working_directory: settings.workingDirectory.trim() }
           : {}),
         ...(settings.profile ? { profile: settings.profile } : {}),
+        ...(settings.project ? { project: settings.project } : {}),
         ...(settings.permission ? { permission: settings.permission } : {}),
         ...(settings.approvals ? { approvals: settings.approvals === 'true' } : {}),
         capabilities: {

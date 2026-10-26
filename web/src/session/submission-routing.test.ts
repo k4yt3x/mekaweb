@@ -60,6 +60,7 @@ async function fixture(open = true) {
   const session: Schema['SessionResponse'] = {
     id: 's',
     profile: 'test',
+    project: '',
     permission: 'read',
     approvals: true,
     title: '',

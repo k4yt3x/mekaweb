@@ -4,6 +4,7 @@ import { Outlet, useLocation } from '@tanstack/react-router';
 import {
   BookOpen,
   CalendarClock,
+  FolderKanban,
   Menu,
   MessageSquare,
   Plug,
@@ -315,6 +316,7 @@ function Navigation({
   const location = useLocation();
   const entries = [
     { name: 'Sessions', path: '/sessions', icon: MessageSquare, scope: 'sessions:r' },
+    { name: 'Projects', path: '/projects', icon: FolderKanban },
     { name: 'Memory', path: '/memory', icon: BookOpen, scope: 'memory:r' },
     { name: 'Skills', path: '/skills', icon: Sparkles },
     { name: 'Schedules', path: '/schedules', icon: CalendarClock, scope: 'schedule:r' },

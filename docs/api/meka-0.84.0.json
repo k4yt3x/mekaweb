@@ -4,7 +4,7 @@
     "title": "meka HTTP API",
     "description": "Service-to-service API for driving meka agent turns programmatically. Mirrors the wire format described in the HTTP API docs. A field that has no value is omitted from every response and event, never sent as `null`.",
     "license": { "name": "AGPL-3.0-or-later" },
-    "version": "0.83.0"
+    "version": "0.84.0"
   },
   "paths": {
     "/v1/health/live": {
@@ -328,6 +328,13 @@
             "description": "Only memories whose expiry has passed.",
             "required": false,
             "schema": { "type": ["boolean", "null"] }
+          },
+          {
+            "name": "project",
+            "in": "query",
+            "description": "Only one tier: a project's memories, or the global tier for an empty value. Absent, every\ntier.",
+            "required": false,
+            "schema": { "type": ["string", "null"] }
           }
         ],
         "responses": {
@@ -373,6 +380,12 @@
             "description": "Memory name",
             "required": true,
             "schema": { "type": "string" }
+          },
+          {
+            "name": "project",
+            "in": "query",
+            "required": false,
+            "schema": { "type": ["string", "null"] }
           }
         ],
         "responses": {
@@ -396,6 +409,12 @@
           },
           "404": {
             "description": "No such memory",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
+            }
+          },
+          "422": {
+            "description": "The name is in several projects and `project` named none",
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
             }
@@ -454,7 +473,7 @@
             }
           },
           "422": {
-            "description": "Invalid name, empty description, or an unwritable path",
+            "description": "Invalid name, empty description, an unknown project, a name another tier holds, or an inline body the budget cannot take",
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
             }
@@ -479,6 +498,12 @@
             "description": "Memory name",
             "required": true,
             "schema": { "type": "string" }
+          },
+          {
+            "name": "project",
+            "in": "query",
+            "required": false,
+            "schema": { "type": ["string", "null"] }
           }
         ],
         "responses": {
@@ -502,7 +527,7 @@
             }
           },
           "422": {
-            "description": "Invalid name, or a symlinked path",
+            "description": "Invalid name, or a name in several projects with none named",
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
             }
@@ -552,6 +577,208 @@
         "security": [
           { "bearerAuth": ["sessions:r", "mcp:r", "skills:r", "memory:r", "schedule:r"] }
         ]
+      }
+    },
+    "/v1/projects": {
+      "get": {
+        "tags": ["projects"],
+        "summary": "`GET /v1/projects`: every project, with how many memories and sessions each holds.",
+        "operationId": "projects",
+        "responses": {
+          "200": {
+            "description": "Every project, with its counts",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ProjectsResponse" } }
+            }
+          },
+          "401": {
+            "description": "Authorization missing or invalid",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
+            }
+          },
+          "403": {
+            "description": "Insufficient scope",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
+            }
+          }
+        },
+        "security": [
+          { "bearerAuth": ["sessions:r", "mcp:r", "skills:r", "memory:r", "schedule:r"] }
+        ]
+      },
+      "post": {
+        "tags": ["projects"],
+        "summary": "`POST /v1/projects`: add a project.",
+        "description": "Under `memory:w`, with the rename and the removal: a project is a memory tier and nothing\nelse, so the scope that writes the tiers is the one that opens and closes them.",
+        "operationId": "create_project",
+        "requestBody": {
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/ProjectNameRequest" } }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Project added",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ProjectView" } }
+            }
+          },
+          "401": {
+            "description": "Authorization missing or invalid",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
+            }
+          },
+          "403": {
+            "description": "Insufficient scope",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
+            }
+          },
+          "413": {
+            "description": "Request body exceeds `[serve] max_body_bytes`",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
+            }
+          },
+          "422": {
+            "description": "Invalid name, or one a project already has, exactly or under case folding",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
+            }
+          }
+        },
+        "security": [{ "bearerAuth": ["memory:w"] }]
+      }
+    },
+    "/v1/projects/{name}": {
+      "delete": {
+        "tags": ["projects"],
+        "summary": "`DELETE /v1/projects/{name}`: remove a project nothing is on.",
+        "operationId": "delete_project",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Project name",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "204": { "description": "Project removed" },
+          "401": {
+            "description": "Authorization missing or invalid",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
+            }
+          },
+          "403": {
+            "description": "Insufficient scope",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
+            }
+          },
+          "404": {
+            "description": "No such project",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
+            }
+          },
+          "422": {
+            "description": "A memory or a session is still on the project; `detail` carries the counts",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
+            }
+          }
+        },
+        "security": [{ "bearerAuth": ["memory:w"] }]
+      },
+      "patch": {
+        "tags": ["projects"],
+        "summary": "`PATCH /v1/projects/{name}`: rename a project, moving every session and memory on it.",
+        "operationId": "rename_project",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Project name",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/ProjectNameRequest" } }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The project under its new name",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ProjectView" } }
+            }
+          },
+          "401": {
+            "description": "Authorization missing or invalid",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
+            }
+          },
+          "403": {
+            "description": "Insufficient scope",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
+            }
+          },
+          "404": {
+            "description": "No such project",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
+            }
+          },
+          "413": {
+            "description": "Request body exceeds `[serve] max_body_bytes`",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
+            }
+          },
+          "422": {
+            "description": "Invalid new name, or one another project has, exactly or under case folding",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
+            }
+          }
+        },
+        "security": [{ "bearerAuth": ["memory:w"] }]
       }
     },
     "/v1/schedule": {
@@ -678,6 +905,13 @@
             "name": "working_directory",
             "in": "query",
             "description": "Only list sessions whose working directory is this one, compared in the canonical spelling\nevery session records.",
+            "required": false,
+            "schema": { "type": ["string", "null"] }
+          },
+          {
+            "name": "project",
+            "in": "query",
+            "description": "Only sessions on this project; an empty value, the sessions on none.",
             "required": false,
             "schema": { "type": ["string", "null"] }
           },
@@ -2845,20 +3079,45 @@
           }
         }
       },
-      "CompactionMarker": {
+      "CompactionView": {
         "type": "object",
-        "required": ["replaced_count", "generation"],
+        "description": "One compaction as every JSON surface reports it: the `context.compacted` event, the\n`compaction` marker on a summary message, and the one-shot report. `trigger` and `source` are\nthe spellings of [`crate::conversation::CompactionTrigger`] and\n[`crate::conversation::CompactionSource`].",
+        "required": [
+          "trigger",
+          "source",
+          "memories_written",
+          "kept_recent",
+          "replaced_count",
+          "generation"
+        ],
         "properties": {
           "generation": {
             "type": "integer",
             "format": "int64",
-            "description": "Which compaction produced it, counting from 1. Fidelity degrades with each pass, so a\nclient rendering a transcript can say how far from the original it is.",
+            "description": "Which compaction this was, counting from 1. Fidelity degrades with each pass, so a client\nrendering a transcript can say how far from the original it is.",
             "minimum": 0
+          },
+          "kept_recent": {
+            "type": "boolean",
+            "description": "Whether the recent turns were kept verbatim after the summary."
+          },
+          "memories_written": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Memories the checkpoint turn wrote, observed from its calls rather than self-reported."
           },
           "replaced_count": {
             "type": "integer",
-            "description": "How many materialized messages the boundary removed.\n\nThe whole pre-compaction window, including the recent tail that compaction then re-appends\nverbatim, so it over-counts what the summary itself stands for. Use it to detect *that* the\nview was rewritten, not to compute how much was lost.",
+            "description": "How many materialized messages the boundary removed: the whole pre-compaction window,\nincluding the tail compaction re-appends verbatim, so it over-counts what the summary\nitself stands for. Use it to detect *that* the view was rewritten, not to compute how much\nwas lost.",
             "minimum": 0
+          },
+          "source": {
+            "type": "string",
+            "description": "Which strategy wrote the summary: `checkpoint` or `summarizer`. They differ in fidelity,\nnot just mechanism."
+          },
+          "trigger": {
+            "type": "string",
+            "description": "What set the compaction going: `reactive`, `proactive`, `manual`, `requested`, `emergency`\nor `retention`."
           }
         }
       },
@@ -3086,6 +3345,10 @@
           "profile": {
             "type": ["string", "null"],
             "description": "Profile the session runs on, and keeps for the rest of its life unless a later PATCH moves\nit. Defaults to the server's own default profile. Must name a profile in `config.toml`;\n`GET /v1/profiles` lists them."
+          },
+          "project": {
+            "type": ["string", "null"],
+            "description": "Project the session opens on, which decides the memory tier its writes land in and the\ntiers it sees. Absent or empty, the session is on none. Must name a project the store has;\n`GET /v1/projects` lists them and `POST /v1/projects` adds one."
           },
           "working_directory": {
             "type": ["string", "null"],
@@ -3375,6 +3638,7 @@
         "description": "A memory: what `meka memory list` prints and `GET /v1/memory/{name}` answers with. The body\nrides only on the single-memory surfaces, so a listing stays small.",
         "required": [
           "name",
+          "project",
           "description",
           "priority",
           "load",
@@ -3410,6 +3674,10 @@
             "format": "int32",
             "description": "0..=9, lower first. Unlike a skill's, a memory's priority is shown to the model, because it\nsays how heavily to weigh a note the model is already reasoning from.",
             "minimum": 0
+          },
+          "project": {
+            "type": "string",
+            "description": "The project whose tier the memory is in; empty for the global tier."
           },
           "read_count": {
             "type": "integer",
@@ -3465,7 +3733,7 @@
           "compaction": {
             "oneOf": [
               {
-                "$ref": "#/components/schemas/CompactionMarker",
+                "$ref": "#/components/schemas/CompactionView",
                 "description": "Present only on a message that *is* a compaction summary.\n\nWithout this a client polling `/messages` watches history rewrite itself: a compaction\ntruncates the materialized tail and pushes a summary in its place, so `total` shrinks and\nmessages the client already rendered stop coming back. The marker is what lets it tell\n\"the window was summarized\" from \"the server lost my conversation\"."
               },
               { "type": "null" }
@@ -3530,6 +3798,10 @@
           "profile": {
             "type": ["string", "null"],
             "description": "Profile to move the session onto. Must name a profile in `config.toml`. Absent → keep\ncurrent.\n\nSwitching mid-conversation is allowed and is the client's call. Thinking blocks are tagged\nwith the profile that produced them and are not replayed to a different one, so the\nreasoning recorded so far stops being visible to the model from the next turn onward. A\nprofile with `vision = false` refuses the next turn while the session holds an image."
+          },
+          "project": {
+            "type": ["string", "null"],
+            "description": "Project to move the session onto, which decides the memory tier its writes land in and the\ntiers it sees. Must name a project the store has; empty takes the session off its\nproject. Absent → keep current. The next turn's context restates the memories the session\nnow sees."
           },
           "title": {
             "type": ["string", "null"],
@@ -3645,6 +3917,46 @@
         "required": ["profiles"],
         "properties": {
           "profiles": { "type": "array", "items": { "$ref": "#/components/schemas/ProfileView" } }
+        }
+      },
+      "ProjectNameRequest": {
+        "type": "object",
+        "description": "The body of `POST /v1/projects` and of `PATCH /v1/projects/{name}`.",
+        "required": ["name"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The project's name, `[A-Za-z0-9][A-Za-z0-9_-]*`, compared exactly and refused when it\ndiffers from an existing name only by case. On a `PATCH`, the name the project moves to."
+          }
+        },
+        "additionalProperties": false
+      },
+      "ProjectView": {
+        "type": "object",
+        "description": "A project as `meka project list` prints it and the `/v1/projects` routes answer with: its name,\nwhen it was added, and how many memories and sessions are on it.",
+        "required": ["name", "created_at", "memories", "sessions"],
+        "properties": {
+          "created_at": { "type": "string", "description": "RFC 3339." },
+          "memories": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Memories in the project's tier.",
+            "minimum": 0
+          },
+          "name": { "type": "string" },
+          "sessions": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Root sessions on the project.",
+            "minimum": 0
+          }
+        }
+      },
+      "ProjectsResponse": {
+        "type": "object",
+        "required": ["projects"],
+        "properties": {
+          "projects": { "type": "array", "items": { "$ref": "#/components/schemas/ProjectView" } }
         }
       },
       "ReadyResponse": {
@@ -3833,7 +4145,7 @@
       "SessionView": {
         "type": "object",
         "description": "A session's row: what `meka session list` prints and what `GET /v1/sessions/{id}` answers with,\nless the facts only the process holding the session can add (`capabilities`, `turn_in_flight`,\n`inbox_pending`, `approvals_pending`, `checklist`), which the HTTP response flattens this\nunder.",
-        "required": ["id", "created_at", "updated_at", "approvals", "profile", "title"],
+        "required": ["id", "created_at", "updated_at", "approvals", "profile", "project", "title"],
         "properties": {
           "approvals": {
             "type": "boolean",
@@ -3864,6 +4176,10 @@
             "description": "RFC 3339, when the session was pinned; omitted for a session that is not. Pinned sessions\nare listed first, newest pin on top."
           },
           "profile": { "type": "string", "description": "The profile this session runs on." },
+          "project": {
+            "type": "string",
+            "description": "The project the session is on; empty for none."
+          },
           "title": {
             "type": "string",
             "description": "The title a user set, else the first user message's words, whitespace collapsed and cut to\n80 characters. Empty until either has happened."
@@ -4170,6 +4486,10 @@
             "description": "0..=9, lower first. Omit to keep an existing memory's priority; defaults to 5 on creation.",
             "minimum": 0
           },
+          "project": {
+            "type": ["string", "null"],
+            "description": "The project to file the memory in, which must be one the store has; `\"\"` is the global\ntier. Omit to keep an existing memory's tier, or to file a new one as global. Naming\nthe other tier for an existing memory moves it; a name a global memory and a project memory\nwould share is refused."
+          },
           "references": {
             "type": ["array", "null"],
             "items": { "type": "string" },
@@ -4239,6 +4559,7 @@
     { "name": "tasks", "description": "Background tasks" },
     { "name": "skills", "description": "Skill store CRUD" },
     { "name": "memory", "description": "Memory store CRUD" },
+    { "name": "projects", "description": "Projects, the memory tiers beside the global one" },
     { "name": "discovery", "description": "Server info, tools, instructions, profiles, MCP" },
     { "name": "health", "description": "Liveness / readiness probes" }
   ]

@@ -200,7 +200,14 @@ it('does not reach past another assistant message to attach a late result', () =
 it('does not pair across compaction or interpret tool blocks inside a summary as calls', () => {
   const summary: Schema['MessageView'] = {
     ...message('assistant', call('summary')),
-    compaction: { generation: 1, replaced_count: 12 },
+    compaction: {
+      trigger: 'reactive',
+      source: 'checkpoint',
+      memories_written: [],
+      kept_recent: true,
+      generation: 1,
+      replaced_count: 12,
+    },
   };
   const input = [
     message('assistant', call('before')),
@@ -272,7 +279,17 @@ it('keeps user input, compaction, unmatched results, and distinct saved turns as
     { ...message('assistant'), turn_id: 'turn-2' },
     message('user', { type: 'text', text: 'Another question.' }),
     message('assistant'),
-    { ...message('assistant'), compaction: { generation: 1, replaced_count: 20 } },
+    {
+      ...message('assistant'),
+      compaction: {
+        trigger: 'reactive',
+        source: 'checkpoint',
+        memories_written: [],
+        kept_recent: true,
+        generation: 1,
+        replaced_count: 20,
+      },
+    },
     message('assistant'),
     message('tool', result('unmatched')),
     message('assistant'),

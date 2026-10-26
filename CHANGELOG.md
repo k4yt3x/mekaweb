@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-10-26
+
+### Added
+
+- Projects: add, rename and remove them, put sessions on one, and filter and file memories by one.
+- Each compaction says what set it going, and one meka starts on its own shows while it runs.
+
+### Changed
+
+- **Breaking:** mekaweb requires meka 0.84.0 or newer.
+- Memory search is meka's own, so it finds words in a memory's body too.
+
+### Fixed
+
+- Memories that share a name across projects open, save and delete the right one.
+
+### Security
+
+- KaTeX moves to 0.18.11 for GHSA-238p-pmpm-9mq7, in math and diagrams alike.
+
 ## [0.27.0] - 2026-10-25
 
 ### Added
@@ -523,7 +543,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Light and dark themes, narrow layouts, and collapsible, resizable session panels.
 - Hosting at the root or a subpath, with GitHub Pages deployment on version tags.
 
-[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.27.0...HEAD
+[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.28.0...HEAD
+[0.28.0]: https://github.com/k4yt3x/mekaweb/compare/0.27.0...0.28.0
 [0.27.0]: https://github.com/k4yt3x/mekaweb/compare/0.26.0...0.27.0
 [0.26.0]: https://github.com/k4yt3x/mekaweb/compare/0.25.0...0.26.0
 [0.25.0]: https://github.com/k4yt3x/mekaweb/compare/0.24.1...0.25.0

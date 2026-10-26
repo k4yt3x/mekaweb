@@ -35,6 +35,7 @@ import type {
   ComposerOptions,
   ImageAttachment,
 } from '../session/controller';
+import { compactionNote } from '../session/compaction';
 import { isSessionRunning, UnsentMessage } from '../session/controller';
 import { useTextDraft } from '../session/drafts';
 import { subagentsQuery, useSessionStates } from '../session/hooks';
@@ -752,14 +753,14 @@ function Message({
             onToggle={(event) => setSummaryOpen(event.currentTarget.open)}
           >
             <summary>
-              Conversation summary
+              <span className="compaction-note">{compactionNote(message.compaction)}</span>
               <span className="muted small">Compaction {message.compaction.generation}</span>
             </summary>
             {summaryOpen && (
               <div className="compaction-content">
                 <p className="muted small">
-                  {message.compaction.replaced_count} messages replaced in the model context.
-                  Earlier history is available in transcript export.
+                  This summary replaced {message.compaction.replaced_count} messages in the model
+                  context. Earlier history is available in transcript export.
                 </p>
                 {content.map(({ block, index }) => (
                   <ContentBlock

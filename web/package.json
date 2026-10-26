@@ -1,6 +1,6 @@
 {
   "name": "mekaweb",
-  "version": "0.27.0",
+  "version": "0.28.0",
   "private": true,
   "description": "The web interface for meka",
   "license": "AGPL-3.0-or-later",
@@ -38,7 +38,7 @@
     "clsx": "2.1.1",
     "dompurify": "3.4.17",
     "js-yaml": "4.3.2",
-    "katex": "0.16.47",
+    "katex": "0.18.11",
     "lucide-react": "1.47.0",
     "mdast-util-math": "3.0.0",
     "mermaid": "11.17.2",
@@ -75,6 +75,9 @@
     "typescript-eslint": "8.70.0",
     "vite": "8.3.5",
     "vitest": "5.0.5"
+  },
+  "overrides": {
+    "katex": "$katex"
   },
   "workspaces": [
     "tools/schema"

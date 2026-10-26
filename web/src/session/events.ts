@@ -205,7 +205,9 @@ const required: Record<keyof EventPayloads, string[]> = {
   'task.reported': ['text'],
   'feed.gap': [],
   'checklist.updated': [],
+  'context.compacting': ['compaction_id'],
   'context.compacted': ['source'],
+  'context.compaction_failed': ['compaction_id'],
   progress: ['server_name', 'tool_name'],
 };
 export function parseEvent(
