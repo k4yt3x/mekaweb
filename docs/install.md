@@ -6,7 +6,7 @@ mekaweb runs on the meka host, beside meka. meka listens on loopback only; mekaw
 browser ──HTTPS──▶ Cloudflare Tunnel or Caddy ──▶ mekaweb (loopback) ──▶ meka serve (loopback)
 ```
 
-mekaweb runs on Linux, macOS and Windows. Each release states which meka versions it supports; this one needs meka 0.84.0 or newer. The steps show Linux and macOS commands, with Windows' where they differ.
+mekaweb runs on Linux, macOS and Windows. Each release states which meka versions it supports; this one needs meka 0.85.0 or newer. The steps show Linux and macOS commands, with Windows' where they differ.
 
 ## 1. Get mekaweb
 
@@ -72,8 +72,11 @@ scopes = [
   "skills:r", "skills:w",
   "schedule:r", "schedule:w",
   "mcp:r", "mcp:w",
+  "config:r", "config:w",
 ]
 ```
+
+`config:w` lets mekaweb add accounts, profiles and MCP servers; an MCP server's command runs as meka's user. A meka with no profile yet can be set up from **Providers** once mekaweb runs.
 
 ## 3. Configure mekaweb
 

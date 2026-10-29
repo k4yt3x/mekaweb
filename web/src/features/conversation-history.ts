@@ -323,7 +323,13 @@ export function responseActivityIndicator(
   | {
       index: number;
       status:
-        'working' | 'compacting' | 'approval' | 'connecting' | 'reconnecting' | 'disconnected';
+        | 'working'
+        | 'compacting'
+        | 'approval'
+        | 'question'
+        | 'connecting'
+        | 'reconnecting'
+        | 'disconnected';
     }
   | undefined {
   if (!isSessionRunning(state)) return;
@@ -357,7 +363,9 @@ export function responseActivityIndicator(
     index--;
   }
   const status = state.approvals.length
-    ? 'approval'
+    ? state.approvals.some((approval) => approval.kind === 'permission')
+      ? 'approval'
+      : 'question'
     : state.feed === 'connected'
       ? state.running && state.compacting
         ? 'compacting'

@@ -36,17 +36,23 @@ export type LiveBlock =
   /** Words that entered the conversation: a turn's opening, or a message an interrupt appended. */
   | { kind: 'message'; message: Schema['MessageView']; opening: boolean }
   | { kind: 'submission'; key: string };
-export interface Approval {
+/** A prompt parked for the person: a gated tool call, or an MCP server's question. meka counts
+ * both in `approvals_pending` and takes both answers at the same route. */
+export type Approval = {
   id: string;
   sessionId: string;
   turnId: string;
-  tool: string;
-  input: unknown;
   expires: number;
   /** The sub-agent whose call asks, answered here on its parent's behalf. */
   subagentId?: string;
   error?: string;
-}
+} & (
+  | { kind: 'permission'; tool: string; input: unknown }
+  /** A form to fill in, by the JSON Schema the server sent. */
+  | { kind: 'form'; server: string; message: string; schema: Record<string, unknown> }
+  /** A page to visit and come back from. */
+  | { kind: 'url'; server: string; message: string; url: string }
+);
 export interface Submission {
   key: string;
   kind: 'inbox' | 'turn';
@@ -92,6 +98,8 @@ export interface SessionState {
   blocks: LiveBlock[];
   tools: Record<string, LiveTool>;
   approvals: Approval[];
+  /** What meka last measured in context, which moves the context view on. */
+  measured?: { used: number; window?: number };
   notices: SessionNotice[];
   submissions: Submission[];
   revision: number;
@@ -595,6 +603,16 @@ export class SessionController {
         this.publish(entry, { session: data as Schema['SessionResponse'] });
       return;
     }
+    if (frame.event === 'context.measured') {
+      // After every provider round, a compaction, or a rewind, inside a turn or not.
+      this.publish(entry, {
+        measured: {
+          used: Number(data.used),
+          ...(typeof data.window === 'number' ? { window: data.window } : {}),
+        },
+      });
+      return;
+    }
     const turnId = string(data, 'turn_id');
     // A turn's record can settle it before the attending feed's replay. Its saved snapshot
     // supersedes those old deltas; replay must not reopen work or duplicate the saved answer.
@@ -662,6 +680,7 @@ export class SessionController {
           'assistant_text.delta',
           'thinking.delta',
           'permission_required',
+          'elicitation_required',
           'progress',
           'turn.nudged',
           'task.reported',
@@ -792,30 +811,37 @@ export class SessionController {
         tools: { ...entry.state.tools, [id]: tool },
         ...(!old ? { blocks: [...state.blocks, { kind: 'tool', id }] } : {}),
       });
-    } else if (frame.event === 'permission_required' && !state.session?.parent_id) {
+    } else if (
+      (frame.event === 'permission_required' || frame.event === 'elicitation_required') &&
+      !state.session?.parent_id
+    ) {
       // A sub-agent's feed mirrors its prompts; the parent's carries them and takes the answer.
       const id = string(data, 'request_id');
       // The deadline itself, for a prompt replayed long after it was parked.
       const deadline = Date.parse(string(data, 'expires_at'));
       const subagentId = string(data, 'subagent_id');
+      const common = {
+        id,
+        sessionId: state.id,
+        turnId: turnId || state.turnId || '',
+        expires: Number.isFinite(deadline)
+          ? deadline
+          : Date.now() + Number(data.expires_in_seconds) * 1000,
+        ...(subagentId ? { subagentId } : {}),
+      };
+      const server = string(data, 'server');
+      const message = string(data, 'message');
+      const approval: Approval =
+        frame.event === 'permission_required'
+          ? { ...common, kind: 'permission', tool: string(data, 'tool_name'), input: data.input }
+          : data.kind === 'form'
+            ? { ...common, kind: 'form', server, message, schema: data.schema as EventData }
+            : { ...common, kind: 'url', server, message, url: string(data, 'url') };
       this.publish(entry, {
         textStreaming: false,
-        approvals: [
-          ...state.approvals.filter((a) => a.id !== id),
-          {
-            id,
-            sessionId: state.id,
-            turnId: turnId || state.turnId || '',
-            tool: string(data, 'tool_name'),
-            input: data.input,
-            expires: Number.isFinite(deadline)
-              ? deadline
-              : Date.now() + Number(data.expires_in_seconds) * 1000,
-            ...(subagentId ? { subagentId } : {}),
-          },
-        ],
+        approvals: [...state.approvals.filter((a) => a.id !== id), approval],
       });
-    } else if (frame.event === 'permission_resolved') {
+    } else if (frame.event === 'permission_resolved' || frame.event === 'elicitation_resolved') {
       // Answered elsewhere, expired, or canceled with its turn.
       const id = string(data, 'request_id');
       this.publish(entry, { approvals: state.approvals.filter((a) => a.id !== id) });
@@ -1969,7 +1995,7 @@ export class SessionController {
       turn_id: turnId,
     } satisfies Schema['CancelRequest']);
   }
-  async respond(approval: Approval, outcome: Schema['PermissionDecision']) {
+  async respond(approval: Approval, outcome: Schema['ResponseOutcome'], content?: EventData) {
     if (this.disposed || !this.canWrite)
       throw new Error('Answering approvals requires an active connection with sessions:w.');
     const entry = this.entries.get(approval.sessionId);
@@ -1978,7 +2004,7 @@ export class SessionController {
       await this.api.mutate(
         'POST',
         sessionPath(approval.sessionId) + '/responses/' + segment(approval.id),
-        { outcome } satisfies Schema['ResponseBody'],
+        { outcome, ...(content ? { content } : {}) } satisfies Schema['ResponseBody'],
       );
     } catch (error) {
       if (!(error instanceof ApiError && error.status === 404)) throw error;

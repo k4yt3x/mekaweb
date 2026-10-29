@@ -4,6 +4,149 @@
  */
 
 export interface paths {
+  '/v1/accounts': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** `GET /v1/accounts`: every account, with whether a credential is stored under it. */
+    get: operations['accounts'];
+    put?: never;
+    /**
+     * `POST /v1/accounts`: add an account, with its key when its backend takes one.
+     * @description A subscription backend's account is added without a credential and logged in through
+     *     `POST /v1/accounts/{name}/login`, as `meka account add` would have run the flow.
+     */
+    post: operations['create_account'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/accounts/{name}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * `GET /v1/accounts/{name}`: one account as the server serves it, with whether a credential is
+     *     stored under it.
+     */
+    get: operations['get_account'];
+    put?: never;
+    post?: never;
+    /**
+     * `DELETE /v1/accounts/{name}`: remove an account and the credential stored under its name,
+     *     or a credential alone when no account claims it.
+     */
+    delete: operations['delete_account'];
+    options?: never;
+    head?: never;
+    /**
+     * `PATCH /v1/accounts/{name}`: rename an account, moving its credential and every profile on it.
+     * @description A rename is all an account takes: its other settings are what a login was made against, so
+     *     another endpoint or backend is another account.
+     */
+    patch: operations['rename_account'];
+    trace?: never;
+  };
+  '/v1/accounts/{name}/login': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * `POST /v1/accounts/{name}/login`: store a credential for an account, replacing the one it has.
+     * @description An API-key backend takes the key in the body, as `meka account login` reads it from stdin, and
+     *     is answered 200 with the account. A subscription backend takes no body: the login runs in the
+     *     browser, and the answer is 202 with the URL to open and a `login_id` that
+     *     `POST /v1/accounts/{name}/login/{login_id}` completes with what the browser gave. A
+     *     `chatgpt-subscription` login also holds the loopback listener the browser is sent back to,
+     *     when the port is free, so a browser on this machine completes it on its own. Beginning a login
+     *     on an account that has one pending replaces it.
+     */
+    post: operations['login_account'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/accounts/{name}/login/{login_id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** `GET /v1/accounts/{name}/login/{login_id}`: where a browser login stands. */
+    get: operations['login_status'];
+    put?: never;
+    /**
+     * `POST /v1/accounts/{name}/login/{login_id}`: complete a browser login with what the browser
+     *     gave, storing the credential.
+     * @description A login the loopback listener has already completed answers 200 as well; one it has already
+     *     failed answers 422 with why. A code the authorization server rejects ends the login, since the
+     *     code is spent; a paste that carries no code leaves it pending for another try.
+     */
+    post: operations['complete_login'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/config': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * `GET /v1/config`: where the installation is, when `config.toml` was last read whole and
+     *     written, whether an edit awaits `POST /v1/config/reload`, and what only a restart applies.
+     */
+    get: operations['config'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/config/reload': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * `POST /v1/config/reload`: read `config.toml` again and serve what a write over HTTP would
+     *     have: the accounts and profiles, the MCP servers brought to the file's entries, and the standing
+     *     instructions. Every other section is read at startup alone, and the answer names those that
+     *     changed.
+     */
+    post: operations['reload_config'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/v1/health/live': {
     parameters: {
       query?: never;
@@ -79,7 +222,16 @@ export interface paths {
     };
     /** `GET /v1/instructions`: the standing instructions this server's agents run under. */
     get: operations['instructions'];
-    put?: never;
+    /**
+     * `PUT /v1/instructions`: write the standing instructions to `instructions.md` in the config
+     *     directory, and run the sessions that open from now on under them.
+     * @description Refused when that file is not what this server reads: `--instructions`, `MEKA_INSTRUCTIONS`,
+     *     `MEKA_INSTRUCTIONS_FILE` or the `instructions/` directory stands above it, so a write would
+     *     change nothing a session sees, which is the one thing a write must not quietly do. Under
+     *     `config:w`, with the rest of the installation: the text is the persona every session runs
+     *     under.
+     */
+    put: operations['put_instructions'];
     post?: never;
     delete?: never;
     options?: never;
@@ -94,10 +246,122 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** `GET /v1/mcp`: configured MCP servers and their current connection state. */
+    /**
+     * `GET /v1/mcp`: configured MCP servers and their current connection state, and the names a
+     *     credential is stored under that no entry claims.
+     */
     get: operations['mcp'];
     put?: never;
+    /**
+     * `POST /v1/mcp`: add a server to `config.toml` and to the running manager, which connects it
+     *     in the background.
+     * @description The answer's `state` is where the connection stands at once, `pending` for a server about to
+     *     connect; `GET /v1/mcp` says when it has. No login runs: a server whose endpoint asks for one
+     *     is logged in through `POST /v1/mcp/{name}/login`.
+     */
+    post: operations['create_mcp_server'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/mcp/{name}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** `GET /v1/mcp/{name}`: one server's configuration and connection state. */
+    get: operations['get_mcp_server'];
+    put?: never;
     post?: never;
+    /**
+     * `DELETE /v1/mcp/{name}`: remove a server from `config.toml` and from the running manager,
+     *     closing its connection and dropping its tools from every session, and clear the credentials
+     *     stored under its name, the OAuth grant revoked at the provider once the removal is served,
+     *     where it can be. A name with credentials and no entry is cleared the same way.
+     */
+    delete: operations['delete_mcp_server'];
+    options?: never;
+    head?: never;
+    /**
+     * `PATCH /v1/mcp/{name}`: change a server's entry in place. A change to what its connection is
+     *     made from, or to a credential it stores, restarts it; a change to its tool policy alone applies
+     *     on the connection it holds; `disabled: true` stops it and `false` starts it.
+     */
+    patch: operations['patch_mcp_server'];
+    trace?: never;
+  };
+  '/v1/mcp/{name}/login': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * `POST /v1/mcp/{name}/login`: store a credential for a server, or begin its OAuth login in the
+     *     browser.
+     * @description With `auth_token` or `client_secret`, the secret is stored, as `meka mcp login
+     *     --auth-token-stdin` or `--client-secret-stdin` stores it, and the server is restarted from its
+     *     entry; the answer is the server as it stands. With neither, the OAuth login `meka mcp
+     *     login` runs at a terminal begins: the answer is 202 with the URL to open and a `login_id`,
+     *     the server holds the loopback listener the browser is sent back to, and a browser elsewhere
+     *     is answered by posting the callback URL to `POST /v1/mcp/{name}/login/{login_id}`. The server
+     *     is restarted from the entry as the file then states it once the login completes. A
+     *     `client_credentials` server needs no browser: its login connects with the stored secret and is
+     *     answered 200 with the server, as a stored secret is.
+     */
+    post: operations['login_mcp_server'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/mcp/{name}/login/{login_id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** `GET /v1/mcp/{name}/login/{login_id}`: where a browser login stands. */
+    get: operations['mcp_login_status'];
+    put?: never;
+    /**
+     * `POST /v1/mcp/{name}/login/{login_id}`: complete a browser login with the callback URL the
+     *     browser was sent to, when it could not reach the listener itself.
+     * @description A URL with no code in it is refused and leaves the login pending, as an account's is. The
+     *     answer waits for the exchange and the commit; the restart connects in the background, so the
+     *     server it carries is `pending` until it has.
+     */
+    post: operations['complete_mcp_login'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/mcp/{name}/logout': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * `POST /v1/mcp/{name}/logout`: clear every credential stored for a server and restart it
+     *     without them, the OAuth grant revoked at the provider once that is served, where it can be. A
+     *     server holding none is left as it is.
+     */
+    post: operations['logout_mcp_server'];
     delete?: never;
     options?: never;
     head?: never;
@@ -191,23 +455,40 @@ export interface paths {
     };
     /**
      * `GET /v1/profiles`: configured profiles, with their account, backend and model only.
-     * @description Read-only by design, and the distinction is which fact is being written. A session *may* name a
-     *     profile (`POST /v1/sessions`) and move to another (`PATCH /v1/sessions/{id}`), because that
-     *     records a choice on one session's own row where the user can see it. What no request may do is
-     *     edit the profiles themselves: what `work` means, and therefore which account it bills, comes
-     *     from `config.toml` and nothing else. Letting a request redefine a profile is how an ambient
-     *     value silently rebinds an account, which is the same reason there is no environment tier.
-     *
-     *     No credentials are returned: they live in the database, keyed by account name, and never
-     *     transit this API.
+     * @description Under any read scope, with the other discovery endpoints: a client that may run turns may see
+     *     which profiles it can run them on. No credentials are returned: they live in the database,
+     *     keyed by account name, and never transit this API.
      */
     get: operations['profiles'];
     put?: never;
-    post?: never;
+    /** `POST /v1/profiles`: add a profile on a configured account. */
+    post: operations['create_profile'];
     delete?: never;
     options?: never;
     head?: never;
     patch?: never;
+    trace?: never;
+  };
+  '/v1/profiles/{name}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** `GET /v1/profiles/{name}`: one profile, with every setting it states. */
+    get: operations['get_profile'];
+    put?: never;
+    post?: never;
+    /**
+     * `DELETE /v1/profiles/{name}`: remove a profile. The sessions recorded on it keep the name and
+     *     refuse to resume until it is configured again or they are moved.
+     */
+    delete: operations['delete_profile'];
+    options?: never;
+    head?: never;
+    /** `PATCH /v1/profiles/{name}`: change a profile's settings, make it the default, or rename it. */
+    patch: operations['patch_profile'];
     trace?: never;
   };
   '/v1/projects': {
@@ -815,6 +1096,40 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
+    /**
+     * @description An account as `meka account list` prints it and `GET /v1/accounts` answers with: the
+     *     `[accounts.<name>]` settings and whether a credential is stored, never the credential.
+     */
+    AccountView: {
+      /**
+       * @description `yes`, `no`, or `unreadable`: the same three answers as the plain column, because a row
+       *     meka cannot deserialize is neither logged in nor logged out.
+       */
+      authenticated: string;
+      backend: string;
+      base_url?: string | null;
+      /** @description The OAuth client the account's grants are minted under, when it states one. */
+      client_id?: string | null;
+      /** @description Whether the interleaved-thinking beta is sent, when the account states it. */
+      interleaved_thinking?: boolean | null;
+      name: string;
+      /** @description The OAuth token endpoint the account's logins and refreshes post to, when it states one. */
+      oauth_token_url?: string | null;
+    };
+    /** @description What `GET /v1/accounts` answers. */
+    AccountsResponse: {
+      accounts: components['schemas']['AccountView'][];
+      /**
+       * @description Names a credential is stored under that no account claims, which `DELETE
+       *     /v1/accounts/{name}` clears. Absent when there are none.
+       */
+      orphaned_credentials?: string[];
+    };
+    /**
+     * @description One background task as every JSON surface reports it: the task routes, and the `_meta` of the
+     *     ACP notice that says what reported. `status` is the spelling of
+     *     [`crate::store::background::TaskStatus`].
+     */
     BackgroundTaskView: {
       /**
        * @description When subscribers were told, which is when `task.finished` fired for this task. Absent when
@@ -878,6 +1193,12 @@ export interface components {
        *     the last attending reader leaves. Default `false`.
        */
       answers_prompts_on_return?: boolean;
+      /**
+       * @description When `true`, an MCP server's elicitation parks as an `elicitation_required` event for an
+       *     attending client to answer at the responses route, as an approval does; when `false` it
+       *     is declined with a notice. Default `false`.
+       */
+      supports_elicitation?: boolean;
       /**
        * @description When `false`, mid-turn permission requests are denied immediately with a notice instead of
        *     parking on the SSE channel. Streaming clients with no approval interface set this. Default
@@ -976,6 +1297,44 @@ export interface components {
        *     or `retention`.
        */
       trigger: string;
+    };
+    /** @description The body of `POST /v1/accounts/{name}/login/{login_id}`. */
+    CompleteLoginRequest: {
+      /**
+       * @description What the browser gave: the code Anthropic's page shows, as shown, or the callback URL a
+       *     `chatgpt-subscription` login sent the browser to.
+       */
+      code: string;
+    };
+    /**
+     * @description Where the installation is and how what this server serves stands against `config.toml`, as
+     *     `GET /v1/config` answers.
+     */
+    ConfigResponse: {
+      /**
+       * @description Whether `config.toml` has changed since this process last read it whole: an edit made in a
+       *     shell, which `POST /v1/config/reload` applies. A write of the server's own reads the file
+       *     again, so it leaves this `false`. Compared on the file's modification time, so it holds
+       *     where the two instants above, spelled to the second, read equal.
+       */
+      config_changed: boolean;
+      /**
+       * @description When this process last read `config.toml` whole, RFC 3339: its start, the last
+       *     `POST /v1/config/reload`, or its own last write, each of which reads the whole file.
+       */
+      config_loaded_at: string;
+      /** @description When `config.toml` was last written, RFC 3339; absent when there is no file. */
+      config_modified_at?: string | null;
+      /** @description `config.toml`'s path; absent when no config directory can be determined. */
+      config_path?: string | null;
+      /** @description The data directory, where the store lives; absent when none can be determined. */
+      data_dir?: string | null;
+      /**
+       * @description The sections of `config.toml` that state something else than the file this server
+       *     started on and are read at startup alone, so neither a reload nor a write applies them and
+       *     only a restart does: `permissions`, `shell`, `[mcp]`'s own keys as `mcp`, and the rest.
+       */
+      restart_required: string[];
     };
     ContentBlockView:
       | {
@@ -1106,6 +1465,28 @@ export interface components {
        */
       window?: number | null;
     };
+    /**
+     * @description The body of `POST /v1/accounts`: the `[accounts.<name>]` settings, and the key for a backend
+     *     that takes one.
+     */
+    CreateAccountRequest: {
+      /**
+       * @description The key an API-key backend presents, stored in the database and never in `config.toml`.
+       *     Required on such a backend, refused on one that logs in through the browser.
+       */
+      api_key?: string | null;
+      /** @description The backend, as `[accounts.<name>].backend` names it. */
+      backend: string;
+      /** @description The API base URL; omitted, the backend's own applies. */
+      base_url?: string | null;
+      /** @description The OAuth client id, read by the two subscription backends alone. */
+      client_id?: string | null;
+      /** @description Whether to send the interleaved-thinking beta, read by `anthropic-messages` alone. */
+      interleaved_thinking?: boolean | null;
+      name: string;
+      /** @description The OAuth token endpoint, read by the two subscription backends alone. */
+      oauth_token_url?: string | null;
+    };
     CreateGate: {
       /**
        * @description What to run: `{"command": "…"}` for a shell command, or `{"tool": "mcp__server__tool",
@@ -1132,6 +1513,34 @@ export interface components {
       gate?: components['schemas']['CreateGate'] | null;
       /** @description What the agent is asked to do when the job fires. */
       prompt: string;
+    };
+    /**
+     * @description The body of `POST /v1/profiles`: `[profiles.<name>]` as it will be written. A setting left
+     *     out is left out of the profile, so its documented default applies.
+     */
+    CreateProfileRequest: {
+      /** @description The account the profile bills, which must be configured. */
+      account: string;
+      cache_control?: boolean | null;
+      /** Format: int64 */
+      context_window?: number | null;
+      /** @description Make the profile the one a session gets when it names none. */
+      default?: boolean;
+      deferred_tools?: string | null;
+      effort?: string | null;
+      /** @description The profiles a turn moves to when this one cannot serve it, in order. */
+      fallbacks?: string[];
+      /** Format: int64 */
+      max_output_tokens?: number | null;
+      /** Format: int64 */
+      max_request_bytes?: number | null;
+      model: string;
+      name: string;
+      thinking?: string | null;
+      /** Format: int64 */
+      thinking_budget?: number | null;
+      thinking_display?: string | null;
+      vision?: boolean | null;
     };
     /**
      * @description `deny_unknown_fields` rejects typos like `permision: "read"` with 422 instead of silently
@@ -1164,6 +1573,13 @@ export interface components {
       project?: string | null;
       /** @description Absolute path. Defaults to the server process's `current_dir` if omitted. */
       working_directory?: string | null;
+    };
+    /** @description A credential stored under a server's name for an endpoint other than its `url`. */
+    CredentialElsewhereView: {
+      /** @description The kind, by the label the plain output uses. */
+      kind: string;
+      /** @description The origin it was stored for; absent for one bound to no server. */
+      stored_for?: string | null;
     };
     /**
      * @description Body for `POST /v1/sessions/{id}/fork`. Every field is optional; omitted means "inherit from
@@ -1334,10 +1750,17 @@ export interface components {
       /** @description The resolved instruction text the agent runs under, omitted when there is none. */
       content?: string | null;
       /**
+       * @description The file `PUT /v1/instructions` writes, `instructions.md` in the config directory, when
+       *     that file is what this server reads; absent when another source is in charge.
+       */
+      path?: string | null;
+      /**
        * @description Where the instructions came from, for an operator diagnosing "why is it behaving like
        *     that". Absent when none are configured.
        */
       source?: string | null;
+      /** @description Whether `PUT /v1/instructions` would change what this server's sessions run under. */
+      writable: boolean;
     };
     ListSessionsResponse: {
       next_cursor?: string | null;
@@ -1345,6 +1768,82 @@ export interface components {
     };
     LiveResponse: {
       status: string;
+    };
+    /** @description The body of `POST /v1/accounts/{name}/login`. */
+    LoginRequest: {
+      /**
+       * @description The key an API-key backend presents, replacing the one stored. Absent on a subscription
+       *     backend, whose login runs in the browser.
+       */
+      api_key?: string | null;
+    };
+    /** @description What `POST /v1/accounts/{name}/login` answers when the login runs in the browser. */
+    LoginStarted: {
+      /** @description The URL the person opens. */
+      authorization_url: string;
+      /**
+       * @description What the person brings back and the client posts as `code`: `code`, the one Anthropic's
+       *     page shows after the login, or `callback_url`, the address the browser was sent to.
+       */
+      completes_with: string;
+      /** @description When the login lapses, RFC 3339. */
+      expires_at: string;
+      /**
+       * @description Whether the server holds the loopback listener the browser is sent back to, so a browser
+       *     on the server's own machine completes the login without the client posting anything.
+       */
+      listening: boolean;
+      /** @description Names the login to `GET` and `POST /v1/accounts/{name}/login/{login_id}`. */
+      login_id: string;
+    };
+    /** @description Where a browser login stands, as `GET /v1/accounts/{name}/login/{login_id}` answers. */
+    LoginStatus: {
+      /** @description Why a `failed` login failed. */
+      error?: string | null;
+      /** @description `pending`, `completed` or `failed`. */
+      status: string;
+    };
+    /**
+     * @description How an HTTP MCP server authenticates. The secret itself is never here: it lives in
+     *     `mcp_credentials`, keyed by server name, exactly as an account's key lives in
+     *     `account_credentials`. This block says *which* flow to run and with what public parameters.
+     *
+     *     `deny_unknown_fields` so a key this does not model is refused rather than silently dropped,
+     *     which is the same strictness [`McpServerConfig`] already has. A secret quietly ignored is worse
+     *     than one refused: the connect fails later, somewhere else, for a reason that names nothing.
+     */
+    McpAuthConfig:
+      | {
+          client_id: string;
+          scopes?: string[] | null;
+          /** @enum {string} */
+          type: 'client_credentials';
+        }
+      | {
+          client_id: string;
+          scopes?: string[] | null;
+          signing_algorithm?: string | null;
+          signing_key_path: string;
+          /** @enum {string} */
+          type: 'client_credentials_jwt';
+        }
+      | {
+          client_id?: string | null;
+          /** Format: int32 */
+          redirect_port?: number | null;
+          scopes?: string[] | null;
+          /** @enum {string} */
+          type: 'oauth';
+        };
+    /**
+     * @description The body of `POST /v1/mcp/{name}/login`: a secret to store, or none to begin the OAuth login
+     *     in the browser.
+     */
+    McpLoginRequest: {
+      /** @description A bearer sent verbatim on every request, for a server with no `auth` block. */
+      auth_token?: string | null;
+      /** @description The client secret a confidential OAuth client presents. */
+      client_secret?: string | null;
     };
     McpReconnectResponse: {
       server: string;
@@ -1356,6 +1855,146 @@ export interface components {
        *     `disabled` server is a 422 and never appears here.
        */
       state: string;
+    };
+    McpServerConfig: {
+      /**
+       * @description Optional allow-list of raw tool names (the server-advertised form, not the
+       *     `mcp__<server>__<tool>` namespaced form). When set and non-empty, only these tools from
+       *     this server are registered.
+       */
+      allowed_tools?: string[] | null;
+      args?: string[] | null;
+      auth?: components['schemas']['McpAuthConfig'] | null;
+      command?: string | null;
+      /**
+       * @description What becomes of this server's tools that [`Self::eager_load_tools`] does not name. `None`
+       *     inherits `[mcp].deferral`, settled in [`crate::config::ResolvedConfig::resolve`] the way
+       *     [`Self::required`] is, so every later reader holds a value.
+       */
+      deferral?: string | null;
+      /**
+       * @description When true, this server is skipped at startup: no process is spawned, no HTTP connect
+       *     attempt is made. Lets users mute a flaky or in-development server without removing the
+       *     entry. Unset means false.
+       */
+      disabled?: boolean | null;
+      /**
+       * @description Optional block-list of raw tool names. Applied after [`Self::allowed_tools`]. Tools listed
+       *     here are never registered.
+       */
+      disabled_tools?: string[] | null;
+      /**
+       * @description Raw tool names (server-advertised, not the `mcp__<server>__<tool>` namespaced form) that
+       *     should ship eager-loaded instead of deferred. Saves a `tool_load` round-trip and keeps the
+       *     schema in the cacheable tools-array prefix. Names that don't match an advertised tool
+       *     surface as a `warn!` via [`crate::mcp::warn_on_stale_tool_config`].
+       */
+      eager_load_tools?: string[] | null;
+      env?: {
+        [key: string]: string;
+      } | null;
+      headers?: {
+        [key: string]: string;
+      } | null;
+      /**
+       * @description Optional path to an executable that, when run, prints dynamic HTTP headers to stdout in
+       *     `Name: Value\n` form. Merged over [`Self::headers`] (dynamic wins). Useful for SSO flows
+       *     where bearer tokens rotate. The script is spawned with `MEKA_MCP_SERVER_NAME` and
+       *     `MEKA_MCP_SERVER_URL` in its environment so one helper can drive multiple servers. Non-zero
+       *     exit fails the connect.
+       */
+      headers_helper?: string | null;
+      name: string;
+      /**
+       * @description Server-wide permission override. Typed, like `[permissions]`, so a level meka does not have
+       *     is refused where the file is parsed rather than when the server connects.
+       */
+      permission?: string | null;
+      /**
+       * @description Whether a turn may proceed while this server is unavailable. `None` inherits
+       *     [`McpConfig::default_required`] (false by default), so a server is optional unless it says
+       *     otherwise.
+       *
+       *     The other half of the availability pair with [`Self::disabled`]: `disabled` says "don't
+       *     even try", `required` says "if trying failed, stop the turn". Resolved once in
+       *     [`crate::config::ResolvedConfig::resolve`], so every later consumer reads a plain `bool`.
+       */
+      required?: boolean | null;
+      /**
+       * @description Optional per-tool permission overrides keyed by raw tool name. Beats the server-level
+       *     `permission` and the server's `readOnlyHint` annotation when resolving a tool's required
+       *     permission at registration time. Typed for the same reason [`Self::permission`] is.
+       */
+      tool_permissions?: {
+        [key: string]: string;
+      } | null;
+      /** @description `stdio` or `http`. */
+      transport: string;
+      /**
+       * @description Whether this server's `readOnlyHint` annotation may classify a tool as `read`. Defaults to
+       *     true, so a server that says a tool only reads is believed.
+       *
+       *     The hint is asserted by the server, not verified by meka, and MCP tools execute in the
+       *     server's own process with no sandbox. A server that advertises `readOnlyHint: true` for a
+       *     tool that in fact writes therefore gets to write while meka sits at `read`. That is the
+       *     reason this knob exists: setting it to `false` makes the hint advisory for display only, so
+       *     the tool falls through to the strict `Unrestricted` fallback, and nothing from this server
+       *     is reachable at `read` without an explicit [`Self::tool_permissions`] or
+       *     [`Self::permission`] entry.
+       *
+       *     A refused hint deliberately skips `[mcp].default_permission` on the way. That is a global
+       *     convenience and this is a per-server audit decision, so the per-server one wins, the same
+       *     direction the two overrides above already run. Falling through to it meant that with
+       *     `default_permission = "read"` the knob changed nothing at all: the tool landed back on
+       *     `Read` and dispatched unapproved at `--permission read`, which is precisely the outcome
+       *     setting it to `false` was meant to prevent.
+       *
+       *     Defaulting to true keeps existing configurations working and keeps the `read` level useful
+       *     with well-behaved servers; the trade is that the `read` level's filesystem guarantee covers
+       *     meka's built-in tools plus whichever MCP servers the user has chosen to trust.
+       */
+      trust_read_only_hint?: boolean | null;
+      url?: string | null;
+    };
+    /**
+     * @description One configured MCP server in full, for `meka mcp get` and `GET /v1/mcp/{name}`: the listing's
+     *     fields plus every other key the entry states, as written, so an editor can show and change
+     *     them. Keys only for `env` and `headers`, as in the plain output, because a value there may be
+     *     a secret. `required` and `deferral` are what the server runs under, the `[mcp]` default filled
+     *     in; `inherited` names those the entry leaves unsaid.
+     */
+    McpServerDetail: components['schemas']['McpServerView'] & {
+      allowed_tools?: string[] | null;
+      auth?: components['schemas']['McpAuthConfig'] | null;
+      /**
+       * @description The kinds of credential stored for the server and presented to its `url`, by the labels
+       *     the plain output uses.
+       */
+      credentials?: string[];
+      /**
+       * @description The kinds stored under the server's name for another endpoint, which a connect does not
+       *     present: a `url` moved by hand, or a credential no server claimed.
+       */
+      credentials_for_another_endpoint?: components['schemas']['CredentialElsewhereView'][];
+      /** @description `eager`, `deferred` or `hidden`: what the server's tools run under. */
+      deferral: string;
+      disabled_tools?: string[] | null;
+      eager_load_tools?: string[] | null;
+      env_keys?: string[];
+      header_keys?: string[];
+      headers_helper?: string | null;
+      /** @description Of `required` and `deferral`, those the entry leaves unsaid and takes from `[mcp]`. */
+      inherited?: string[];
+      tool_permissions?: {
+        [key: string]: string;
+      } | null;
+      trust_read_only_hint?: boolean | null;
+    };
+    McpServerRequest: components['schemas']['McpServerConfig'] & {
+      /** @description A bearer sent verbatim on every request, for an http server with no `auth` block */
+      auth_token?: string;
+      /** @description The client secret a confidential OAuth client presents, for an `auth` block of type `oauth` or `client_credentials` */
+      client_secret?: string;
     };
     /**
      * @description One configured MCP server and where its connection stands. Not the server's configuration,
@@ -1370,6 +2009,43 @@ export interface components {
       protocol_version?: string | null;
       /** @description `pending`, `connected`, `failed` or `disabled`. */
       state: string;
+    };
+    /**
+     * @description A configured server's entry and where its connection stands: `GET /v1/mcp/{name}`, and what
+     *     every write answers with.
+     */
+    McpServerStatus: components['schemas']['McpServerDetail'] & {
+      /**
+       * @description Why the last connect failed, on a `failed` server, with URLs redacted as the connector
+       *     records them: a client that manages servers without a shell has no log to read it from.
+       */
+      error?: string | null;
+      /** @description `pending`, `connected`, `failed` or `disabled`. */
+      state: string;
+    };
+    /**
+     * @description A configured MCP server as `meka mcp list` prints it: what `config.toml` says about it, never a
+     *     credential. `GET /v1/mcp` answers a different question, the live connection state, and has its
+     *     own shape in the HTTP layer; the two share `name` alone.
+     */
+    McpServerView: {
+      args?: string[] | null;
+      command?: string | null;
+      disabled: boolean;
+      name: string;
+      permission?: string | null;
+      required: boolean;
+      transport: string;
+      url?: string | null;
+    };
+    /** @description What `GET /v1/mcp` answers. */
+    McpServersResponse: {
+      /**
+       * @description Names a credential is stored under that no entry claims, which `DELETE /v1/mcp/{name}`
+       *     clears. Absent when there are none.
+       */
+      orphaned_credentials?: string[];
+      servers: components['schemas']['McpServerStateView'][];
     };
     /**
      * @description One tool an MCP server advertises, with its permission resolved: what `meka mcp tools` prints
@@ -1525,6 +2201,74 @@ export interface components {
       level: string;
       text: string;
     };
+    /**
+     * @description The body of `PATCH /v1/mcp/{name}`: any of the entry's keys, each left out to keep, `null` to
+     *     remove, or a value to set, `env`, `headers` and `tool_permissions` merging key by key, and the
+     *     two secrets, each `null` to clear the kind. A string key reads `""` as `null`. `name` and
+     *     `transport` are not changed: another transport is another server.
+     */
+    PatchMcpServerRequest: {
+      allowed_tools?: string[] | null;
+      args?: string[] | null;
+      auth?: components['schemas']['McpAuthConfig'] | null;
+      auth_token?: string | null;
+      client_secret?: string | null;
+      command?: string | null;
+      deferral?: string | null;
+      disabled?: boolean | null;
+      disabled_tools?: string[] | null;
+      eager_load_tools?: string[] | null;
+      /** @description Merged into the entry's: a key set to a string is set, one set to `null` removed. */
+      env?: {
+        [key: string]: string | null;
+      } | null;
+      /** @description Merged into the entry's, as `env` is. */
+      headers?: {
+        [key: string]: string | null;
+      } | null;
+      headers_helper?: string | null;
+      permission?: string | null;
+      required?: boolean | null;
+      /** @description Merged into the entry's, as `env` is. */
+      tool_permissions?: {
+        [key: string]: string | null;
+      } | null;
+      trust_read_only_hint?: boolean | null;
+      url?: string | null;
+    };
+    /**
+     * @description The body of `PATCH /v1/profiles/{name}`: a new `name`, sent on its own; `default: true`; and
+     *     any of the settings `meka profile set` writes, each left out to keep, `null` to remove, or a
+     *     value to set.
+     */
+    PatchProfileRequest: {
+      cache_control?: boolean | null;
+      /** Format: int64 */
+      context_window?: number | null;
+      /**
+       * @description `true` makes the profile the one a session gets when it names none. `false` is refused:
+       *     the default is unset by removing the profile or choosing another.
+       */
+      default?: boolean | null;
+      deferred_tools?: string | null;
+      effort?: string | null;
+      fallbacks?: string[] | null;
+      /** Format: int64 */
+      max_output_tokens?: number | null;
+      /** Format: int64 */
+      max_request_bytes?: number | null;
+      model?: string | null;
+      /**
+       * @description The name the profile moves to, taking every session recorded on it along. Sent on its
+       *     own: a rename moves rows in the store, and is not combined with a change to the file.
+       */
+      name?: string | null;
+      thinking?: string | null;
+      /** Format: int64 */
+      thinking_budget?: number | null;
+      thinking_display?: string | null;
+      vision?: boolean | null;
+    };
     PatchSessionRequest: {
       /** @description Whether calls above the level are submitted for approval. Absent → keep current. */
       approvals?: boolean | null;
@@ -1563,8 +2307,6 @@ export interface components {
       /** @description New working directory. Must be absolute. Absent → keep current. */
       working_directory?: string | null;
     };
-    /** @enum {string} */
-    PermissionDecision: 'allow' | 'deny' | 'allow_always' | 'deny_always';
     /**
      * @description The `permission_required` SSE event's payload: what a client needs to show the prompt and
      *     answer it.
@@ -1623,6 +2365,35 @@ export interface components {
       type: string;
     };
     /**
+     * @description A profile with every setting `config.toml` states for it, as `GET /v1/profiles/{name}` answers:
+     *     the listing's facts, and each key the profile sets beside them, absent where the documented
+     *     default applies.
+     */
+    ProfileDetailView: {
+      account: string;
+      /** @description Whether this is the profile a session gets when it names none. */
+      active: boolean;
+      /** @description The account's backend; omitted when the profile names an account that is not configured. */
+      backend?: string | null;
+      cache_control?: boolean | null;
+      /** Format: int64 */
+      context_window?: number | null;
+      deferred_tools?: string | null;
+      effort?: string | null;
+      fallbacks?: string[];
+      /** Format: int64 */
+      max_output_tokens?: number | null;
+      /** Format: int64 */
+      max_request_bytes?: number | null;
+      model?: string | null;
+      name: string;
+      thinking?: string | null;
+      /** Format: int64 */
+      thinking_budget?: number | null;
+      thinking_display?: string | null;
+      vision?: boolean | null;
+    };
+    /**
      * @description A profile as `meka profile list` prints it and `GET /v1/profiles` answers with: its account, the
      *     account's backend and its model, and never a credential.
      */
@@ -1657,6 +2428,7 @@ export interface components {
        */
       vision: boolean;
     };
+    /** @description What `GET /v1/profiles` answers. */
     ProfilesResponse: {
       profiles: components['schemas']['ProfileView'][];
     };
@@ -1707,9 +2479,45 @@ export interface components {
       session_db: boolean;
       status: string;
     };
-    ResponseBody: {
-      outcome: components['schemas']['PermissionDecision'];
+    /** @description What `POST /v1/config/reload` applied. */
+    ReloadResponse: {
+      /**
+       * @description RFC 3339, when this read of `config.toml` was made; `GET /v1/config` reports the same
+       *     instant from now on.
+       */
+      config_loaded_at: string;
+      /**
+       * @description Sections of `config.toml` that state something else than the file this server started
+       *     on and are read at startup alone, so only a restart applies them; as `GET /v1/config`
+       *     reports.
+       */
+      restart_required: string[];
+      /** @description MCP servers the file names that were not running, started. */
+      servers_added: string[];
+      /** @description MCP servers whose tool policy alone changed, given it on the connection they hold. */
+      servers_reconfigured: string[];
+      /** @description MCP servers the file no longer names, taken out of the running manager. */
+      servers_removed: string[];
+      /** @description MCP servers whose connection or credential changed, restarted on the file's entry. */
+      servers_restarted: string[];
     };
+    /** @description The body of `PATCH /v1/accounts/{name}`. */
+    RenameRequest: {
+      /** @description The name the account moves to. */
+      name: string;
+    };
+    ResponseBody: {
+      /** @description What the form was filled with, on an `accept`: an object of the fields the schema named. */
+      content?: unknown;
+      outcome: components['schemas']['ResponseOutcome'];
+    };
+    /**
+     * @description The answers a parked prompt takes: the four an approval takes, and the three an elicitation
+     *     takes.
+     * @enum {string}
+     */
+    ResponseOutcome:
+      'allow' | 'deny' | 'allow_always' | 'deny_always' | 'accept' | 'decline' | 'cancel';
     RewindRequestBody: {
       /**
        * @description How many trailing turns to drop. A turn starts at a user message that is not a tool result,
@@ -1778,6 +2586,14 @@ export interface components {
        */
       answers_prompts_on_return: boolean;
       /**
+       * @description When `true`, an MCP server's elicitation parks as an `elicitation_required` event for an
+       *     attending client to answer, under the attendance rule approvals follow; when `false` it
+       *     is declined with a notice. Defaults to `false`: a bridge that answers approvals has no
+       *     form to render, and a prompt nobody renders holds the call for its lifetime.
+       * @default false
+       */
+      supports_elicitation: boolean;
+      /**
        * @description When `false`, a mid-turn permission request is denied immediately with a notice instead of
        *     parking on the SSE channel for [`APPROVAL_TIMEOUT`].
        *
@@ -1821,10 +2637,11 @@ export interface components {
     SessionResponse: components['schemas']['SessionView'] & {
       /**
        * Format: int64
-       * @description Approval prompts parked on this session, waiting for a person. Reported for a session this
-       *     process holds, on the listing too, since the count is a fact of the resident frontend and
-       *     costs no query; it is what lets a session list say "waiting on a person" without a feed
-       *     per row. The prompts themselves are on the feed, which replays every one still parked.
+       * @description Prompts parked on this session, approvals and elicitations, waiting for a person. Reported
+       *     for a session this process holds, on the listing too, since the count is a fact of the
+       *     resident frontend and costs no query; it is what lets a session list say "waiting on a
+       *     person" without a feed per row. The prompts themselves are on the feed, which replays
+       *     every one still parked.
        */
       approvals_pending?: number | null;
       /**
@@ -2133,6 +2950,11 @@ export interface components {
       /** Format: int64 */
       output_tokens: number;
     };
+    /** @description The body of `PUT /v1/instructions`. */
+    WriteInstructionsRequest: {
+      /** @description The standing instructions, written whole to `instructions.md`; blank removes the file. */
+      content: string;
+    };
     WriteMemoryRequest: {
       /** @description Omit to keep the existing body when updating; send `""` to clear it. */
       body?: string | null;
@@ -2208,6 +3030,710 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+  accounts: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Configured accounts */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AccountsResponse'];
+        };
+      };
+      /** @description Authorization missing or invalid */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Insufficient scope */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+    };
+  };
+  create_account: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateAccountRequest'];
+      };
+    };
+    responses: {
+      /** @description Account added */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AccountView'];
+        };
+      };
+      /** @description Authorization missing or invalid */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Insufficient scope */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Request body exceeds `[serve] max_body_bytes` */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Invalid body: a name in use, an unknown backend, a setting the backend never reads, or a key where none is taken or none where one is; or `config.toml` holds something startup would refuse, which refuses every write until it is repaired */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+    };
+  };
+  get_account: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Account name */
+        name: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The account */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AccountView'];
+        };
+      };
+      /** @description Authorization missing or invalid */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Insufficient scope */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description No such account */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+    };
+  };
+  delete_account: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Account name */
+        name: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Account removed */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Authorization missing or invalid */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Insufficient scope */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description No such account, and no credential under the name */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description A profile names the account; or `config.toml` holds something startup would refuse, which refuses every write until it is repaired */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+    };
+  };
+  rename_account: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Account name */
+        name: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['RenameRequest'];
+      };
+    };
+    responses: {
+      /** @description The account under its new name */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AccountView'];
+        };
+      };
+      /** @description Authorization missing or invalid */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Insufficient scope */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description No such account */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description A session or sub-agent running on this server may run on the account, or another meka is refreshing its credential, which refreshes under its name */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Request body exceeds `[serve] max_body_bytes` */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Invalid new name, or one in use; or `config.toml` holds something startup would refuse, which refuses every write until it is repaired */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+    };
+  };
+  login_account: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Account name */
+        name: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['LoginRequest'];
+      };
+    };
+    responses: {
+      /** @description Logged in with the key; the account, now authenticated */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AccountView'];
+        };
+      };
+      /** @description A browser login begun; open the URL, then complete the login */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['LoginStarted'];
+        };
+      };
+      /** @description Authorization missing or invalid */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Insufficient scope */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description No such account */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Request body exceeds `[serve] max_body_bytes` */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description No key for a backend that takes one, or one for a backend that logs in through the browser; or `config.toml` holds something startup would refuse, which refuses every write until it is repaired */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description The login produced no authorization URL in time; the reason is in the meka log */
+      502: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description The server is shutting down */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+    };
+  };
+  login_status: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Account name */
+        name: string;
+        /** @description The login, as `POST /v1/accounts/{name}/login` named it */
+        login_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Where the login stands */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['LoginStatus'];
+        };
+      };
+      /** @description Authorization missing or invalid */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Insufficient scope */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description No such login pending on the account, or one that lapsed */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+    };
+  };
+  complete_login: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Account name */
+        name: string;
+        /** @description The login, as `POST /v1/accounts/{name}/login` named it */
+        login_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CompleteLoginRequest'];
+      };
+    };
+    responses: {
+      /** @description Logged in; the account, now authenticated */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AccountView'];
+        };
+      };
+      /** @description Authorization missing or invalid */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Insufficient scope */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description No such login pending on the account, or one that lapsed */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Request body exceeds `[serve] max_body_bytes` */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description No code in what was pasted, another login's state, or an exchange the authorization server rejected; or `config.toml` holds something startup would refuse, which refuses every write until it is repaired */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description The token exchange got no answer meka can read, or the login lapsed; the reason is in the meka log */
+      502: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description The server is shutting down */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+    };
+  };
+  config: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Where the installation is and how this server stands against it */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ConfigResponse'];
+        };
+      };
+      /** @description Authorization missing or invalid */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Insufficient scope */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+    };
+  };
+  reload_config: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description What the reload applied, and what waits for a restart */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ReloadResponse'];
+        };
+      };
+      /** @description Authorization missing or invalid */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Insufficient scope */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description `config.toml` fails to parse, or holds anything startup would refuse; nothing was applied */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+    };
+  };
   live: {
     parameters: {
       query?: never;
@@ -2369,6 +3895,84 @@ export interface operations {
       };
     };
   };
+  put_instructions: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['WriteInstructionsRequest'];
+      };
+    };
+    responses: {
+      /** @description Written; the instructions as this server now holds them */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['InstructionsResponse'];
+        };
+      };
+      /** @description Authorization missing or invalid */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Insufficient scope */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Another source is in charge of the instructions, so the file would change nothing; `detail` names it */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Request body exceeds `[serve] max_body_bytes` */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Invalid body */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+    };
+  };
   mcp: {
     parameters: {
       query?: never;
@@ -2384,7 +3988,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['McpServerStateView'][];
+          'application/json': components['schemas']['McpServersResponse'];
         };
       };
       /** @description Authorization missing or invalid */
@@ -2398,6 +4002,617 @@ export interface operations {
       };
       /** @description Insufficient scope */
       403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+    };
+  };
+  create_mcp_server: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['McpServerRequest'];
+      };
+    };
+    responses: {
+      /** @description Server added */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['McpServerStatus'];
+        };
+      };
+      /** @description Authorization missing or invalid */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Insufficient scope */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Request body exceeds `[serve] max_body_bytes` */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Invalid body: a name in use or reserved, keys that do not fit the transport, or a secret the entry cannot present; or `config.toml` holds something startup would refuse, which refuses every write until it is repaired */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+    };
+  };
+  get_mcp_server: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description MCP server name */
+        name: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The server as configured, with the kinds of credential stored for it and its connection state */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['McpServerStatus'];
+        };
+      };
+      /** @description Authorization missing or invalid */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Insufficient scope */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description No such server */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+    };
+  };
+  delete_mcp_server: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description MCP server name */
+        name: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Server removed */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Authorization missing or invalid */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Insufficient scope */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description No such server, and no credentials under the name */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description `config.toml` holds something startup would refuse, which refuses every write until it is repaired */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+    };
+  };
+  patch_mcp_server: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description MCP server name */
+        name: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['PatchMcpServerRequest'];
+      };
+    };
+    responses: {
+      /** @description The server as it now stands */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['McpServerStatus'];
+        };
+      };
+      /** @description Authorization missing or invalid */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Insufficient scope */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description No such server */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Request body exceeds `[serve] max_body_bytes` */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Invalid body: keys that do not fit the transport, an `auth` block beside a stored bearer, or a secret the entry cannot present; or `config.toml` holds something startup would refuse, which refuses every write until it is repaired */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+    };
+  };
+  login_mcp_server: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description MCP server name */
+        name: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['McpLoginRequest'];
+      };
+    };
+    responses: {
+      /** @description The secret stored, or a login that needed no browser completed: a `client_credentials` server's; the server as it stands */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['McpServerStatus'];
+        };
+      };
+      /** @description A browser login begun; open the URL, then complete the login */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['LoginStarted'];
+        };
+      };
+      /** @description Authorization missing or invalid */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Insufficient scope */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description No such server */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Request body exceeds `[serve] max_body_bytes` */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description A secret the entry cannot present, both secrets at once, or a login the entry cannot run: a stdio server, or one holding a bearer; or `config.toml` holds something startup would refuse, which refuses every write until it is repaired */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description The login did not begin: the server or its authorization server did not answer; the reason is in the meka log */
+      502: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description The server is shutting down */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+    };
+  };
+  mcp_login_status: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description MCP server name */
+        name: string;
+        /** @description The login, as `POST /v1/mcp/{name}/login` named it */
+        login_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Where the login stands */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['LoginStatus'];
+        };
+      };
+      /** @description Authorization missing or invalid */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Insufficient scope */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description No such login pending on the server, or one that lapsed */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+    };
+  };
+  complete_mcp_login: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description MCP server name */
+        name: string;
+        /** @description The login, as `POST /v1/mcp/{name}/login` named it */
+        login_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CompleteLoginRequest'];
+      };
+    };
+    responses: {
+      /** @description Logged in; the server as it now stands */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['McpServerStatus'];
+        };
+      };
+      /** @description Authorization missing or invalid */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Insufficient scope */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description No such login pending on the server, or one that lapsed */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Request body exceeds `[serve] max_body_bytes` */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description No code in what was posted, another login's state, or a login that had already ended; or `config.toml` holds something startup would refuse, which refuses every write until it is repaired */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description The exchange at the authorization server failed; the reason is in the meka log */
+      502: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description The server is shutting down */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+    };
+  };
+  logout_mcp_server: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description MCP server name */
+        name: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Credentials cleared */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Authorization missing or invalid */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Insufficient scope */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description No such server, and no credentials under the name */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description `config.toml` holds something startup would refuse, which refuses every write until it is repaired */
+      422: {
         headers: {
           [name: string]: unknown;
         };
@@ -2872,6 +5087,281 @@ export interface operations {
       };
       /** @description Insufficient scope */
       403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+    };
+  };
+  create_profile: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateProfileRequest'];
+      };
+    };
+    responses: {
+      /** @description Profile added */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProfileDetailView'];
+        };
+      };
+      /** @description Authorization missing or invalid */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Insufficient scope */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Request body exceeds `[serve] max_body_bytes` */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Invalid body: a name in use, an account not configured, a setting the backend never sends, a profile that could not run, or `default: true` on a server started with `--profile`; or `config.toml` holds something startup would refuse, which refuses every write until it is repaired */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+    };
+  };
+  get_profile: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Profile name */
+        name: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The profile */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProfileDetailView'];
+        };
+      };
+      /** @description Authorization missing or invalid */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Insufficient scope */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description No such profile */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+    };
+  };
+  delete_profile: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Profile name */
+        name: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Profile removed */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Authorization missing or invalid */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Insufficient scope */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description No such profile */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Another profile names it in `fallbacks`; it is the default while two or more profiles would remain; or the server was started with `--profile` naming it; or `config.toml` holds something startup would refuse, which refuses every write until it is repaired */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Internal server error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+    };
+  };
+  patch_profile: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Profile name */
+        name: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['PatchProfileRequest'];
+      };
+    };
+    responses: {
+      /** @description The profile as it now stands */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProfileDetailView'];
+        };
+      };
+      /** @description Authorization missing or invalid */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Insufficient scope */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description No such profile */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Request body exceeds `[serve] max_body_bytes` */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Invalid body: a value the key refuses, a setting the backend never sends, a profile that could not run on the result, `default: false`, `default: true` on a server started with `--profile`, a `name` sent beside other changes, or a rename of the profile the server was started with `--profile` naming; or `config.toml` holds something startup would refuse, which refuses every write until it is repaired */
+      422: {
         headers: {
           [name: string]: unknown;
         };
@@ -4506,7 +6996,7 @@ export interface operations {
       path: {
         /** @description Session UUID */
         id: string;
-        /** @description Pending request id emitted by the matching permission_required SSE event. */
+        /** @description Pending request id emitted by the matching `permission_required` or `elicitation_required` SSE event. */
         request_id: string;
       };
       cookie?: never;
@@ -4560,7 +7050,7 @@ export interface operations {
           'application/json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description Invalid body, or the id names a sub-agent's conversation (`/errors/session-not-drivable`), which no payload makes acceptable */
+      /** @description Invalid body, an answer of the other prompt's kind, `content` on anything but `accept`, an `accept` without `content` on a form or with it on a URL, or the id names a sub-agent's conversation (`/errors/session-not-drivable`), which no payload makes acceptable */
       422: {
         headers: {
           [name: string]: unknown;

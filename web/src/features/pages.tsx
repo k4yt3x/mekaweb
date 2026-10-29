@@ -12,3 +12,6 @@ export const ProjectsPage = lazy(() =>
   import('./projects').then((module) => ({ default: module.ProjectsPage })),
 );
 export const McpPage = lazy(() => import('./mcp').then((module) => ({ default: module.McpPage })));
+export const ProvidersPage = lazy(() =>
+  import('./providers').then((module) => ({ default: module.ProvidersPage })),
+);

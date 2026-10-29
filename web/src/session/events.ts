@@ -194,6 +194,8 @@ const required: Record<keyof EventPayloads, string[]> = {
   'tool_call.output_delta': ['id', 'chunk'],
   permission_required: ['request_id', 'tool_name'],
   permission_resolved: ['request_id', 'outcome'],
+  elicitation_required: ['request_id', 'server', 'kind', 'message'],
+  elicitation_resolved: ['request_id', 'outcome'],
   notice: ['text'],
   'inbox.delivered': [],
   'inbox.deferred': [],
@@ -208,6 +210,7 @@ const required: Record<keyof EventPayloads, string[]> = {
   'context.compacting': ['compaction_id'],
   'context.compacted': ['source'],
   'context.compaction_failed': ['compaction_id'],
+  'context.measured': [],
   progress: ['server_name', 'tool_name'],
 };
 export function parseEvent(
@@ -226,6 +229,16 @@ export function parseEvent(
   )
     throw new Error('Invalid approval event. Reconnect before submitting work.');
   if (
+    frame.event === 'elicitation_required' &&
+    (typeof value.expires_in_seconds !== 'number' ||
+      (value.kind === 'form'
+        ? !record(value.schema)
+        : value.kind !== 'url' || typeof value.url !== 'string'))
+  )
+    throw new Error('Invalid question event. Reconnect before submitting work.');
+  if (frame.event === 'context.measured' && typeof value.used !== 'number')
+    throw new Error('Invalid context event.');
+  if (
     (frame.event === 'inbox.delivered' || frame.event === 'inbox.deferred') &&
     (!Array.isArray(value.item_ids) || !value.item_ids.every((id) => typeof id === 'string'))
   )
@@ -241,7 +254,15 @@ export function parseEvent(
     (!Array.isArray(value.task_ids) || !value.task_ids.every((id) => typeof id === 'string'))
   )
     throw new Error('Invalid background report event.');
-  for (const key of ['expires_in_seconds', 'progress', 'total', 'replaced_count', 'generation'])
+  for (const key of [
+    'expires_in_seconds',
+    'progress',
+    'total',
+    'replaced_count',
+    'generation',
+    'used',
+    'window',
+  ])
     if (
       key in value &&
       (typeof value[key] !== 'number' || !Number.isFinite(value[key]) || value[key] < 0)

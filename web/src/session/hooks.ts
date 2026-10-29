@@ -53,3 +53,11 @@ export function useSessionStates() {
     controller?.getSnapshot ?? emptySnapshot,
   );
 }
+/** What meka last measured in one session's context, while its feed is open. */
+export function useMeasured(id: string) {
+  const { controller } = useConnection();
+  return useSyncExternalStore(
+    controller?.subscribe ?? noopSubscribe,
+    () => controller?.getSnapshot().find((state) => state.id === id)?.measured,
+  );
+}

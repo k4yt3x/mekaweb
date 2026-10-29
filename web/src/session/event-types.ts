@@ -61,6 +61,19 @@ export interface EventPayloads {
     subagent_id?: string;
   };
   permission_resolved: Correlation & { request_id: string; outcome: string };
+  // 0.85 asks the person an MCP server's question: a form to fill in, or a page to visit.
+  elicitation_required: Correlation & {
+    request_id: string;
+    server: string;
+    kind: 'form' | 'url';
+    message: string;
+    schema?: unknown;
+    url?: string;
+    expires_in_seconds: number;
+    expires_at?: string;
+    subagent_id?: string;
+  };
+  elicitation_resolved: Correlation & { request_id: string; outcome: string };
   notice: Correlation & { text: string; level?: string };
   'inbox.delivered': Correlation & { item_ids: string[] };
   'inbox.deferred': Correlation & {
@@ -89,6 +102,8 @@ export interface EventPayloads {
     error: string;
     interrupted: boolean;
   };
+  // 0.85 says what is in context after every provider round, a compaction, or a rewind.
+  'context.measured': Correlation & { used: number; window?: number };
   progress: Correlation & {
     server_name: string;
     tool_name: string;

@@ -1,7 +1,9 @@
 import { useAction } from '../components/actions';
-import { RefreshCw, RotateCcw } from 'lucide-react';
+import { useState, type FormEvent } from 'react';
+import { FileCog, Pencil, RefreshCw, RotateCcw } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import {
+  useCan,
   useConnection,
   useGateway,
   useResource,
@@ -34,12 +36,11 @@ export function SettingsPage() {
   const meka = status.data?.meka;
   const live = useResource<Schema['LiveResponse']>('/v1/health/live');
   const ready = useResource<Schema['ReadyResponse']>('/v1/health/ready');
-  const profiles = useResource<Schema['ProfilesResponse']>('/v1/profiles');
-  const instructions = useResource<Schema['InstructionsResponse']>(
-    '/v1/instructions',
-    undefined,
-    state.info?.scopes.includes('sessions:r'),
-  );
+  const config = useResource<Schema['ConfigResponse']>('/v1/config', undefined, useCan('config:r'));
+  const canConfigure = useCan('config:w');
+  const edited = config.data?.config_changed;
+  const reload = useAction();
+  const [reloaded, setReloaded] = useState<string>();
   return (
     <div className="page settings-page">
       <header className="page-heading">
@@ -192,7 +193,15 @@ export function SettingsPage() {
           <dt>Liveness</dt>
           <dd>{live.isPending ? 'Checking…' : (live.data?.status ?? 'Unavailable')}</dd>
           <dt>Readiness</dt>
-          <dd>{ready.isPending ? 'Checking…' : (ready.data?.status ?? 'Unavailable')}</dd>
+          <dd>
+            {ready.isPending ? 'Checking…' : (ready.data?.status ?? 'Unavailable')}
+            {ready.data?.profile_configured === false && (
+              <span className="muted">
+                {' '}
+                · No profile yet. <a href="#/providers">Add one</a>
+              </span>
+            )}
+          </dd>
           {meka && (
             <>
               <dt>Last checked</dt>
@@ -201,6 +210,33 @@ export function SettingsPage() {
               </dd>
             </>
           )}
+          {config.data?.config_path && (
+            <>
+              <dt>Config file</dt>
+              <dd>{config.data.config_path}</dd>
+            </>
+          )}
+          {config.data?.data_dir && (
+            <>
+              <dt>Data folder</dt>
+              <dd>{config.data.data_dir}</dd>
+            </>
+          )}
+          {config.data && (
+            <>
+              <dt>Config loaded</dt>
+              <dd>
+                <Timestamp value={config.data.config_loaded_at} />
+                {edited && <span className="muted"> · Edited since; reload to apply</span>}
+              </dd>
+            </>
+          )}
+          {config.data?.restart_required.length ? (
+            <>
+              <dt>Awaiting restart</dt>
+              <dd>{config.data.restart_required.join(', ')}</dd>
+            </>
+          ) : null}
           <dt>Default permission</dt>
           <dd>{state.info?.default_permission}</dd>
           <dt>Token scopes</dt>
@@ -212,7 +248,21 @@ export function SettingsPage() {
             ))}
           </dd>
         </dl>
-        <ErrorNotice error={status.error ?? live.error ?? ready.error ?? action.error} />
+        <ErrorNotice
+          error={
+            status.error ??
+            live.error ??
+            ready.error ??
+            config.error ??
+            action.error ??
+            reload.error
+          }
+        />
+        {reloaded && (
+          <p className="notice" role="status">
+            {reloaded}
+          </p>
+        )}
         {ready.data && (
           <details>
             <summary>Readiness details</summary>
@@ -239,6 +289,28 @@ export function SettingsPage() {
             <RefreshCw size={16} className={action.busy ? 'spin' : undefined} />
             Check now
           </Button>
+          {canConfigure && (
+            <Button
+              variant={edited ? 'default' : 'secondary'}
+              disabled={reload.busy}
+              title="Read config.toml and instructions.md again"
+              onClick={() =>
+                void reload.run(async () => {
+                  if (!state.api) return;
+                  setReloaded(undefined);
+                  const result = await state.api.mutate<Schema['ReloadResponse']>(
+                    'POST',
+                    '/v1/config/reload',
+                  );
+                  setReloaded(reloadOutcome(result));
+                  await queries.invalidateQueries();
+                })
+              }
+            >
+              <FileCog size={16} />
+              Reload config
+            </Button>
+          )}
           {/* meka 0.82.0 serves no API browser; its book documents the API instead. */}
           <a
             className="button button-secondary"
@@ -257,37 +329,76 @@ export function SettingsPage() {
           />
         </div>
       </section>
-      <section className="panel">
-        <h2>Profiles</h2>
-        <ErrorNotice error={profiles.error} />
-        <div className="bounded">
-          {profiles.data?.profiles.map((p) => (
-            <div className="setting-row" key={p.name}>
-              <strong>
-                {p.name}
-                {p.active && <span className="badge">Default</span>}
-              </strong>
-              <span className="muted">
-                {p.model ?? 'No model'} · {p.backend ?? 'Backend unavailable'} · Account:{' '}
-                {p.account} · {p.vision ? 'Images' : 'No images'}
-              </span>
-            </div>
-          ))}
-        </div>
-      </section>
-      {state.info?.scopes.includes('sessions:r') && (
-        <section className="panel">
-          <h2>Standing instructions</h2>
-          <ErrorNotice error={instructions.error} />
-          {instructions.isPending ? (
-            <Loading />
-          ) : instructions.data?.content ? (
+      {state.info?.scopes.includes('sessions:r') && <InstructionsPanel />}
+    </div>
+  );
+}
+
+/** What a reload changed: the MCP servers it started, restarted, updated, and took out, and the
+ * sections only a restart applies. */
+function reloadOutcome(result: Schema['ReloadResponse']) {
+  const changes = [
+    ['Started', result.servers_added],
+    ['Restarted', result.servers_restarted],
+    ['Updated', result.servers_reconfigured],
+    ['Removed', result.servers_removed],
+    ['Restart meka to apply', result.restart_required],
+  ] as const;
+  const parts = changes
+    .filter(([, names]) => names.length)
+    .map(([verb, names]) => `${verb} ${names.join(', ')}.`);
+  return ['Config reloaded.', ...parts].join(' ');
+}
+
+function InstructionsPanel() {
+  const { api } = useConnection();
+  const canWrite = useCan('config:w');
+  const instructions = useResource<Schema['InstructionsResponse']>('/v1/instructions');
+  const action = useAction();
+  const [draft, setDraft] = useState<string>();
+  async function save(event: FormEvent) {
+    event.preventDefault();
+    await action.run(async () => {
+      if (!api || draft === undefined) return;
+      await api.mutate('PUT', '/v1/instructions', {
+        content: draft,
+      } satisfies Schema['WriteInstructionsRequest']);
+      await instructions.refetch();
+      setDraft(undefined);
+    });
+  }
+  const data = instructions.data;
+  return (
+    <section className="panel">
+      <h2>Standing instructions</h2>
+      <ErrorNotice error={instructions.error ?? action.error} />
+      {draft !== undefined ? (
+        <form className="form-stack" onSubmit={(event) => void save(event)}>
+          <Field label="Instructions" hint="New sessions run under them. Empty removes them.">
+            <textarea
+              className="body-editor"
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+            />
+          </Field>
+          <div className="actions">
+            <Button type="submit" disabled={action.busy}>
+              {action.busy ? 'Saving…' : 'Save'}
+            </Button>
+            <Button variant="ghost" disabled={action.busy} onClick={() => setDraft(undefined)}>
+              Cancel
+            </Button>
+          </div>
+        </form>
+      ) : instructions.isPending ? (
+        <Loading />
+      ) : (
+        <>
+          {data?.content ? (
             <>
-              {instructions.data.source && (
-                <p className="muted small">{instructions.data.source}</p>
-              )}
+              {data.source && <p className="muted small">{data.source}</p>}
               <pre className="plain-text bounded" tabIndex={0} aria-label="Standing instructions">
-                {instructions.data.content}
+                {data.content}
               </pre>
             </>
           ) : (
@@ -295,8 +406,19 @@ export function SettingsPage() {
               <p className="muted small">No standing instructions configured.</p>
             )
           )}
-        </section>
+          {canWrite && data && !data.writable && data.source && (
+            <p className="muted small">Read only while meka takes them from {data.source}.</p>
+          )}
+          {canWrite && data?.writable && (
+            <div className="actions">
+              <Button variant="secondary" onClick={() => setDraft(data.content ?? '')}>
+                <Pencil size={15} />
+                Edit
+              </Button>
+            </div>
+          )}
+        </>
       )}
-    </div>
+    </section>
   );
 }

@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.29.0] - 2026-10-29
+
+### Added
+
+- Providers: add accounts, sign in to them, and add, edit and choose the default profile.
+- MCP: add, edit, enable, remove, sign in to and sign out of servers, and see why one failed.
+- An MCP server's question waits beside approvals, as a form to fill in or a page to open.
+- Settings: edit standing instructions, and reload meka's config without restarting it.
+
+### Changed
+
+- **Breaking:** mekaweb requires meka 0.85.0 or newer; give its token `config:r` and `config:w`.
+- Recognize meka 0.86.0 as a verified server version; meka 0.85.0 and newer still connect.
+
+### Security
+
+- seroval, under the router, moves to 1.7.3 for five advisories, GHSA-f86p-h4j2-7qgj among them.
+- crypto-bigint and ctutils, under push's signing and encryption, move for RUSTSEC-2026-0387, -0385.
+
 ## [0.28.0] - 2026-10-26
 
 ### Added
@@ -543,7 +562,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Light and dark themes, narrow layouts, and collapsible, resizable session panels.
 - Hosting at the root or a subpath, with GitHub Pages deployment on version tags.
 
-[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.28.0...HEAD
+[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.29.0...HEAD
+[0.29.0]: https://github.com/k4yt3x/mekaweb/compare/0.28.0...0.29.0
 [0.28.0]: https://github.com/k4yt3x/mekaweb/compare/0.27.0...0.28.0
 [0.27.0]: https://github.com/k4yt3x/mekaweb/compare/0.26.0...0.27.0
 [0.26.0]: https://github.com/k4yt3x/mekaweb/compare/0.25.0...0.26.0

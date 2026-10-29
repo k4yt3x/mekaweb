@@ -752,6 +752,24 @@ pre.bounded {
   grid-template-columns: 1fr 1fr;
   gap: 16px;
 }
+/* A profile's fallbacks, in the order they are tried. */
+.fallback-list {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.fallback-list select {
+  width: auto;
+}
+.tag-remove {
+  display: inline-flex;
+  border: 0;
+  padding: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
 .appearance-panel {
   container-type: inline-size;
 }
@@ -3279,6 +3297,28 @@ select option {
   gap: 8px;
   margin-top: 14px;
 }
+.approval-actions.question-actions {
+  grid-template-columns: repeat(3, 1fr);
+}
+/* What the browser is about to open is shown whole. */
+.question-url {
+  display: block;
+  overflow-wrap: anywhere;
+  margin: 10px 0;
+}
+.question-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin: 12px 0;
+}
+.question-choices label {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-weight: 400;
+  cursor: pointer;
+}
 @media (min-width: 1550px) {
   .app-shell {
     --navigation-width: 214px;
@@ -3544,6 +3584,21 @@ select option {
 }
 .mcp-card .actions {
   margin-top: auto;
+}
+.mcp-card .actions + .actions {
+  margin-top: 0;
+}
+.mcp-summary {
+  overflow-wrap: anywhere;
+  margin: 0;
+}
+.mcp-leftovers {
+  margin-top: 24px;
+}
+.mcp-error {
+  color: var(--danger);
+  overflow-wrap: anywhere;
+  margin: 0;
 }
 .card-heading {
   min-width: 0;

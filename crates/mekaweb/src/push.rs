@@ -44,7 +44,7 @@ const SEND_TIMEOUT: Duration = Duration::from_secs(15);
 /// offline.
 const OUTCOME_TTL: u32 = 4 * 60 * 60;
 
-/// How long it keeps an approval's: as long as meka waits for an answer.
+/// How long it keeps an approval's or a question's: as long as meka waits for an answer.
 const APPROVAL_TTL: u32 = 30 * 60;
 
 /// The longest wait between attempts to follow meka's feed.
@@ -95,6 +95,8 @@ pub(crate) enum PushKind {
     Finished,
     Failed,
     Approval,
+    /// An MCP server's question, which waits as an approval does.
+    Question,
     Test,
 }
 
@@ -220,7 +222,7 @@ impl Push {
             chrono::Utc::now().timestamp(),
         )?;
         let (urgency, ttl) = match message.kind {
-            PushKind::Approval => ("high", APPROVAL_TTL),
+            PushKind::Approval | PushKind::Question => ("high", APPROVAL_TTL),
             _ => ("normal", OUTCOME_TTL),
         };
         let mut request = self
@@ -391,7 +393,7 @@ impl Push {
                 };
                 self.notify(&session, message).await;
             }
-            "permission_required" => {
+            "permission_required" | "elicitation_required" => {
                 let Some(session) = text("session_id").filter(|_| news) else {
                     return;
                 };
@@ -401,7 +403,11 @@ impl Push {
                     .map(|info| info.title)
                     .unwrap_or_default();
                 let message = Message {
-                    kind: PushKind::Approval,
+                    kind: if frame.event == "permission_required" {
+                        PushKind::Approval
+                    } else {
+                        PushKind::Question
+                    },
                     session: Some(session.clone()),
                     title,
                     badge: self.waiting_approvals().await,

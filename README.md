@@ -4,15 +4,15 @@ A web interface for [meka](https://github.com/k4yt3x/meka), served from the meka
 
 mekaweb is a server you install beside meka, on Linux, macOS or Windows. It signs you in, serves the interface, and passes your requests to meka on loopback, so meka itself is never exposed to your network or the internet. Put mekaweb behind a Cloudflare Tunnel or an HTTPS proxy, and reach your meka from any browser, or install it on your phone's Home Screen.
 
-Besides meka's sessions, memory, skills, schedules and MCP servers, mekaweb adds what meka leaves to the host:
+Besides meka's sessions, memory, skills, schedules, MCP servers, accounts and profiles, mekaweb adds what meka leaves to the host:
 
 - **Sign-in** with a password or a passkey, a list of the devices signed in, and a sign-in log.
 - **Files** beside each session, at its working directory: preview, upload, download, mention a file in a message.
 - **A terminal** docked under each session that keeps running when you leave, to come back to from any device.
-- **Push notifications** when a turn finishes, fails, or waits for your approval, even with the app closed.
+- **Push notifications** when a turn finishes, fails, or waits for your approval or answer, even with the app closed.
 - **Data saver** for mobile data, and preferences shared by every device.
 
-This release supports **meka 0.84.0** and newer.
+This release supports **meka 0.85.0** and newer.
 
 web.meka.run, the static site that reached meka straight from the browser, is retired; its last release was mekaweb 0.23.1.
 

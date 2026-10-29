@@ -14,6 +14,7 @@ import {
   ResourcesPage,
   SchedulesPage,
   McpPage,
+  ProvidersPage,
   ProjectsPage,
 } from './features/pages';
 import { ConnectionRuntime } from './connections/runtime';
@@ -72,6 +73,7 @@ const routes = [
     component: () => <SchedulesPage />,
   }),
   createRoute({ getParentRoute: () => rootRoute, path: '/mcp', component: McpPage }),
+  createRoute({ getParentRoute: () => rootRoute, path: '/providers', component: ProvidersPage }),
   createRoute({ getParentRoute: () => rootRoute, path: '/settings', component: SettingsPage }),
 ];
 const router = createRouter({

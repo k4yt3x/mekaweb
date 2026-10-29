@@ -1,15 +1,14 @@
-import { useAction } from './components/actions';
 import { useEffect, useRef, useState, Suspense } from 'react';
 import { Outlet, useLocation } from '@tanstack/react-router';
 import {
   BookOpen,
+  BrainCircuit,
   CalendarClock,
   FolderKanban,
   Menu,
   MessageSquare,
   Plug,
   Settings,
-  ShieldCheck,
   Sparkles,
 } from 'lucide-react';
 import type { ConnectionRuntime } from './connections/runtime';
@@ -17,11 +16,9 @@ import { RuntimeContext, useConnection, useRuntime, useSettings } from './connec
 import { SignIn } from './features/sign-in';
 import { Unavailable } from './features/unavailable';
 import { useSessionStates } from './session/hooks';
-import type { Approval } from './session/controller';
-import type { Schema } from './api/client';
 import { Button } from './components/ui/button';
 import { Dialog } from './components/ui/dialog';
-import { ErrorNotice, Json, Loading } from './components/common';
+import { ErrorNotice, Loading } from './components/common';
 import { NavigationToggle } from './components/layout';
 import { ConnectionBanner } from './components/connection-banner';
 import { AccountMenu } from './components/account-menu';
@@ -32,6 +29,7 @@ import { KeyboardShortcutsButton, KeyboardShortcutsDialog } from './components/s
 import { useShortcut } from './components/use-shortcut';
 import { SessionNavigationContext } from './features/session-navigation';
 import { useNewConversation } from './features/use-new-conversation';
+import { PromptCard } from './features/approval-cards';
 
 export function App({ runtime }: { runtime: ConnectionRuntime }) {
   useEffect(trackFocusInput, []);
@@ -293,7 +291,7 @@ function Workspace() {
             {sessions
               .flatMap((s) => s.approvals)
               .map((approval) => (
-                <ApprovalCard key={approval.id} approval={approval} />
+                <PromptCard key={approval.id} approval={approval} />
               ))}
           </div>
           <span className="sr-only" aria-live="polite">
@@ -315,12 +313,14 @@ function Navigation({
   const state = useConnection();
   const location = useLocation();
   const entries = [
+    // By how often each is used, related pages together; the setup pages last.
     { name: 'Sessions', path: '/sessions', icon: MessageSquare, scope: 'sessions:r' },
     { name: 'Projects', path: '/projects', icon: FolderKanban },
-    { name: 'Memory', path: '/memory', icon: BookOpen, scope: 'memory:r' },
+    { name: 'Memories', path: '/memory', icon: BookOpen, scope: 'memory:r' },
     { name: 'Skills', path: '/skills', icon: Sparkles },
     { name: 'Schedules', path: '/schedules', icon: CalendarClock, scope: 'schedule:r' },
     { name: 'MCP', path: '/mcp', icon: Plug },
+    { name: 'Providers', path: '/providers', icon: BrainCircuit },
     { name: 'Settings', path: '/settings', icon: Settings },
   ];
   const pages = entries.filter((entry) => !entry.scope || state.info?.scopes.includes(entry.scope));
@@ -356,68 +356,5 @@ function Navigation({
       </nav>
       <AccountMenu onNavigate={onNavigate} />
     </>
-  );
-}
-/** How long an approval's buttons wait before they take a tap: one meant for what was under the
- * card as it appeared is not taken for an answer. */
-const APPROVAL_ARMING_DELAY = 700;
-
-function ApprovalCard({ approval }: { approval: Approval }) {
-  const { controller } = useConnection();
-  const action = useAction();
-  // Each approval has a card of its own, so it arms once, as it appears.
-  const [armed, setArmed] = useState(false);
-  useEffect(() => {
-    const timer = setTimeout(() => setArmed(true), APPROVAL_ARMING_DELAY);
-    return () => clearTimeout(timer);
-  }, []);
-  return (
-    <section className="approval-card">
-      <header>
-        <ShieldCheck size={20} />
-        <h2>Approval needed</h2>
-      </header>
-      <p className="muted small">
-        <a href={`#/sessions/${encodeURIComponent(approval.sessionId)}`}>
-          Session {approval.sessionId.slice(0, 8)}
-        </a>
-        {approval.subagentId && (
-          <>
-            {' · '}
-            <a href={`#/sessions/${encodeURIComponent(approval.subagentId)}`}>
-              Sub-agent {approval.subagentId.slice(0, 8)}
-            </a>
-          </>
-        )}
-      </p>
-      <h3>{approval.tool}</h3>
-      <details open>
-        <summary>Full arguments</summary>
-        <Json value={approval.input} />
-      </details>
-      <p className="muted small">Expires at {new Date(approval.expires).toLocaleTimeString()}.</p>
-      <ErrorNotice error={action.error} />
-      <div className="approval-actions">
-        {(
-          [
-            ['allow', 'Allow once'],
-            ['deny', 'Deny once'],
-            ['allow_always', 'Always allow'],
-            ['deny_always', 'Always deny'],
-          ] satisfies [Schema['PermissionDecision'], string][]
-        ).map(([outcome, label]) => (
-          <Button
-            key={outcome}
-            variant={outcome === 'allow' ? 'default' : 'secondary'}
-            size="sm"
-            disabled={!armed || action.busy || !controller?.canWrite}
-            title={!controller?.canWrite ? 'Requires sessions:w' : undefined}
-            onClick={() => void action.run(async () => controller?.respond(approval, outcome))}
-          >
-            {label}
-          </Button>
-        ))}
-      </div>
-    </section>
   );
 }

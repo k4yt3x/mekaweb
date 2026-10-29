@@ -29,6 +29,30 @@ it('rejects malformed approval payloads and ignores unknown events', () => {
   expect(parseEvent({ event: 'future.event', data: '{}' })).toBeUndefined();
 });
 
+it('takes a question only with the form or the address it asks about', () => {
+  const question = {
+    request_id: 'q',
+    server: 'github',
+    message: 'Which repository?',
+    expires_in_seconds: 60,
+  };
+  const form = { ...question, kind: 'form', schema: { type: 'object', properties: {} } };
+  const url = { ...question, kind: 'url', url: 'https://example.com/authorize' };
+  expect(parseEvent({ event: 'elicitation_required', data: JSON.stringify(form) })).toEqual(form);
+  expect(parseEvent({ event: 'elicitation_required', data: JSON.stringify(url) })).toEqual(url);
+  for (const broken of [
+    { ...question, kind: 'form' },
+    { ...question, kind: 'url' },
+    { ...question, kind: 'other', url: 'https://example.com' },
+    { ...form, expires_in_seconds: undefined },
+  ])
+    expect(() =>
+      parseEvent({ event: 'elicitation_required', data: JSON.stringify(broken) }),
+    ).toThrow();
+  expect(() => parseEvent({ event: 'context.measured', data: '{"window":1000}' })).toThrow();
+  expect(parseEvent({ event: 'context.measured', data: '{"used":10}' })).toEqual({ used: 10 });
+});
+
 it('takes a background report only with the tasks it names', () => {
   const report = { task_ids: ['7f3a1c22-0000-4000-8000-000000000000'], text: 'ok' };
   expect(parseEvent({ event: 'task.reported', data: JSON.stringify(report) })).toEqual(report);

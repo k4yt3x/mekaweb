@@ -4,7 +4,7 @@
   "type": "module",
   "license": "AGPL-3.0-or-later",
   "scripts": {
-    "generate": "openapi-typescript ../../../docs/api/meka-0.84.0.json --empty-objects-unknown -o ../../src/api/schema.d.ts && openapi-typescript ../../src/api/mekaweb-openapi.json --empty-objects-unknown -o ../../src/api/mekaweb-schema.d.ts && prettier --write ../../src/api/schema.d.ts ../../src/api/mekaweb-openapi.json ../../src/api/mekaweb-schema.d.ts"
+    "generate": "openapi-typescript ../../../docs/api/meka-0.86.0.json --empty-objects-unknown -o ../../src/api/schema.d.ts && openapi-typescript ../../src/api/mekaweb-openapi.json --empty-objects-unknown -o ../../src/api/mekaweb-schema.d.ts && prettier --write ../../src/api/schema.d.ts ../../src/api/mekaweb-openapi.json ../../src/api/mekaweb-schema.d.ts"
   },
   "devDependencies": {
     "openapi-typescript": "7.13.0",

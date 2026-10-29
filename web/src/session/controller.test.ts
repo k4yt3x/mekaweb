@@ -32,6 +32,7 @@ async function fixture(
       supports_permission_prompts: true,
       supports_reasoning_stream: false,
       answers_prompts_on_return: false,
+      supports_elicitation: false,
     },
     turn_in_flight: false,
     ...record,
@@ -1579,6 +1580,46 @@ it('takes down a prompt resolved elsewhere, and keeps its deadline and sub-agent
   });
   await f.event('permission_resolved', { request_id: 'a', outcome: 'allow' });
   expect(f.state().approvals).toEqual([]);
+});
+it('holds an MCP server’s question beside approvals and sends the answer’s content', async () => {
+  const f = await fixture();
+  await f.event('turn.started', { turn_id: 'turn-1' });
+  const schema = { type: 'object', properties: { name: { type: 'string' } } };
+  await f.event('elicitation_required', {
+    request_id: 'q',
+    server: 'github',
+    kind: 'form',
+    message: 'Who?',
+    schema,
+    expires_in_seconds: 60,
+  });
+  await f.event('elicitation_required', {
+    request_id: 'u',
+    server: 'github',
+    kind: 'url',
+    message: 'Sign in',
+    url: 'https://example.com/',
+    expires_in_seconds: 60,
+  });
+  expect(f.state().approvals).toMatchObject([
+    { kind: 'form', id: 'q', server: 'github', message: 'Who?', schema, turnId: 'turn-1' },
+    { kind: 'url', id: 'u', url: 'https://example.com/' },
+  ]);
+  const mutate = vi.spyOn(f.api, 'mutate').mockResolvedValue(undefined);
+  await f.controller.respond(f.state().approvals[0]!, 'accept', { name: 'Ada' });
+  expect(mutate).toHaveBeenCalledWith('POST', '/v1/sessions/s/responses/q', {
+    outcome: 'accept',
+    content: { name: 'Ada' },
+  });
+  await f.event('elicitation_resolved', { request_id: 'u', outcome: 'expired' });
+  expect(f.state().approvals).toEqual([]);
+});
+it('keeps what meka last measured in context, inside a turn or not', async () => {
+  const f = await fixture();
+  await f.event('context.measured', { used: 1200, window: 200000 });
+  expect(f.state().measured).toEqual({ used: 1200, window: 200000 });
+  await f.event('context.measured', { used: 900 });
+  expect(f.state().measured).toEqual({ used: 900 });
 });
 it('does not send approval responses through a read-only controller', async () => {
   const f = await fixture(false);

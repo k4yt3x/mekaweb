@@ -71,6 +71,7 @@ async function fixture(open = true) {
       supports_permission_prompts: true,
       supports_reasoning_stream: true,
       answers_prompts_on_return: true,
+      supports_elicitation: true,
     },
   };
   const saved: Schema['MessagesResponse'] = {

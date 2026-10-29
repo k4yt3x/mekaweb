@@ -5,6 +5,7 @@ const words = {
   finished: 'Finished.',
   failed: 'Failed.',
   approval: 'Waiting for your approval.',
+  question: 'Waiting for your answer.',
   test: 'Push notifications work on this device.',
 };
 

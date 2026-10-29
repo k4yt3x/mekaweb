@@ -37,7 +37,7 @@ import type { Gateway } from '../api/gateway';
 import { FileBrowser, type FilesTarget } from './file-browser';
 import { TerminalDock } from './terminal-dock';
 import { WorkspaceProvider, type Workspace } from '../components/workspace';
-import { useSessionMetadata, useSessionStates } from '../session/hooks';
+import { useMeasured, useSessionMetadata, useSessionStates } from '../session/hooks';
 import { isSessionRunning } from '../session/controller';
 import { useParams } from '@tanstack/react-router';
 import { Button } from '../components/ui/button';
@@ -1025,8 +1025,16 @@ function SessionDetails({ session, tab }: { session: Schema['SessionResponse']; 
     sessionPath(session.id) + '/context',
     undefined,
     tab === 'context',
-    5000,
   );
+  // meka measures after every provider round; read the breakdown again when it does.
+  const measured = useMeasured(session.id);
+  const seen = useRef(measured);
+  const refetchContext = context.refetch;
+  useEffect(() => {
+    if (measured === seen.current) return;
+    seen.current = measured;
+    if (tab === 'context') void refetchContext();
+  }, [measured, tab, refetchContext]);
   const tasks = useResource<Schema['BackgroundTasksResponse']>(
     sessionPath(session.id) + '/tasks',
     undefined,

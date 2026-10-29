@@ -44,6 +44,7 @@ const status = (
     },
   });
 const approval = {
+  kind: 'permission' as const,
   id: 'r',
   sessionId: 'other',
   turnId: 't',

@@ -1,8 +1,8 @@
 # API schema maintenance
 
-`meka-0.84.0.json` was captured from meka `0.84.0`, commit `b14735f9f2892578b5c54d762a0305eb14e2109e`, through `/v1/openapi.json` with `[serve].docs = true`. The generated REST types are committed in `web/src/api/schema.d.ts`; runtime connections do not require schema access.
+`meka-0.86.0.json` was captured from meka `0.86.0`, commit `13e1e2493ca3185a086c3758656bb9ed1259d158`, through `/v1/openapi.json` with `[serve].docs = true`. The generated REST types are committed in `web/src/api/schema.d.ts`; runtime connections do not require schema access.
 
-mekaweb requires meka 0.84.0 or newer and refuses older servers when it connects. Compared with 0.68.0, the 0.70.0 and 0.71.0 APIs change these shapes the client used:
+mekaweb requires meka 0.85.0 or newer and refuses older servers when it connects. Compared with 0.68.0, the 0.70.0 and 0.71.0 APIs change these shapes the client used:
 
 - `/v1/info` no longer reports `vision`; each `/v1/profiles` entry does.
 - `/v1/sessions/{id}/context` no longer reports `used_percent`. The client divides `used` by `window`, rounding down as meka did.
@@ -56,7 +56,19 @@ mekaweb requires meka 0.84.0 or newer and refuses older servers when it connects
 - `/v1/projects` lists, adds, renames, and removes projects, its writes under `memory:w`; meka removes only a project nothing is on. A session carries `project`, which create and `PATCH` take. The client picks one for a new session, changes it in settings, and names it in the session list.
 - `context.compacting` opens a compaction and `context.compaction_failed` ends one that did not land; the client shows the session compacting between them, as meka's screen does. `context.compacted` and a summary's `compaction` add `trigger`, `memories_written`, and `kept_recent`, from which the summary's row says what the compaction was, in the words of meka's `CompactionRecord::note`.
 - `context_replace`, the tool a compaction's checkpoint writes its summary with, is labeled by `summary`.
+
+0.85.0 changes these, and the client therefore requires it:
+
+- `/v1/accounts` and `/v1/profiles` add, rename, and remove accounts and profiles under `config:w`, which `config:r` reads. An account takes only the settings its backend reads, and a profile only the ones its account's backend sends; meka refuses any other with a `422`, so the forms offer only those, by meka's `Backend::reads_account_key` and `reads_profile_key`. A profile's `PATCH` keeps an omitted key, removes one sent as `null`, and takes a rename alone, so the client sends what changed, then the rename. A profile's account cannot change. Removing the default while two or more profiles would remain is a `422`; another is made the default first.
+- A subscription account signs in through the browser: `POST …/login` answers `202` with the page to open and a `login_id`, and the code, or for ChatGPT the address the browser landed on, is posted to `…/login/{login_id}`. A wrong paste is a `422` that leaves the login pending. When meka holds the redirect's port, `listening`, a browser on its machine completes it with nothing posted, so the client reads the login's state while it waits. An OAuth MCP server's login works the same way.
+- `POST`, `PATCH` and `DELETE /v1/mcp` change MCP servers, and `…/login` and `…/logout` their credentials, under `config:w`. `GET /v1/mcp` answers `servers` and `orphaned_credentials`, names a credential is stored under with no entry, which `DELETE /v1/mcp/{name}` clears. `GET /v1/mcp/{name}` answers every key as written, the `auth` block whole, and `required` and `deferral` as in force, with `inherited` naming those left to `[mcp]`, which the form shows as Default. It names `env` and `headers` by their keys alone, and a `PATCH` merges those and `tool_permissions` key by key, `null` removing one, so the client sends the keys entered and `null` for each taken out. A stored secret is kept unless a new one is sent. A credential stored for another endpoint is listed apart and not sent. A `client_credentials` entry is added with its secret, and a login without a body connects it at once, answering the server rather than a browser login. `resource` is no longer an `auth` key.
+- `PUT /v1/instructions` writes `instructions.md`, blank to remove it, and `GET` says whether a write would take effect, `writable`. `GET /v1/config` names `config_path` and `data_dir`, when the file was last read, whether a shell has changed it since, `config_changed`, and the sections only a restart applies, `restart_required`. `POST /v1/config/reload` applies a shell's edit and names the MCP servers it started, restarted, reconfigured, and removed, and what still needs a restart. A write of meka's own reads the whole file again, so it applies an earlier shell edit too.
+- `meka serve` starts with no profile, and refuses a session until one is added; readiness reports `profile_configured`.
+- A session with `supports_elicitation` gets an MCP server's question as `elicitation_required`, a form with a `schema` or a `url`, answered at the responses route with `accept` and `content`, `decline`, or `cancel`, and closed by `elicitation_resolved`. The response body's outcome schema is `ResponseOutcome`, which `PermissionDecision` was.
+- `context.measured` says what is in context after every provider round, compaction, and rewind.
 - The export archive is format 16.
+
+0.86.0 changes no shape the client uses. The export archive is format 17, and 0.86.0 reads a format 16 archive as it is.
 
 0.70.0 also adds turn records, the `/v1/stream` server feed, conditional rewind and fork through `ETag` and `If-Match`, `conversation.rewound`, `permission_resolved`, `approvals_pending`, the `parent` list filter, and the session's open `checklist` with `checklist.updated`. The client shows the open checklist above the message input. Notices are ephemeral: a running turn's show inline where they arrived, warnings and errors also stay below the conversation, and none survives a reload. The session feed parser ignores events it does not handle.
 
@@ -64,12 +76,12 @@ A shell command may print 64 MiB, all of which `tool_call.completed` carries, wh
 
 The feed's 409 covers `session-not-loaded`: a token with only `sessions:r` does not load a session by attaching. The client then shows the saved conversation and retries the feed until the server loads the session. `POST /compact` runs as a turn on the feed, with `source: "compaction"` on `turn.started`; the client shows it as compacting and does not notify when it ends.
 
-Schema capture is a manual maintenance step. Choose a disposable meka instance with `[serve].docs = true`, confirm its version, and download its schema. For a 0.84.0 instance listening on port 8081:
+Schema capture is a manual maintenance step. Choose a disposable meka instance with `[serve].docs = true`, confirm its version, and download its schema. For a 0.86.0 instance listening on port 8081:
 
 ```sh
-curl --fail --silent --show-error http://127.0.0.1:8081/v1/openapi.json --output docs/api/meka-0.84.0.json
+curl --fail --silent --show-error http://127.0.0.1:8081/v1/openapi.json --output docs/api/meka-0.86.0.json
 cd web
-npx prettier --write ../docs/api/meka-0.84.0.json
+npx prettier --write ../docs/api/meka-0.86.0.json
 npm run api:generate
 ```
 

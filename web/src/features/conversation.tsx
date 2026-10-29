@@ -14,6 +14,7 @@ import {
   ArrowDown,
   FoldVertical,
   GitBranch,
+  MessageCircleQuestion,
   Pencil,
   RotateCcw,
   ShieldCheck,
@@ -603,15 +604,18 @@ function AgentActivity({
   const Icon =
     status === 'approval'
       ? ShieldCheck
-      : status === 'compacting'
-        ? FoldVertical
-        : status === 'disconnected'
-          ? Unplug
-          : undefined;
+      : status === 'question'
+        ? MessageCircleQuestion
+        : status === 'compacting'
+          ? FoldVertical
+          : status === 'disconnected'
+            ? Unplug
+            : undefined;
   const label = {
     working: 'Agent is working',
     compacting: 'Compacting context…',
     approval: 'Waiting for approval',
+    question: 'Waiting for your answer',
     connecting: 'Connecting…',
     reconnecting: 'Reconnecting…',
     disconnected: 'Connection interrupted',

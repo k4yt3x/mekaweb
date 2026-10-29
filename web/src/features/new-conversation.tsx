@@ -33,6 +33,8 @@ export function NewConversation() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [error, setError] = useState<unknown>();
   const disabled = !canWrite || creation.busy;
+  // meka starts with no profile, and refuses a session until one is added.
+  const noProfile = profiles.data?.profiles.length === 0;
   function updateOptions(patch: Partial<ComposerOptions>) {
     controller?.saveDraft('new', {
       ...(controller.draft('new') ?? emptyComposerOptions),
@@ -54,6 +56,13 @@ export function NewConversation() {
             {/* The recovery notice explains an unconfirmed creation in place of its generic error. */}
             <ErrorNotice error={creation.uncertain ? undefined : creation.error} />
             <ErrorNotice error={error ?? profiles.error} />
+            {noProfile && (
+              <p className="notice">
+                <span>
+                  meka has no profile yet. <a href="#/providers">Add one in Providers</a> to start.
+                </span>
+              </p>
+            )}
             {creation.uncertain && (
               <div className="new-session-recovery">
                 <NoticeMessage
@@ -132,6 +141,7 @@ export function NewConversation() {
               kind: 'send',
               disabled:
                 disabled ||
+                noProfile ||
                 creation.uncertain ||
                 (!draft.text.trim() && !options.images.length && !options.skill),
               busy: creation.busy,

@@ -71,7 +71,7 @@ export function ResourcesPage({ kind }: { kind: Kind }) {
       : list?.filter((item) =>
           [item.name, item.description].join(' ').toLowerCase().includes(query.toLowerCase()),
         );
-  const title = kind === 'memory' ? 'Memory' : 'Skills';
+  const title = kind === 'memory' ? 'Memories' : 'Skills';
   function open(entry: Entry) {
     runtime.queries.removeQueries({
       queryKey: [connection?.id, connection?.authority, `/v1/${kind}/${segment(entry.name)}`],

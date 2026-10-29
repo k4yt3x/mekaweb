@@ -646,6 +646,7 @@ it('distinguishes approval and connection waits from active computation', () => 
   state.feed = 'connected';
   state.approvals = [
     {
+      kind: 'permission',
       id: 'approval',
       sessionId: 'session',
       turnId: 'turn',
@@ -655,6 +656,19 @@ it('distinguishes approval and connection waits from active computation', () => 
     },
   ];
   expect(activity(state)?.status).toBe('approval');
+  state.approvals = [
+    {
+      kind: 'url',
+      id: 'question',
+      sessionId: 'session',
+      turnId: 'turn',
+      server: 'github',
+      message: 'Sign in',
+      url: 'https://example.com/',
+      expires: Date.now() + 10000,
+    },
+  ];
+  expect(activity(state)?.status).toBe('question');
 });
 
 it('places activity after the opening of another client’s turn, which it answers', () => {
