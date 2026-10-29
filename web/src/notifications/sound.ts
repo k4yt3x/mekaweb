@@ -58,6 +58,10 @@ export class CompletionSound {
       // Unsupported audio or autoplay restrictions must not affect the conversation.
     }
   }
+  /** Whether audio is unlocked, so a chime can play without a click or key press first. */
+  ready() {
+    return this.context?.state === 'running';
+  }
   play(force = false) {
     const context = this.context;
     if (!context || context.state !== 'running') return false;

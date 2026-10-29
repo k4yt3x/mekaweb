@@ -266,16 +266,64 @@ it('honors the shared claim across relayed and local completions', async () => {
   await vi.waitFor(() => expect(f.runtime.notifications.getSnapshot().toasts).toHaveLength(1));
 });
 
-it('stays quiet in the background, leaving it to push', async () => {
+it('chimes from a background tab that followed the turn, without a toast', async () => {
+  vi.useFakeTimers();
   const f = fixture();
   f.document.hasFocus = () => false;
   f.storage.completionSound(true);
+  vi.spyOn(CompletionSound.prototype, 'ready').mockReturnValue(true);
   const play = vi.spyOn(CompletionSound.prototype, 'play').mockReturnValue(true);
   f.start();
   await f.complete();
-  expect(f.runtime.notifications.getSnapshot().toasts).toHaveLength(0);
-  expect(play).not.toHaveBeenCalled();
   expect(f.channel.postMessage).toHaveBeenCalledOnce();
+  // A focused tab has the first chance to claim it.
+  expect(play).not.toHaveBeenCalled();
+  await vi.advanceTimersByTimeAsync(500);
+  expect(play).toHaveBeenCalledOnce();
+  expect(claimNotification).toHaveBeenCalledOnce();
+  expect(f.runtime.notifications.getSnapshot().toasts).toHaveLength(0);
+});
+
+it('leaves the chime to a focused tab that claimed it, or to no one', async () => {
+  vi.useFakeTimers();
+  const f = fixture();
+  f.document.hasFocus = () => false;
+  f.storage.completionSound(true);
+  const ready = vi.spyOn(CompletionSound.prototype, 'ready').mockReturnValue(true);
+  const play = vi.spyOn(CompletionSound.prototype, 'play').mockReturnValue(true);
+  f.start();
+  vi.mocked(claimNotification).mockResolvedValue(false);
+  await f.complete();
+  await vi.advanceTimersByTimeAsync(500);
+  expect(claimNotification).toHaveBeenCalledOnce();
+  // Audio not yet unlocked by a click or key press, or the sound turned off, claims nothing.
+  vi.mocked(claimNotification).mockClear().mockResolvedValue(true);
+  ready.mockReturnValue(false);
+  await f.complete({ turnId: 'second' });
+  await vi.advanceTimersByTimeAsync(500);
+  ready.mockReturnValue(true);
+  f.storage.completionSound(false);
+  await f.complete({ turnId: 'third' });
+  await vi.advanceTimersByTimeAsync(500);
+  expect(play).not.toHaveBeenCalled();
+  expect(claimNotification).not.toHaveBeenCalled();
+});
+
+it('tells mekaweb it is in front only while focused and alerting in the page', () => {
+  const f = fixture();
+  const controller = f.runtime.getSnapshot().controller!;
+  const focus = vi.spyOn(controller, 'focus');
+  f.start();
+  expect(focus).toHaveBeenLastCalledWith(true);
+  f.document.hasFocus = () => false;
+  f.window.dispatchEvent(new Event('blur'));
+  expect(focus).toHaveBeenLastCalledWith(false);
+  f.document.hasFocus = () => true;
+  f.window.dispatchEvent(new Event('focus'));
+  expect(focus).toHaveBeenLastCalledWith(true);
+  // With neither toasts nor sound, push is how it hears.
+  f.storage.inAppNotifications(false);
+  expect(focus).toHaveBeenLastCalledWith(false);
 });
 
 it('opens the session a notification names when the service worker asks', () => {

@@ -40,7 +40,7 @@ See the [captured schema and generation instructions](api/README.md) for the wir
 | GET    | `/v1/sessions/{id}/inbox`                  | Pending/appended items, delivery state, and retries after a failed turn                  |
 | DELETE | `/v1/sessions/{id}/inbox/{item_id}`        | Withdraw an eligible item                                                                |
 | POST   | `/v1/sessions/{id}/responses/{request_id}` | Approvals, and answers to MCP servers' forms and links, including for sub-agents         |
-| GET    | `/v1/stream`                               | Live session list and statuses across sessions                                           |
+| GET    | `/v1/stream`                               | Live session list and statuses, and alerts of turns ending in any session                |
 | GET    | `/v1/sessions/{id}/stream`                 | Attendance, replay, lifecycle, content, tools, inbox, and live sub-agents                |
 | POST   | `/v1/sessions/{id}/compact`                | Explicit compaction and its result                                                       |
 | GET    | `/v1/sessions/{id}/context`                | Context capacity, usage, and cache hit rate, read again on each `context.measured`       |

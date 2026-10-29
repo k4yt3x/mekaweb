@@ -84,6 +84,8 @@ export interface RequestOptions {
   /** An `ETag` the write was decided on; meka refuses it with 412 once the resource moved on. */
   ifMatch?: string | undefined;
   accept?: string;
+  /** mekaweb's own headers for this request, which it never passes on to meka. */
+  headers?: Record<string, string>;
 }
 export class ApiClient {
   readonly base: string;
@@ -168,6 +170,7 @@ export class ApiClient {
     const headers: Record<string, string> = {
       Accept: options.accept ?? 'application/json',
       ...(options.accept === 'text/event-stream' ? this.streamHeaders() : {}),
+      ...options.headers,
     };
     if (options.body !== undefined) headers['Content-Type'] = 'application/json';
     if (options.idempotencyKey) headers['Idempotency-Key'] = options.idempotencyKey;
@@ -287,12 +290,14 @@ export class ApiClient {
     /** Session feeds only; the server feed has no one to ask. */
     attend: boolean | undefined,
     signal: AbortSignal,
+    headers?: Record<string, string>,
   ): Promise<Response> {
     // Resume ids are sent only to the authenticated API, never content URLs.
     return this.response('GET', path, {
       query: { attend, ...(cursor ? { last_event_id: cursor } : {}) },
       accept: 'text/event-stream',
       signal,
+      ...(headers ? { headers } : {}),
     });
   }
   async blob(path: string, query?: Query, signal?: AbortSignal): Promise<Blob> {

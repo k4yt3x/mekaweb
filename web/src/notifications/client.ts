@@ -32,6 +32,8 @@ interface NotificationState {
   announcement?: CompletionToast | undefined;
 }
 const script = () => new URL('/notifications.js', location.origin);
+/** How long a tab in the background leaves a focused tab to claim a completion first. */
+const HANDOFF_MS = 500;
 async function deadline<T>(operation: Promise<T>): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -151,12 +153,23 @@ export class BrowserNotifications {
       location.hash.split('?')[0] === '#/sessions/' + encodeURIComponent(value.sessionId)
     );
   }
+  /** Tells the server feed whether this page is in front and alerts of turns ending itself, so
+   * mekaweb holds back push notifications of them from this device meanwhile. */
+  private reportFocus() {
+    const settings = this.runtime.storage.getSnapshot();
+    this.runtime
+      .getSnapshot()
+      .controller?.focus(
+        this.foreground() && (settings.inAppNotifications || settings.completionSound),
+      );
+  }
   private armSound = () => {
     if (this.active && this.runtime.storage.getSnapshot().completionSound) this.sound.arm();
   };
   private viewChanged = () => {
     this.attention++;
     this.inspect();
+    this.reportFocus();
     const toasts = this.foreground()
       ? this.state.toasts.filter((toast) => !toast.target || !this.viewing(toast.target))
       : [];
@@ -177,6 +190,7 @@ export class BrowserNotifications {
         stopCompletion?.();
         controller = next;
         stopCompletion = next?.onCompletion(this.completed);
+        this.reportFocus();
         if (!next) this.publish({ toasts: [], announcement: undefined });
       }
       const nowSignedIn = snapshot.auth === 'signed-in';
@@ -188,10 +202,12 @@ export class BrowserNotifications {
     const settingsChanged = () => {
       const settings = this.runtime.storage.getSnapshot();
       if (!settings.completionSound) this.sound.stop();
+      this.reportFocus();
       if (!settings.inAppNotifications && this.state.toasts.length)
         this.publish({ toasts: [], announcement: undefined });
     };
     const stopSettings = this.runtime.storage.subscribe(settingsChanged);
+    this.reportFocus();
     try {
       this.channel = new BroadcastChannel('mekaweb:notifications:v2');
       this.channel.onmessage = (event: MessageEvent<unknown>) => {
@@ -324,7 +340,24 @@ export class BrowserNotifications {
       // Failure to relay must not prevent this tab from delivering its own alert.
     }
     if (this.foreground()) void this.present(notice);
+    else if (preferences.completionSound) void this.chime(notice);
   };
+  /**
+   * The chime for a turn that ended while this tab was not focused, which a focused tab told of
+   * the completion claims first, for its toast as well.
+   */
+  private async chime(notice: CompletionNotice) {
+    await new Promise((resolve) => setTimeout(resolve, HANDOFF_MS));
+    if (this.foreground()) return this.present(notice);
+    if (!this.active || !this.runtime.storage.getSnapshot().completionSound || !this.sound.ready())
+      return;
+    try {
+      if (await claimNotification(notificationTag(notice.target, notice.turnId), '/'))
+        this.sound.play();
+    } catch {
+      // Without the shared claim, another tab may have played it; quiet is the safer miss.
+    }
+  }
   private async present(notice: CompletionNotice) {
     if (!completion(notice) || !this.foreground()) return;
     const attention = this.attention;

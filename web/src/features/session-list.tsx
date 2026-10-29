@@ -6,7 +6,6 @@ import { useCan, useConnection, useResource, useRuntime } from '../connections/c
 import { subagentsQuery, useSessionStates } from '../session/hooks';
 import { isSessionRunning, type SessionState } from '../session/controller';
 import { sessionStatus, useMarkSeen, useSeenSessions } from '../session/unread';
-import { ServerFeed } from '../session/server-feed';
 import { useAction } from '../components/actions';
 import { ErrorNotice, Loading } from '../components/common';
 import { Button } from '../components/ui/button';
@@ -30,7 +29,7 @@ export function SessionList({
   onSearchOpen: (open: boolean) => void;
   onOpen: () => void;
 }) {
-  const { api, connection } = useConnection();
+  const { api, controller, connection } = useConnection();
   const authority = connection?.authority;
   const runtime = useRuntime();
   const canWrite = useCan('sessions:w');
@@ -78,15 +77,15 @@ export function SessionList({
     searching && !waiting,
     120_000,
   );
-  useEffect(() => {
-    if (!api) return;
-    const feed = new ServerFeed(api, () => {
-      // The open session's record too, so a sub-agent's page sees a follow-up begin.
-      for (const key of ['session-list', '/v1/sessions/search', 'session-metadata'])
-        void runtime.queries.invalidateQueries({ queryKey: [connection?.id, authority, key] });
-    });
-    return () => feed.dispose();
-  }, [api, connection?.id, authority, runtime.queries]);
+  useEffect(
+    () =>
+      controller?.onServerChange(() => {
+        // The open session's record too, so a sub-agent's page sees a follow-up begin.
+        for (const key of ['session-list', '/v1/sessions/search', 'session-metadata'])
+          void runtime.queries.invalidateQueries({ queryKey: [connection?.id, authority, key] });
+      }),
+    [controller, connection?.id, authority, runtime.queries],
+  );
   const rows = searching
     ? (matches.data?.sessions ?? [])
     : (list.data?.pages.flatMap((page) => page.sessions) ?? []);

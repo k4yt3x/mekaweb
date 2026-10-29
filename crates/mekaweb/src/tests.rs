@@ -36,7 +36,7 @@ struct Seen {
     headers: Vec<(String, String)>,
 }
 
-/// A stand-in meka: `/v1/info`, `/v1/echo` and a session's event stream.
+/// A stand-in meka: `/v1/info`, `/v1/echo`, the server feed and a session's event stream.
 async fn stand_in_meka() -> (SocketAddr, Arc<Mutex<Seen>>) {
     let seen = Arc::new(Mutex::new(Seen::default()));
     let app = Router::new()
@@ -92,6 +92,18 @@ async fn stand_in_meka() -> (SocketAddr, Arc<Mutex<Seen>>) {
                 let first = format!("id: 1\nevent: tool_call.completed\ndata: {completed}\n\n");
                 let stream = futures_util::stream::iter([Ok::<_, std::io::Error>(first)])
                     .chain(futures_util::stream::pending());
+                Response::builder()
+                    .header(header::CONTENT_TYPE, "text/event-stream")
+                    .body(Body::from_stream(stream))
+                    .unwrap()
+            }),
+        )
+        .route(
+            "/v1/stream",
+            get(|| async {
+                let stream =
+                    futures_util::stream::iter([Ok::<_, std::io::Error>("retry: 3000\n\n")])
+                        .chain(futures_util::stream::pending());
                 Response::builder()
                     .header(header::CONTENT_TYPE, "text/event-stream")
                     .body(Body::from_stream(stream))
@@ -399,6 +411,50 @@ async fn an_event_stream_arrives_compressed_with_its_change_as_a_diff_and_marks_
     drop(body);
     tokio::time::sleep(Duration::from_millis(100)).await;
     assert!(!app.watching.is_watching(&device, "s1"));
+}
+
+#[tokio::test]
+async fn a_server_feed_from_a_page_in_front_marks_its_device_while_open() {
+    let (app, router, seen, _dir) = mekaweb().await;
+    let cookie = sign_in(&router).await;
+    let devices = send(
+        &router,
+        request("GET", "/api/account/devices")
+            .header(header::COOKIE, &cookie)
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    let device = json(devices).await[0]["id"].as_str().unwrap().to_owned();
+    let feed = |focused: bool| {
+        let mut builder = request("GET", "/meka/v1/stream").header(header::COOKIE, &cookie);
+        if focused {
+            builder = builder.header("x-mekaweb-focused", "1");
+        }
+        send(&router, builder.body(Body::empty()).unwrap())
+    };
+    let behind = feed(false).await;
+    assert_eq!(behind.status(), StatusCode::OK);
+    assert!(!app.watching.is_focused(&device));
+    let front = feed(true).await;
+    assert_eq!(front.status(), StatusCode::OK);
+    assert!(app.watching.is_focused(&device));
+    drop(front);
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(!app.watching.is_focused(&device));
+    drop(behind);
+    // The header is mekaweb's; meka never sees it.
+    send(
+        &router,
+        request("GET", "/meka/v1/echo")
+            .header(header::COOKIE, &cookie)
+            .header("x-mekaweb-focused", "1")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    let recorded = seen.lock().unwrap().headers.clone();
+    assert!(recorded.iter().all(|(name, _)| name != "x-mekaweb-focused"));
 }
 
 #[tokio::test]

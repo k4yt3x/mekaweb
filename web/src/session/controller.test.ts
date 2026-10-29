@@ -2341,3 +2341,83 @@ it('opens with fewer messages on a device saving data', async () => {
   expect(controller.getSnapshot()[0]?.offset).toBe(50);
   expect(controller.getSnapshot()[0]?.saved?.messages).toHaveLength(30);
 });
+
+/** A controller following the server feed, with a session `open` here on its own feed too. */
+async function serverFixture(records: Record<string, Partial<Schema['SessionResponse']>>) {
+  vi.useFakeTimers();
+  const api = new ApiClient('https://example.org');
+  const writers: Record<string, ReadableStreamDefaultController<Uint8Array>> = {};
+  vi.spyOn(api, 'stream').mockImplementation(async (path) => {
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        writers[path] = controller;
+      },
+    });
+    return new Response(body, { headers: { 'Content-Type': 'text/event-stream' } });
+  });
+  const get = vi.spyOn(api, 'get').mockImplementation(async <T>(path: string) => {
+    if (path.endsWith('/messages'))
+      return { session_id: 'open', messages: [], total: 0, revision: 0 } as T;
+    if (path.endsWith('/inbox')) return { session_id: 'open', items: [] } as T;
+    const id = path.split('/').pop()!;
+    return { id, title: '', approvals: true, profile: 'mock', project: '', ...records[id] } as T;
+  });
+  const controller = new SessionController(api, true);
+  controllers.push(controller);
+  const completed = vi.fn();
+  controller.onCompletion(completed);
+  controller.followServer();
+  controller.select('open');
+  await vi.advanceTimersByTimeAsync(0);
+  let cursor = 0;
+  async function event(name: string, payload: unknown) {
+    writers['/v1/stream']!.enqueue(
+      new TextEncoder().encode(
+        `id: ${++cursor}\nevent: ${name}\ndata: ${JSON.stringify(payload)}\n\n`,
+      ),
+    );
+    await vi.advanceTimersByTimeAsync(0);
+  }
+  return { controller, completed, get, event };
+}
+
+it('alerts of a turn ending in any root session the server feed tells of, once', async () => {
+  const f = await serverFixture({
+    looked: { title: 'Looked up' },
+    child: { parent_id: 'p' },
+    fresh: { title: 'From its first message' },
+  });
+  // What the feed joins with is history.
+  await f.event('turn.finished', { session_id: 'early', turn_id: 'old' });
+  await vi.advanceTimersByTimeAsync(2000);
+  await f.event('session.updated', { id: 'named', title: 'Named' });
+  await f.event('turn.finished', { session_id: 'named', turn_id: 't1' });
+  await f.event('turn.finished', { session_id: 'named', turn_id: 't1' });
+  await f.event('turn.failed', { session_id: 'looked', turn_id: 't2' });
+  // meka titles a session by its first message in the record alone.
+  await f.event('session.created', { id: 'fresh', title: '' });
+  await f.event('turn.finished', { session_id: 'fresh', turn_id: 't5' });
+  // A sub-agent's turn and a compaction alert no one.
+  await f.event('turn.finished', { session_id: 'child', turn_id: 't3' });
+  await f.event('turn.started', { session_id: 'named', turn_id: 't4', source: 'compaction' });
+  await f.event('turn.finished', { session_id: 'named', turn_id: 't4' });
+  expect(f.completed.mock.calls.map(([completion]) => completion)).toEqual([
+    { sessionId: 'named', turnId: 't1', outcome: 'completed', title: 'Named' },
+    { sessionId: 'looked', turnId: 't2', outcome: 'failed', title: 'Looked up' },
+    { sessionId: 'fresh', turnId: 't5', outcome: 'completed', title: 'From its first message' },
+  ]);
+  expect(f.get).not.toHaveBeenCalledWith('/v1/sessions/named', undefined, expect.anything());
+});
+
+it('leaves a session whose own feed is open to that feed', async () => {
+  const f = await serverFixture({ open: { title: 'Open here' } });
+  await vi.advanceTimersByTimeAsync(2000);
+  await f.event('turn.finished', { session_id: 'open', turn_id: 't1' });
+  expect(f.completed).not.toHaveBeenCalled();
+  // Once it is closed, the server feed tells of its turns.
+  f.controller.select(undefined);
+  await f.event('turn.finished', { session_id: 'open', turn_id: 't2' });
+  expect(f.completed).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({ sessionId: 'open', turnId: 't2', title: 'Open here' }),
+  );
+});

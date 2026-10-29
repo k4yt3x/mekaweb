@@ -75,6 +75,10 @@ const BATCH_HEADER: &str = "x-mekaweb-batch";
 /// The header a device saving data sends to leave out commands' streamed output.
 const DATA_SAVER_HEADER: &str = "x-mekaweb-data-saver";
 
+/// The header a page in front sends with its server feed: it alerts of finished turns itself, so
+/// its device is not sent push notifications of them.
+const FOCUSED_HEADER: &str = "x-mekaweb-focused";
+
 /// The shortest and longest wait a device may ask for.
 const BATCH_MILLIS: std::ops::RangeInclusive<u64> = 100..=2_000;
 
@@ -84,16 +88,35 @@ const RESPONSE_POLICY: &str = "sandbox; default-src 'none'; img-src 'self' data:
 /// How much a batch holds before it is sent anyway.
 const MAX_BATCH_BYTES: usize = 256 * 1024;
 
-/// Which devices are watching which meka sessions: a count per sign-in and session.
+/// Which devices are watching which meka sessions, and which have a page in front: a count per
+/// sign-in and what its streams say of it.
 #[derive(Debug, Default)]
 pub(crate) struct Watching {
-    counts: Mutex<HashMap<(String, String), usize>>,
+    counts: Mutex<HashMap<(String, Watched), usize>>,
+}
+
+/// What an open stream says of its device.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum Watched {
+    /// A session's feed or a streamed turn: the device sees what happens in that session.
+    Session(String),
+    /// A server feed sent from a page in front, which alerts in the page itself.
+    Focused,
 }
 
 impl Watching {
     /// Notes that the sign-in `device` is watching `session` until the guard is dropped.
     pub(crate) fn watch(self: &Arc<Self>, device: &str, session: &str) -> WatchGuard {
-        let key = (device.to_owned(), session.to_owned());
+        self.hold(device, Watched::Session(session.to_owned()))
+    }
+
+    /// Notes that the sign-in `device` has a page in front until the guard is dropped.
+    pub(crate) fn focus(self: &Arc<Self>, device: &str) -> WatchGuard {
+        self.hold(device, Watched::Focused)
+    }
+
+    fn hold(self: &Arc<Self>, device: &str, watched: Watched) -> WatchGuard {
+        let key = (device.to_owned(), watched);
         *self
             .counts
             .lock()
@@ -108,18 +131,27 @@ impl Watching {
 
     /// Whether the sign-in `device` is watching `session`.
     pub(crate) fn is_watching(&self, device: &str, session: &str) -> bool {
+        self.holds(device, Watched::Session(session.to_owned()))
+    }
+
+    /// Whether the sign-in `device` has a page in front.
+    pub(crate) fn is_focused(&self, device: &str) -> bool {
+        self.holds(device, Watched::Focused)
+    }
+
+    fn holds(&self, device: &str, watched: Watched) -> bool {
         self.counts
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .contains_key(&(device.to_owned(), session.to_owned()))
+            .contains_key(&(device.to_owned(), watched))
     }
 }
 
-/// A device watching a session, until dropped.
+/// A device watching a session, or with a page in front, until dropped.
 #[derive(Debug)]
 pub(crate) struct WatchGuard {
     watching: Arc<Watching>,
-    key: (String, String),
+    key: (String, Watched),
 }
 
 impl Drop for WatchGuard {
@@ -280,7 +312,11 @@ pub(crate) async fn forward(
         });
     let lean = parts.headers.get(DATA_SAVER_HEADER).is_some();
     let guard = streamed_session(rest, &parts.method)
-        .map(|session| app.watching.watch(&signed.session.id, &session));
+        .map(|session| app.watching.watch(&signed.session.id, &session))
+        .or_else(|| {
+            (rest == "v1/stream" && parts.headers.contains_key(FOCUSED_HEADER))
+                .then(|| app.watching.focus(&signed.session.id))
+        });
     out_headers.remove(header::CONTENT_LENGTH);
     if gzip {
         out_headers.insert(header::CONTENT_ENCODING, HeaderValue::from_static("gzip"));
@@ -519,6 +555,17 @@ mod tests {
         assert!(watching.is_watching("device", "session"));
         drop(second);
         assert!(!watching.is_watching("device", "session"));
+    }
+
+    #[test]
+    fn a_page_in_front_marks_its_own_device_alone() {
+        let watching = Arc::new(Watching::default());
+        let focused = watching.focus("device");
+        assert!(watching.is_focused("device"));
+        assert!(!watching.is_focused("other"));
+        assert!(!watching.is_watching("device", ""));
+        drop(focused);
+        assert!(!watching.is_focused("device"));
     }
 
     #[test]

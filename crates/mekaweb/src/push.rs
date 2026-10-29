@@ -5,7 +5,8 @@
 //! mekaweb follows meka's server feed, `/v1/stream`, which carries every session's turn
 //! lifecycle and approval prompts, and keeps each session's title and parent from the records it
 //! also carries. A device watching a session (its event stream open through mekaweb) is not
-//! notified of that session. Sub-agents' turns and compactions notify nobody.
+//! notified of that session, and a device with a page in front is not notified of turns ending,
+//! which that page tells of itself. Sub-agents' turns and compactions notify nobody.
 //!
 //! Every push shows a notification: iOS cancels a subscription whose pushes show nothing.
 //!
@@ -275,7 +276,10 @@ impl Push {
             }
         };
         for subscription in subscriptions {
-            if self.watching.is_watching(&subscription.session_id, session) {
+            let ended = matches!(message.kind, PushKind::Finished | PushKind::Failed);
+            if self.watching.is_watching(&subscription.session_id, session)
+                || (ended && self.watching.is_focused(&subscription.session_id))
+            {
                 continue;
             }
             match self.send(&subscription, &message).await {

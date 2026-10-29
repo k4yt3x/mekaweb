@@ -54,6 +54,9 @@ function Workspace() {
   const [nav, setNav] = useState(false);
   const location = useLocation();
   const sessions = useSessionStates();
+  // meka's server feed, followed on every page: the session list reads it, and any turn ending
+  // alerts by it.
+  useEffect(() => state.controller?.followServer(), [state.controller]);
   const [mobileSessionsOpen, setMobileSessionsOpen] = useState(false);
   const [searchRequested, setSearchRequested] = useState(false);
   const [keymap, setKeymap] = useState(false);

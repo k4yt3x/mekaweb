@@ -13,6 +13,7 @@ import { emptyComposerOptions } from './composer-options';
 import { parseEvent, record, SseParser, string, type EventData, type SseFrame } from './events';
 import { createId } from '../identifiers';
 import { problemText, sessionNotice, type SessionNotice } from './notices';
+import { ServerFeed } from './server-feed';
 
 export interface LiveTool {
   id: string;
@@ -268,6 +269,11 @@ function turnBody(message: string, options: ComposerOptions): Schema['TurnReques
       : {}),
   };
 }
+
+/** Keeps a set of recent ids to its newest 50. */
+function limit(set: Set<string>) {
+  if (set.size > 50) set.delete(set.values().next().value!);
+}
 export class SessionController {
   private lifetime = new AbortController();
   private entries = new Map<string, Entry>();
@@ -294,6 +300,122 @@ export class SessionController {
     return () => {
       this.completionListeners.delete(listener);
     };
+  }
+  private server: ServerFeed | undefined;
+  private serverHolds = 0;
+  private serverListeners = new Set<() => void>();
+  private focused = false;
+  /** Root sessions' titles, and which sessions are sub-agents, as the server feed told of them. */
+  private known = new Map<string, { title: string; parent: boolean }>();
+  private compactions = new Set<string>();
+  private serverAlerted = new Set<string>();
+  /**
+   * Follows meka's server feed until the returned function is called: for the session list, and
+   * so a turn ending in any session alerts, not only one this page follows.
+   */
+  followServer() {
+    if (this.disposed) return () => {};
+    this.server ??= new ServerFeed(
+      this.api,
+      () => {
+        for (const listener of this.serverListeners) listener();
+      },
+      (frame, news) => this.heard(frame, news),
+      this.focused,
+    );
+    this.serverHolds++;
+    let held = true;
+    return () => {
+      if (!held) return;
+      held = false;
+      if (--this.serverHolds > 0) return;
+      this.server?.dispose();
+      this.server = undefined;
+    };
+  }
+  /** Calls `listener` after the server feed says a session changed, while it is followed. */
+  onServerChange(listener: () => void) {
+    this.serverListeners.add(listener);
+    return () => {
+      this.serverListeners.delete(listener);
+    };
+  }
+  /** Whether this page is in front, alerting of turns ending itself; see `ServerFeed.focus`. */
+  focus(focused: boolean) {
+    this.focused = focused;
+    this.server?.focus(focused);
+  }
+  private heard(frame: SseFrame, news: boolean) {
+    let data: unknown;
+    try {
+      data = JSON.parse(frame.data);
+    } catch {
+      return;
+    }
+    if (!record(data)) return;
+    const fields = data;
+    const text = (key: string) => (typeof fields[key] === 'string' ? fields[key] : undefined);
+    if (frame.event === 'session.created' || frame.event === 'session.updated') {
+      const id = text('id');
+      const title = text('title');
+      if (id && title !== undefined) this.remember(id, title, Boolean(text('parent_id')));
+    } else if (frame.event === 'turn.started') {
+      const turn = text('turn_id');
+      if (turn && text('source') === 'compaction') limit(this.compactions.add(turn));
+    } else if (frame.event === 'turn.finished' || frame.event === 'turn.failed') {
+      const session = text('session_id');
+      const turn = text('turn_id');
+      if (!session || !turn || this.compactions.delete(turn) || !news) return;
+      void this.serverEnded(
+        session,
+        turn,
+        frame.event === 'turn.finished' ? 'completed' : 'failed',
+      );
+    }
+  }
+  private remember(id: string, title: string, parent: boolean) {
+    const known = { title, parent };
+    this.known.delete(id);
+    this.known.set(id, known);
+    if (this.known.size > 500) this.known.delete(this.known.keys().next().value!);
+    return known;
+  }
+  /** A turn the server feed says ended, alerted unless a sub-agent's or this page's feed's. */
+  private async serverEnded(sessionId: string, turnId: string, outcome: 'completed' | 'failed') {
+    const alerted = () => {
+      const entry = this.entries.get(sessionId);
+      // A session's own feed tells of its turns, and knows which are news.
+      return (
+        this.disposed ||
+        this.serverAlerted.has(turnId) ||
+        Boolean(entry && (!entry.abort.signal.aborted || entry.outcomes.has(turnId)))
+      );
+    };
+    if (alerted()) return;
+    const session = this.entries.get(sessionId)?.state.session;
+    let known = session
+      ? { title: session.title, parent: Boolean(session.parent_id) }
+      : this.known.get(sessionId);
+    // A title meka took from the first message is in the record alone: the feed's is older.
+    if (!known?.title.trim())
+      known = await this.api
+        .get<Schema['SessionResponse']>(sessionPath(sessionId), undefined, this.lifetime.signal)
+        .then(
+          (read) => this.remember(sessionId, read.title, Boolean(read.parent_id)),
+          () => known,
+        );
+    if (!known || known.parent || alerted() || this.entries.get(sessionId)?.state.deleting) return;
+    limit(this.serverAlerted.add(turnId));
+    this.emit({ sessionId, turnId, outcome, title: known.title.trim() || 'New conversation' });
+  }
+  private emit(completion: TurnCompletion) {
+    for (const listener of this.completionListeners) {
+      try {
+        listener(completion);
+      } catch {
+        // A presentation failure must not interrupt the turn's state or reconciliation.
+      }
+    }
   }
   constructor(
     readonly api: ApiClient,
@@ -1023,19 +1145,12 @@ export class SessionController {
       entry.notifiedTurns.add(turnId);
       if (entry.notifiedTurns.size > 50)
         entry.notifiedTurns.delete(entry.notifiedTurns.values().next().value!);
-      const completion: TurnCompletion = {
+      this.emit({
         sessionId: state.id,
         turnId,
         outcome,
         title: state.session?.title?.trim() || 'New conversation',
-      };
-      for (const listener of this.completionListeners) {
-        try {
-          listener(completion);
-        } catch {
-          // A presentation failure must not interrupt the turn's state or reconciliation.
-        }
-      }
+      });
     }
   }
   deleteSession(id: string): Promise<string[]> {
@@ -2024,6 +2139,9 @@ export class SessionController {
   dispose() {
     this.disposed = true;
     this.lifetime.abort();
+    this.server?.dispose();
+    this.server = undefined;
+    this.serverListeners.clear();
     for (const entry of this.entries.values()) entry.abort.abort();
     this.entries.clear();
     this.drafts.clear();

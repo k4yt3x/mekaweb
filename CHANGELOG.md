@@ -7,13 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.30.0] - 2026-10-29
+
 ### Changed
 
 - New session starts like the session you are in; pressed again, it starts from server defaults.
 - The line saying when a turn finished is slightly smaller and fainter.
+- Toasts and the chime cover turns started anywhere; a focused page gets no push of them.
 
 ### Fixed
 
+- A tab in the background plays the completion sound, where nothing used to alert at all.
 - A session opens where you left it, rather than at the top, after you scrolled up in it.
 
 ## [0.29.0] - 2026-10-29
@@ -571,7 +575,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Light and dark themes, narrow layouts, and collapsible, resizable session panels.
 - Hosting at the root or a subpath, with GitHub Pages deployment on version tags.
 
-[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.29.0...HEAD
+[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.30.0...HEAD
+[0.30.0]: https://github.com/k4yt3x/mekaweb/compare/0.29.0...0.30.0
 [0.29.0]: https://github.com/k4yt3x/mekaweb/compare/0.28.0...0.29.0
 [0.28.0]: https://github.com/k4yt3x/mekaweb/compare/0.27.0...0.28.0
 [0.27.0]: https://github.com/k4yt3x/mekaweb/compare/0.26.0...0.27.0
