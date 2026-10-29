@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- New session starts like the session you are in; pressed again, it starts from server defaults.
+
 ### Fixed
 
 - A session opens where you left it, rather than at the top, after you scrolled up in it.

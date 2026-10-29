@@ -1107,16 +1107,7 @@ function FolderMenu({
               Mention in message
             </DropdownMenu.Item>
           )}
-          <DropdownMenu.Item
-            className="menu-item"
-            onSelect={() => {
-              navigation.newConversation.setSettings({
-                ...navigation.newConversation.settings,
-                workingDirectory: path,
-              });
-              navigation.newSession();
-            }}
-          >
+          <DropdownMenu.Item className="menu-item" onSelect={() => navigation.newSession(path)}>
             <MessageSquarePlus size={14} />
             New session here
           </DropdownMenu.Item>

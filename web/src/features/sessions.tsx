@@ -340,7 +340,7 @@ export function SessionsPage({ id }: { id?: string | undefined }) {
         <aside id="session-list" className="session-list" aria-label="Session list">
           <SessionList
             selectedId={id}
-            onCreate={newSession}
+            onCreate={() => newSession()}
             searchInput={searchInput}
             searchOpen={searchOpen}
             onSearchOpen={setSearchOpen}

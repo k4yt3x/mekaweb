@@ -77,8 +77,15 @@ function Workspace() {
       window.location.hash = '/sessions/' + id;
     }
   });
-  function newSession() {
+  /** Opens a new session set up like the one in view, or with the server's defaults when none is,
+   * so pressing it again starts from the defaults. */
+  function newSession(workingDirectory?: string) {
     if (!canCreate) return;
+    const inView = /^\/sessions\/([^/]+)$/.exec(location.pathname)?.[1];
+    newConversation.prepare(
+      sessions.find((session) => session.id === inView && !session.deleting)?.session,
+      workingDirectory,
+    );
     setSearchRequested(false);
     setMobileSessionsOpen(false);
     composerFocusRef.current = 'new';
@@ -100,7 +107,7 @@ function Workspace() {
     setNav(false);
     setKeymap(true);
   }
-  useShortcut('newSession', newSession, canCreate);
+  useShortcut('newSession', () => newSession(), canCreate);
   useShortcut(
     'searchSessions',
     () => {

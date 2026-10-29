@@ -12,16 +12,18 @@ export interface NewSessionSettings {
   approvals: string;
 }
 
+const serverDefaults: NewSessionSettings = {
+  workingDirectory: '',
+  profile: '',
+  project: '',
+  permission: '',
+  approvals: '',
+};
+
 export function useNewConversation(onCreated: (id: string) => void) {
   const { api, controller, connection, info } = useConnection();
   const runtime = useRuntime();
-  const [settings, setSettings] = useState<NewSessionSettings>({
-    workingDirectory: '',
-    profile: '',
-    project: '',
-    permission: '',
-    approvals: '',
-  });
+  const [settings, setSettings] = useState(serverDefaults);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>();
   const [uncertain, setUncertain] = useState(false);
@@ -101,9 +103,34 @@ export function useNewConversation(onCreated: (id: string) => void) {
       });
     return session.id;
   }
+  /** Sets a new session up like `session`, or with the server's defaults without one. Only the
+   * message and its images stay. */
+  function prepare(session?: Schema['SessionResponse'], workingDirectory?: string) {
+    setSettings({
+      ...(session
+        ? {
+            workingDirectory: session.working_directory ?? '',
+            profile: session.profile,
+            project: session.project,
+            permission: session.permission ?? '',
+            approvals: String(session.approvals),
+          }
+        : serverDefaults),
+      ...(workingDirectory ? { workingDirectory } : {}),
+    });
+    if (!controller) return;
+    // A skill goes with the message it was picked for, so it is not carried over.
+    const like = session && controller.draft(session.id);
+    controller.saveDraft('new', {
+      ...emptyComposerOptions,
+      ...(like ? { mode: like.mode, retention: like.retention, source: like.source } : {}),
+      images: controller.draft('new')?.images ?? [],
+    });
+  }
   return {
     settings,
     setSettings,
+    prepare,
     busy,
     error,
     uncertain,
