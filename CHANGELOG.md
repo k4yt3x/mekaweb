@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- A session opens where you left it, rather than at the top, after you scrolled up in it.
+
 ## [0.29.0] - 2026-10-29
 
 ### Added

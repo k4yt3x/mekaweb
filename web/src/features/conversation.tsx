@@ -3,6 +3,7 @@ import { useShortcut } from '../components/use-shortcut';
 import {
   Fragment,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -79,7 +80,39 @@ import {
   emptyComposerOptions,
   remainingComposerOptions,
 } from '../session/composer-options';
-const positions = new Map<string, { top: number; following: boolean }>();
+/** Where a reader left a conversation: at its latest, or `into` pixels below the top of a saved
+ * message, so what loads late above it, such as a diagram, does not move them. */
+type Position = { following: boolean; top: number; anchor?: { message: string; into: number } };
+const positions = new Map<string, Position>();
+function readPosition(node: HTMLElement, following: boolean): Position {
+  const top = node.scrollTop;
+  if (following) return { following, top };
+  // The last saved message that begins at or above the top of the view.
+  const origin = node.getBoundingClientRect().top - top;
+  const messages = node.querySelectorAll<HTMLElement>('[data-message]');
+  let found: HTMLElement | undefined;
+  for (let low = 0, high = messages.length - 1; low <= high;) {
+    const middle = (low + high) >> 1;
+    if (messages[middle]!.getBoundingClientRect().top - origin <= top) {
+      found = messages[middle];
+      low = middle + 1;
+    } else high = middle - 1;
+  }
+  const message = found?.dataset.message;
+  if (!found || !message) return { following, top };
+  return {
+    following,
+    top,
+    anchor: { message, into: top - found.getBoundingClientRect().top + origin },
+  };
+}
+function placePosition(node: HTMLElement, { top, anchor }: Position) {
+  const found = anchor && node.querySelector(`[data-message="${anchor.message}"]`);
+  if (!anchor || !found) node.scrollTop = top;
+  else
+    node.scrollTop +=
+      found.getBoundingClientRect().top - node.getBoundingClientRect().top + anchor.into;
+}
 export function Conversation({ state }: { state: SessionState }) {
   const { api, controller, connection, connectionIssue } = useConnection();
   // A running sub-agent's feed tells which call in this session runs it, and what it is doing.
@@ -112,12 +145,18 @@ export function Conversation({ state }: { state: SessionState }) {
   const content = useRef<HTMLDivElement>(null);
   const dock = useRef<HTMLDivElement>(null);
   const following = useRef(true);
+  // A returning reader's place, kept as the conversation lays out until they move themselves.
+  const held = useRef<Position>(undefined);
+  const release = () => {
+    held.current = undefined;
+  };
   const lastScroll = useRef({ top: 0, height: 0 });
   const [showLatest, setShowLatest] = useState(false);
   const [contentBelow, setContentBelow] = useState(false);
   function jumpToLatest() {
     const node = scroller.current;
     if (!node) return;
+    held.current = undefined;
     following.current = true;
     node.scrollTop = node.scrollHeight;
     setShowLatest(false);
@@ -338,15 +377,15 @@ export function Conversation({ state }: { state: SessionState }) {
     };
   }
   const key = connection?.id + ':' + state.id;
-  useEffect(() => {
+  // Kept as the reader scrolls: once this unmounts, its scroller is detached and reads 0.
+  useLayoutEffect(() => {
     const node = scroller.current;
     if (!node) return;
     const position = positions.get(key);
     following.current = position?.following ?? true;
-    node.scrollTop = following.current ? node.scrollHeight : (position?.top ?? 0);
-    return () => {
-      positions.set(key, { top: node.scrollTop, following: following.current });
-    };
+    held.current = following.current ? undefined : position;
+    if (held.current) placePosition(node, held.current);
+    else node.scrollTop = node.scrollHeight;
   }, [key]);
   useEffect(() => {
     const node = scroller.current;
@@ -363,6 +402,7 @@ export function Conversation({ state }: { state: SessionState }) {
       );
       // Jump only here, after the frame's scroll events, so a reader's scroll lands first.
       if (following.current) node.scrollTop = node.scrollHeight;
+      else if (held.current) placePosition(node, held.current);
       setShowLatest(!following.current);
       setContentBelow(node.scrollHeight - node.scrollTop - node.clientHeight > 1);
     });
@@ -381,19 +421,26 @@ export function Conversation({ state }: { state: SessionState }) {
           role="region"
           aria-label="Conversation"
           tabIndex={-1}
+          onPointerDown={release}
+          onWheel={release}
+          onTouchStart={release}
+          onKeyDown={release}
           onScroll={() => {
             const node = scroller.current;
             if (node) {
               const { scrollTop: top, scrollHeight: height } = node;
               const remaining = height - top - node.clientHeight;
-              // Resizes move the position too, so only a move up at a steady height counts.
-              if (remaining <= 1) following.current = true;
-              else if (top < lastScroll.current.top && height === lastScroll.current.height)
-                following.current = false;
+              // A held place moves only with the layout under it, which says nothing of the reader.
+              if (!held.current) {
+                // Resizes move the position too, so only a move up at a steady height counts.
+                if (remaining <= 1) following.current = true;
+                else if (top < lastScroll.current.top && height === lastScroll.current.height)
+                  following.current = false;
+                positions.set(key, readPosition(node, following.current));
+              }
               lastScroll.current = { top, height };
               setShowLatest(!following.current);
               setContentBelow(remaining > 1);
-              positions.set(key, { top, following: following.current });
             }
           }}
         >
@@ -442,6 +489,7 @@ export function Conversation({ state }: { state: SessionState }) {
               {messages.map((group, position) => (
                 <Message
                   key={`${state.saved?.revision}:${state.offset + group[0]!.index}`}
+                  index={state.offset + group[0]!.index}
                   sessionId={state.id}
                   messages={group}
                   offset={state.offset}
@@ -723,6 +771,7 @@ function turnKind(group: HistoryMessage[]) {
 /** For a message the feed delivered whole, which answers no tool call. */
 const noToolResults: ReadonlyMap<ToolUseBlock, ToolResultBlock> = new Map();
 function Message({
+  index,
   messages,
   sessionId,
   toolResults,
@@ -731,6 +780,8 @@ function Message({
   actions,
   editor,
 }: {
+  /** Where a saved message sits in the history, which marks it as a place to return to. */
+  index?: number;
   messages: HistoryMessage[];
   sessionId: string;
   toolResults: ReadonlyMap<ToolUseBlock, ToolResultBlock>;
@@ -750,7 +801,7 @@ function Message({
   );
   if (message.compaction)
     return (
-      <article className="message message-summary">
+      <article className="message message-summary" data-message={index}>
         <aside className="compaction-marker" aria-label="Compaction boundary">
           <details
             className="tool-card compaction-summary"
@@ -793,7 +844,10 @@ function Message({
   if (!content.length && message.content.length > 0) return null;
   const isUserInput = isInput(message);
   return (
-    <article className={`message message-${message.role}${isUserInput ? ' message-input' : ''}`}>
+    <article
+      className={`message message-${message.role}${isUserInput ? ' message-input' : ''}`}
+      data-message={index}
+    >
       <MessageHeader
         author={
           message.content.length > 0 &&
