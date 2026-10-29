@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - New session starts like the session you are in; pressed again, it starts from server defaults.
+- The line saying when a turn finished is slightly smaller and fainter.
 
 ### Fixed
 

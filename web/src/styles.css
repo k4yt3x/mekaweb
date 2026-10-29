@@ -3201,10 +3201,10 @@ select option {
   padding: 2px 0;
   border: 0;
   background: none;
-  color: var(--muted);
+  /* Quieter than the reply it closes: tool output's 0.9 scale, and fainter than muted text. */
+  color: color-mix(in srgb, var(--muted) 75%, var(--bg));
   font: inherit;
-  /* The message's own size: its colour already sets it apart. */
-  font-size: var(--conversation-font-size, 0.88rem);
+  font-size: calc(var(--conversation-font-size, 0.88rem) * 0.9);
   text-align: left;
   cursor: pointer;
 }
