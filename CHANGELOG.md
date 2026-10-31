@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.32.0] - 2026-10-31
+
+### Added
+
+- Providers: drag accounts and profiles into order; profile pickers follow it, grouped by account.
+
+### Changed
+
+- Providers lists each account with its profiles beneath, a line apiece, with no scrolling box.
+
 ## [0.31.0] - 2026-10-31
 
 ### Added
@@ -590,7 +600,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Light and dark themes, narrow layouts, and collapsible, resizable session panels.
 - Hosting at the root or a subpath, with GitHub Pages deployment on version tags.
 
-[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.31.0...HEAD
+[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.32.0...HEAD
+[0.32.0]: https://github.com/k4yt3x/mekaweb/compare/0.31.0...0.32.0
 [0.31.0]: https://github.com/k4yt3x/mekaweb/compare/0.30.0...0.31.0
 [0.30.0]: https://github.com/k4yt3x/mekaweb/compare/0.29.0...0.30.0
 [0.29.0]: https://github.com/k4yt3x/mekaweb/compare/0.28.0...0.29.0

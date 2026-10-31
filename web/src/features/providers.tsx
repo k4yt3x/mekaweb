@@ -1,13 +1,22 @@
-import { useState, type FormEvent } from 'react';
+import { Fragment, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { flushSync } from 'react-dom';
-import { KeyRound, LogIn, Pencil, Plus, Trash2, X } from 'lucide-react';
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
+import { Ellipsis, GripVertical, KeyRound, LogIn, Pencil, Plus, Trash2, X } from 'lucide-react';
 import { useAction } from '../components/actions';
-import { useCan, useConnection, useResource, useRuntime } from '../connections/context';
+import {
+  useCan,
+  useConnection,
+  useResource,
+  useRuntime,
+  useSettings,
+} from '../connections/context';
 import { segment, type Schema } from '../api/client';
 import { Button } from '../components/ui/button';
 import { Dialog } from '../components/ui/dialog';
 import { SwitchField } from '../components/ui/switch';
-import { ConfirmButton, ErrorNotice, Field, Loading } from '../components/common';
+import { ConfirmAction, ErrorNotice, Field, Loading } from '../components/common';
+import { useSortable } from '../components/sortable';
+import { useOverlayPadding } from '../components/visual-viewport';
 import { BrowserLogin } from './browser-login';
 import {
   BACKENDS,
@@ -17,145 +26,580 @@ import {
   isSubscription,
   patchProfileBody,
   profileDraft,
+  providerGroups,
   readsAccountKey,
   readsProfileKey,
+  renameInOrder,
   type AccountDraft,
   type ProfileDraft,
+  type ProviderGroup,
 } from './providers-model';
 
-/** meka's accounts, which hold what a provider signs in with, and the profiles that run on them. */
-export function ProvidersPage() {
-  const canRead = useCan('config:r');
-  const profiles = useResource<Schema['ProfilesResponse']>('/v1/profiles');
-  const accounts = useResource<Schema['AccountsResponse']>('/v1/accounts', undefined, canRead);
-  return (
-    <div className="page settings-page">
-      <header className="page-heading">
-        <h1>Providers</h1>
-      </header>
-      <ProfilesPanel profiles={profiles} accounts={accounts.data?.accounts} />
-      <AccountsPanel accounts={accounts} />
-    </div>
-  );
-}
+/** What the page has open, one at a time. */
+type Opened =
+  | { kind: 'new-account' }
+  | { kind: 'new-profile'; account: string }
+  | { kind: 'edit-profile'; name: string }
+  | { kind: 'rename-account'; name: string }
+  | { kind: 'sign-in'; account: Schema['AccountView'] }
+  | { kind: 'remove-profile' | 'remove-account' | 'remove-credential'; name: string };
 
-function ProfilesPanel({
-  profiles,
-  accounts,
-}: {
-  profiles: ReturnType<typeof useResource<Schema['ProfilesResponse']>>;
-  accounts: Schema['AccountView'][] | undefined;
-}) {
+const removals = {
+  'remove-profile': {
+    title: 'Remove profile',
+    description: (name: string) =>
+      `Remove “${name}”? Sessions on it can’t resume until they move to another profile.`,
+    path: (name: string) => `/v1/profiles/${segment(name)}`,
+    order: 'profiles',
+  },
+  'remove-account': {
+    title: 'Remove account',
+    description: (name: string) =>
+      `Remove “${name}” and its stored credential? meka refuses while a profile uses it.`,
+    path: (name: string) => `/v1/accounts/${segment(name)}`,
+    order: 'accounts',
+  },
+  'remove-credential': {
+    title: 'Remove credential',
+    description: (name: string) => `Remove the credential stored as “${name}”?`,
+    path: (name: string) => `/v1/accounts/${segment(name)}`,
+    order: undefined,
+  },
+} as const;
+
+/**
+ * meka's accounts, which hold what a provider signs in with, each with the profiles that run on it
+ * beneath, a line apiece so a long list reads at a glance.
+ */
+export function ProvidersPage() {
   const { api } = useConnection();
   const runtime = useRuntime();
   const canRead = useCan('config:r');
   const canWrite = useCan('config:w');
-  const [editing, setEditing] = useState<string>();
-  const [creating, setCreating] = useState(false);
+  const { providerOrder } = useSettings();
+  const profiles = useResource<Schema['ProfilesResponse']>('/v1/profiles');
+  const accounts = useResource<Schema['AccountsResponse']>('/v1/accounts', undefined, canRead);
+  const [opened, setOpened] = useState<Opened>();
+  // What opened a dialog takes the focus back once none is open, if it is still there.
+  const current = useRef<Opened>(undefined);
+  const opener = useRef<HTMLElement>(null);
+  const show = (next: Opened | undefined) => {
+    current.current = next;
+    setOpened(next);
+  };
+  const open = (next: Opened) => (trigger: HTMLElement) => {
+    opener.current = trigger;
+    show(next);
+  };
+  // A save that ends after its dialog was closed leaves whatever is open now alone.
+  const settle = (from: Opened | undefined, next?: Opened) => {
+    if (current.current === from) show(next);
+  };
+  const dialog = {
+    onOpenChange: (value: boolean) => {
+      if (!value) show(undefined);
+    },
+    onCloseAutoFocus: (event: Event) => {
+      event.preventDefault();
+      if (!current.current && opener.current?.isConnected)
+        opener.current.focus({ preventScroll: true });
+    },
+  };
+  const writable = !canWrite ? 'Requires config:w' : undefined;
+  const editable = writable ?? (!canRead ? 'Requires config:r' : undefined);
   const all = profiles.data?.profiles ?? [];
-  const requires = !canWrite ? 'Requires config:w' : !canRead ? 'Requires config:r' : undefined;
+  const listed = accounts.data?.accounts;
+  const orphans = accounts.data?.orphaned_credentials ?? [];
+  // Shown once both lists are in, so profiles do not move as their accounts arrive.
+  const ready = Boolean(profiles.data && (listed || !canRead || accounts.error));
+  const groups = ready ? providerGroups(listed, all, providerOrder) : [];
+  // Saved whole, so the order holds every account and profile as they now stand.
+  const reorder = (profiles: string[], accounts = groups.map((group) => group.name)) =>
+    runtime.storage.providerOrder({ accounts, profiles });
+  const accountSort = useSortable(
+    groups.map((group) => group.name),
+    (accounts) =>
+      reorder(
+        groups.flatMap((group) => group.profiles.map((profile) => profile.name)),
+        accounts,
+      ),
+  );
+  const ordered = groups.flatMap((group) => group.profiles);
+  const orderedAccounts =
+    listed && groups.flatMap((group) => (group.account ? [group.account] : []));
+  const editing = opened?.kind === 'edit-profile' ? opened.name : undefined;
+  const creating = opened?.kind === 'new-profile' ? opened.account : undefined;
+  const renaming = opened?.kind === 'rename-account' ? opened.name : undefined;
+  const signingIn = opened?.kind === 'sign-in' ? opened.account : undefined;
+  const removing =
+    opened?.kind === 'remove-profile' ||
+    opened?.kind === 'remove-account' ||
+    opened?.kind === 'remove-credential'
+      ? opened
+      : undefined;
+  const removal = removals[removing?.kind ?? 'remove-profile'];
   return (
-    <section className="panel">
-      <h2>Profiles</h2>
+    <div className="page settings-page">
+      <header className="page-heading">
+        <h1>Providers</h1>
+        <div className="actions">
+          {ready && !listed && (
+            <Button
+              variant="secondary"
+              disabled={!canWrite}
+              title={writable}
+              onClick={(event) => open({ kind: 'new-profile', account: '' })(event.currentTarget)}
+            >
+              <Plus size={16} />
+              New profile
+            </Button>
+          )}
+          <Button
+            disabled={!canWrite}
+            title={writable}
+            onClick={(event) => open({ kind: 'new-account' })(event.currentTarget)}
+          >
+            <Plus size={16} />
+            New account
+          </Button>
+        </div>
+      </header>
+      {!canRead && <p className="muted small">Reading accounts requires config:r.</p>}
       <ErrorNotice error={profiles.error} />
-      {profiles.isPending && <Loading />}
-      <div className="bounded">
-        {all.map((profile) => (
-          <div className="setting-row connection-row" key={profile.name}>
-            <div className="connection-details">
-              <strong>
-                {profile.name}
-                {profile.active && <span className="badge">Default</span>}
-              </strong>
-              <p className="muted small">
-                {profile.model ?? 'No model'} · {profile.account} · {backendLabel(profile.backend)}
-                {!profile.vision && ' · No images'}
-                {profile.fallbacks?.length
-                  ? ` · Falls back to ${profile.fallbacks.join(', ')}`
-                  : ''}
-              </p>
-            </div>
-            <div className="actions wrap">
-              <Button
-                variant="ghost"
-                disabled={Boolean(requires)}
-                title={requires}
-                onClick={() => setEditing(profile.name)}
-              >
-                <Pencil size={14} />
-                Edit
-              </Button>
-              <ConfirmButton
-                disabled={!canWrite}
-                title="Remove profile"
-                description={`Remove “${profile.name}”? Sessions on it can’t resume until they move to another profile.`}
-                onConfirm={async () => {
-                  await api?.mutate('DELETE', `/v1/profiles/${segment(profile.name)}`);
-                  await runtime.queries.invalidateQueries();
-                }}
-              >
-                <Trash2 size={14} />
-                Remove
-              </ConfirmButton>
-            </div>
-          </div>
-        ))}
-      </div>
-      {profiles.data && !all.length && (
+      <ErrorNotice error={accounts.error} />
+      {!ready && !profiles.error && <Loading />}
+      {ready && !groups.length && !orphans.length && !accounts.error && (
         <p className="muted small">
-          No profiles yet. A profile picks an account and a model; sessions run on one.
+          {listed
+            ? 'No accounts yet. An account is what meka signs in to a provider with.'
+            : 'No profiles yet.'}
         </p>
       )}
-      <div className="panel-footer">
-        <Button
-          disabled={!canWrite || accounts?.length === 0}
-          title={
-            !canWrite
-              ? 'Requires config:w'
-              : accounts?.length === 0
-                ? 'Add an account first'
-                : undefined
-          }
-          onClick={() => setCreating(true)}
-        >
-          <Plus size={16} />
-          New profile
-        </Button>
-      </div>
-      <Dialog open={creating} onOpenChange={setCreating} title="New profile" wide>
-        {creating && (
-          <ProfileForm
-            profiles={all}
-            accounts={accounts}
-            onSaved={async () => {
+      {(groups.length > 0 || orphans.length > 0) && (
+        <section className="panel provider-list" aria-label="Accounts and profiles">
+          {groups.map((group) => (
+            <AccountGroup
+              key={group.name}
+              group={group}
+              listed={Boolean(listed)}
+              canWrite={canWrite}
+              writable={writable}
+              editable={editable}
+              open={open}
+              sort={accountSort}
+              movable={groups.length > 1}
+              onReorder={(names) =>
+                reorder(
+                  groups.flatMap((other) =>
+                    other.name === group.name
+                      ? names
+                      : other.profiles.map((profile) => profile.name),
+                  ),
+                )
+              }
+            />
+          ))}
+          {orphans.map((name) => (
+            <div className="provider-group" key={`orphan:${name}`}>
+              <div className="provider-row">
+                <span className="drag-space" />
+                <span className="provider-name">
+                  <strong title={name}>{name}</strong>
+                </span>
+                <div className="provider-rest">
+                  <span className="provider-meta">A stored credential no account uses.</span>
+                  <RowMenu
+                    label={`More for ${name}`}
+                    items={[
+                      {
+                        label: 'Remove',
+                        icon: <Trash2 size={14} />,
+                        title: writable,
+                        disabled: !canWrite,
+                        danger: true,
+                        onSelect: open({ kind: 'remove-credential', name }),
+                      },
+                    ]}
+                  />
+                </div>
+              </div>
+            </div>
+          ))}
+        </section>
+      )}
+      <Dialog open={opened?.kind === 'new-account'} {...dialog} title="New account">
+        {opened?.kind === 'new-account' && (
+          <AccountForm
+            onSaved={async (account) => {
               await runtime.queries.invalidateQueries();
-              setCreating(false);
+              // A subscription is added signed out; its sign-in is the next step.
+              settle(
+                opened,
+                isSubscription(account.backend) ? { kind: 'sign-in', account } : undefined,
+              );
             }}
           />
         )}
       </Dialog>
       <Dialog
-        open={editing !== undefined}
-        onOpenChange={(open) => {
-          if (!open) setEditing(undefined);
-        }}
-        title={`Edit ${editing ?? 'profile'}`}
-        wide
+        open={signingIn !== undefined}
+        {...dialog}
+        title={`${signingIn && !isSubscription(signingIn.backend) ? 'Change key for' : 'Sign in to'} ${signingIn?.name ?? 'account'}`}
       >
+        {signingIn && (
+          <AccountSignIn
+            account={signingIn}
+            onDone={async () => {
+              await runtime.queries.invalidateQueries();
+              settle(opened);
+            }}
+          />
+        )}
+      </Dialog>
+      <Dialog
+        open={renaming !== undefined}
+        {...dialog}
+        title="Rename account"
+        description="Its profiles and stored credential move with it."
+      >
+        {renaming !== undefined && (
+          <RenameAccount
+            name={renaming}
+            onSaved={async () => {
+              await runtime.queries.invalidateQueries();
+              settle(opened);
+            }}
+          />
+        )}
+      </Dialog>
+      <Dialog open={creating !== undefined} {...dialog} title="New profile" wide>
+        {creating !== undefined && (
+          <ProfileForm
+            preset={creating}
+            profiles={ordered}
+            accounts={orderedAccounts}
+            onSaved={async () => {
+              await runtime.queries.invalidateQueries();
+              settle(opened);
+            }}
+          />
+        )}
+      </Dialog>
+      <Dialog open={editing !== undefined} {...dialog} title={`Edit ${editing ?? 'profile'}`} wide>
         {editing !== undefined && (
           <EditProfile
             name={editing}
-            profiles={all}
-            accounts={accounts}
+            profiles={ordered}
+            accounts={orderedAccounts}
             onSaved={async () => {
               // Closed first, so a renamed profile's old entry is not read again.
-              flushSync(() => setEditing(undefined));
+              flushSync(() => settle(opened));
               await runtime.queries.invalidateQueries();
             }}
           />
         )}
       </Dialog>
-    </section>
+      <ConfirmAction
+        open={removing !== undefined}
+        {...dialog}
+        title={removal.title}
+        description={removal.description(removing?.name ?? '')}
+        onConfirm={async () => {
+          if (!removing || !api) return;
+          await api.mutate('DELETE', removal.path(removing.name));
+          // Gone from the order too, so one added later under its name starts at the end.
+          if (removal.order) {
+            const order = runtime.storage.getSnapshot().providerOrder;
+            runtime.storage.providerOrder({
+              ...order,
+              [removal.order]: order[removal.order].filter((name) => name !== removing.name),
+            });
+          }
+          await runtime.queries.invalidateQueries();
+        }}
+      />
+    </div>
+  );
+}
+
+/** An account's row, then its profiles', each moved by its handle. */
+function AccountGroup({
+  group: { name, account, backend, profiles },
+  listed,
+  canWrite,
+  writable,
+  editable,
+  open,
+  sort,
+  movable,
+  onReorder,
+}: {
+  group: ProviderGroup;
+  /** Whether meka's accounts were read, so one missing from them is not configured. */
+  listed: boolean;
+  canWrite: boolean;
+  writable: string | undefined;
+  editable: string | undefined;
+  open: (next: Opened) => (trigger: HTMLElement) => void;
+  sort: ReturnType<typeof useSortable>;
+  movable: boolean;
+  onReorder: (profiles: string[]) => void;
+}) {
+  const profileSort = useSortable(
+    profiles.map((profile) => profile.name),
+    onReorder,
+  );
+  return (
+    <div className="provider-group" role="group" aria-label={name} {...sort.item(name)}>
+      <div className="provider-row">
+        {movable ? (
+          <DragHandle label={name} {...sort.handle(name)} />
+        ) : (
+          <span className="drag-space" />
+        )}
+        <span className="provider-name">
+          <strong title={name}>{name}</strong>
+          {account && <SignedIn account={account} />}
+        </span>
+        <div className="provider-rest">
+          <span className="provider-meta">
+            {account || !listed ? backendLabel(backend) : 'Not configured'}
+            {account?.base_url && ` · ${account.base_url}`}
+          </span>
+          <div className="actions">
+            {account && account.authenticated !== 'yes' && (
+              <Button
+                variant="ghost"
+                disabled={!canWrite}
+                title={writable}
+                onClick={(event) => open({ kind: 'sign-in', account })(event.currentTarget)}
+              >
+                <SignInLabel account={account} />
+              </Button>
+            )}
+            {(account || !listed) && (
+              <Button
+                variant="ghost"
+                size="icon"
+                disabled={!canWrite}
+                aria-label={`New profile on ${name}`}
+                title={writable ?? 'New profile'}
+                onClick={(event) =>
+                  open({ kind: 'new-profile', account: name })(event.currentTarget)
+                }
+              >
+                <Plus size={16} />
+              </Button>
+            )}
+            {account && (
+              <RowMenu
+                label={`More for ${name}`}
+                items={[
+                  ...(account.authenticated === 'yes'
+                    ? [
+                        {
+                          label: isSubscription(account.backend) ? 'Sign in again' : 'Change key',
+                          icon: isSubscription(account.backend) ? (
+                            <LogIn size={14} />
+                          ) : (
+                            <KeyRound size={14} />
+                          ),
+                          title: writable,
+                          disabled: !canWrite,
+                          onSelect: open({ kind: 'sign-in', account }),
+                        },
+                      ]
+                    : []),
+                  {
+                    label: 'Rename',
+                    icon: <Pencil size={14} />,
+                    title: writable,
+                    disabled: !canWrite,
+                    onSelect: open({ kind: 'rename-account', name }),
+                  },
+                  {
+                    label: 'Remove',
+                    icon: <Trash2 size={14} />,
+                    title: writable,
+                    disabled: !canWrite,
+                    danger: true,
+                    onSelect: open({ kind: 'remove-account', name }),
+                  },
+                ]}
+              />
+            )}
+          </div>
+        </div>
+      </div>
+      {profiles.map((profile) => (
+        <div
+          className="provider-row provider-profile"
+          key={profile.name}
+          {...profileSort.item(profile.name)}
+        >
+          {profiles.length > 1 ? (
+            <DragHandle label={profile.name} {...profileSort.handle(profile.name)} />
+          ) : (
+            <span className="drag-space" />
+          )}
+          <span className="provider-name">
+            <button
+              type="button"
+              className="provider-open"
+              disabled={Boolean(editable)}
+              title={editable ?? profile.name}
+              onClick={(event) =>
+                open({ kind: 'edit-profile', name: profile.name })(event.currentTarget)
+              }
+            >
+              {profile.name}
+            </button>
+            {profile.active && <span className="badge">Default</span>}
+          </span>
+          <div className="provider-rest">
+            <span className="provider-meta">
+              {profile.model ?? 'No model'}
+              {!profile.vision && ' · No images'}
+              {profile.fallbacks?.length ? ` · Falls back to ${profile.fallbacks.join(', ')}` : ''}
+            </span>
+            <RowMenu
+              label={`More for ${profile.name}`}
+              items={[
+                {
+                  label: 'Edit',
+                  icon: <Pencil size={14} />,
+                  title: editable,
+                  disabled: Boolean(editable),
+                  onSelect: open({ kind: 'edit-profile', name: profile.name }),
+                },
+                {
+                  label: 'Remove',
+                  icon: <Trash2 size={14} />,
+                  title: writable,
+                  disabled: !canWrite,
+                  danger: true,
+                  onSelect: open({ kind: 'remove-profile', name: profile.name }),
+                },
+              ]}
+            />
+          </div>
+        </div>
+      ))}
+      {!profiles.length && (
+        <p className="provider-row provider-empty">
+          <span className="drag-space" />
+          <span className="provider-name">No profiles</span>
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** Keeps a renamed account or profile where it was put. */
+function useRenameInOrder() {
+  const runtime = useRuntime();
+  return (kind: 'accounts' | 'profiles', from: string, to: string) =>
+    runtime.storage.providerOrder(
+      renameInOrder(runtime.storage.getSnapshot().providerOrder, kind, from, to),
+    );
+}
+
+/** What moves a row: dragged, or the arrow keys while it has the focus. */
+function DragHandle({
+  label,
+  ...props
+}: { label: string } & ReturnType<ReturnType<typeof useSortable>['handle']>) {
+  return (
+    <button
+      type="button"
+      className="drag-handle"
+      aria-label={`Move ${label}`}
+      title="Drag to reorder"
+      {...props}
+    >
+      <GripVertical size={14} aria-hidden="true" />
+    </button>
+  );
+}
+
+function SignedIn({ account }: { account: Schema['AccountView'] }) {
+  if (account.authenticated === 'yes') return <span className="badge success">Signed in</span>;
+  if (account.authenticated === 'unreadable')
+    return (
+      <span className="badge danger" title="meka can’t read its stored credential">
+        Unreadable
+      </span>
+    );
+  return <span className="badge">Not signed in</span>;
+}
+
+function SignInLabel({ account }: { account: Schema['AccountView'] }) {
+  return isSubscription(account.backend) ? (
+    <>
+      <LogIn size={14} />
+      Sign in
+    </>
+  ) : (
+    <>
+      <KeyRound size={14} />
+      Change key
+    </>
+  );
+}
+
+interface MenuItem {
+  label: string;
+  icon: ReactNode;
+  onSelect: (trigger: HTMLElement) => void;
+  disabled?: boolean;
+  title?: string | undefined;
+  danger?: boolean;
+}
+
+/** A row's other actions, behind one button so a row stays a line. */
+function RowMenu({ label, items }: { label: string; items: MenuItem[] }) {
+  const collisionPadding = useOverlayPadding();
+  const trigger = useRef<HTMLButtonElement>(null);
+  // The dialog an item opens keeps the focus the menu would hand back to its button.
+  const chosen = useRef(false);
+  return (
+    <DropdownMenu.Root modal={false}>
+      <DropdownMenu.Trigger asChild>
+        <Button ref={trigger} variant="ghost" size="icon" aria-label={label} title="More">
+          <Ellipsis size={16} />
+        </Button>
+      </DropdownMenu.Trigger>
+      <DropdownMenu.Portal>
+        <DropdownMenu.Content
+          className="menu-panel"
+          align="end"
+          sideOffset={4}
+          collisionPadding={collisionPadding}
+          onCloseAutoFocus={(event) => {
+            if (chosen.current) event.preventDefault();
+            chosen.current = false;
+          }}
+        >
+          {items.map((item, index) => (
+            <Fragment key={item.label}>
+              {item.danger && index > 0 && <DropdownMenu.Separator className="menu-separator" />}
+              <DropdownMenu.Item
+                className={`menu-item ${item.danger ? 'menu-item-danger' : ''}`}
+                disabled={item.disabled ?? false}
+                title={item.title}
+                onSelect={() => {
+                  chosen.current = true;
+                  if (trigger.current) item.onSelect(trigger.current);
+                }}
+              >
+                {item.icon}
+                {item.label}
+              </DropdownMenu.Item>
+            </Fragment>
+          ))}
+        </DropdownMenu.Content>
+      </DropdownMenu.Portal>
+    </DropdownMenu.Root>
   );
 }
 
@@ -187,21 +631,25 @@ const optionLabels: Record<string, string> = {
 
 function ProfileForm({
   initial,
+  preset,
   profiles,
   accounts,
   onSaved,
 }: {
   initial?: Schema['ProfileDetailView'];
+  /** The account a new profile starts on. */
+  preset?: string;
   profiles: Schema['ProfileView'][];
   accounts: Schema['AccountView'][] | undefined;
   onSaved: () => Promise<void>;
 }) {
   const { api } = useConnection();
   const action = useAction();
+  const rename = useRenameInOrder();
   const [start] = useState(() => profileDraft(initial));
   const [draft, setDraft] = useState(() => ({
     ...start,
-    account: start.account || accounts?.[0]?.name || '',
+    account: start.account || preset || accounts?.[0]?.name || '',
   }));
   const backend = initial
     ? initial.backend
@@ -219,10 +667,12 @@ function ProfileForm({
         const patch = patchProfileBody(start, draft, backend);
         if (Object.keys(patch).length) await api.mutate('PATCH', path, patch);
         // meka takes a rename on its own, after the settings it moves with.
-        if (draft.name.trim() !== initial.name)
+        if (draft.name.trim() !== initial.name) {
           await api.mutate('PATCH', path, {
             name: draft.name.trim(),
           } satisfies Schema['PatchProfileRequest']);
+          rename('profiles', initial.name, draft.name.trim());
+        }
       }
       await onSaved();
     });
@@ -311,7 +761,7 @@ function ProfileForm({
               />
             )}
           </Field>
-          <Field label="Model" hint="Sent to the provider as written.">
+          <Field label="Model">
             <input
               required
               spellCheck={false}
@@ -324,41 +774,43 @@ function ProfileForm({
               }
             />
           </Field>
-        </div>
-        {(draft.fallbacks.length > 0 || others.length > 0) && (
-          <Field label="Fallbacks" hint="Profiles that serve a turn this one can’t, in order.">
-            <div className="fallback-list">
-              {draft.fallbacks.map((name) => (
-                <span className="tag" key={name}>
-                  {name}
-                  <button
-                    type="button"
-                    className="tag-remove"
-                    aria-label={`Remove ${name}`}
-                    onClick={() => set({ fallbacks: draft.fallbacks.filter((f) => f !== name) })}
+          {(draft.fallbacks.length > 0 || others.length > 0) && (
+            <Field label="Fallbacks">
+              <div className="fallback-list">
+                {others.length > 0 && (
+                  <select
+                    aria-label="Add a fallback"
+                    value=""
+                    onChange={(event) =>
+                      set({ fallbacks: [...draft.fallbacks, event.target.value] })
+                    }
                   >
-                    <X size={12} />
-                  </button>
-                </span>
-              ))}
-              {others.length > 0 && (
-                <select
-                  aria-label="Add a fallback"
-                  value=""
-                  onChange={(event) => set({ fallbacks: [...draft.fallbacks, event.target.value] })}
-                >
-                  <option value="">Add a fallback…</option>
-                  {others.map((profile) => (
-                    <option key={profile.name} value={profile.name}>
-                      {profile.name}
-                    </option>
-                  ))}
-                </select>
-              )}
-            </div>
-          </Field>
-        )}
-        <details>
+                    <option value="">Add a fallback…</option>
+                    {others.map((profile) => (
+                      <option key={profile.name} value={profile.name}>
+                        {profile.name}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                {draft.fallbacks.map((name) => (
+                  <span className="tag" key={name}>
+                    {name}
+                    <button
+                      type="button"
+                      className="tag-remove"
+                      aria-label={`Remove ${name}`}
+                      onClick={() => set({ fallbacks: draft.fallbacks.filter((f) => f !== name) })}
+                    >
+                      <X size={12} />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            </Field>
+          )}
+        </div>
+        <details open>
           <summary>Advanced</summary>
           <div className="form-grid">
             {count('context_window', 'Context window')}
@@ -406,163 +858,6 @@ function ProfileForm({
         </div>
       </fieldset>
     </form>
-  );
-}
-
-function AccountsPanel({
-  accounts,
-}: {
-  accounts: ReturnType<typeof useResource<Schema['AccountsResponse']>>;
-}) {
-  const { api } = useConnection();
-  const runtime = useRuntime();
-  const canRead = useCan('config:r');
-  const canWrite = useCan('config:w');
-  const [creating, setCreating] = useState(false);
-  const [renaming, setRenaming] = useState<string>();
-  const [signingIn, setSigningIn] = useState<Schema['AccountView']>();
-  const remove = (name: string) => async () => {
-    await api?.mutate('DELETE', `/v1/accounts/${segment(name)}`);
-    await runtime.queries.invalidateQueries();
-  };
-  const requires = !canWrite ? 'Requires config:w' : undefined;
-  return (
-    <section className="panel">
-      <h2>Accounts</h2>
-      {!canRead && <p className="muted small">Reading accounts requires config:r.</p>}
-      <ErrorNotice error={accounts.error} />
-      {accounts.isFetching && !accounts.data && <Loading />}
-      <div className="bounded">
-        {accounts.data?.accounts.map((account) => (
-          <div className="setting-row connection-row" key={account.name}>
-            <div className="connection-details">
-              <strong>
-                {account.name}
-                {account.authenticated === 'yes' ? (
-                  <span className="badge success">Signed in</span>
-                ) : account.authenticated === 'unreadable' ? (
-                  <span className="badge danger" title="meka can’t read its stored credential">
-                    Unreadable
-                  </span>
-                ) : (
-                  <span className="badge">Not signed in</span>
-                )}
-              </strong>
-              <p className="muted small">
-                {backendLabel(account.backend)}
-                {account.base_url && ` · ${account.base_url}`}
-              </p>
-            </div>
-            <div className="actions wrap">
-              <Button
-                variant="ghost"
-                disabled={!canWrite}
-                title={requires}
-                onClick={() => setSigningIn(account)}
-              >
-                {isSubscription(account.backend) ? <LogIn size={14} /> : <KeyRound size={14} />}
-                {isSubscription(account.backend) ? 'Sign in' : 'Change key'}
-              </Button>
-              <Button
-                variant="ghost"
-                disabled={!canWrite}
-                title={requires}
-                onClick={() => setRenaming(account.name)}
-              >
-                <Pencil size={14} />
-                Rename
-              </Button>
-              <ConfirmButton
-                disabled={!canWrite}
-                title="Remove account"
-                description={`Remove “${account.name}” and its stored credential? meka refuses while a profile uses it.`}
-                onConfirm={remove(account.name)}
-              >
-                <Trash2 size={14} />
-                Remove
-              </ConfirmButton>
-            </div>
-          </div>
-        ))}
-        {accounts.data?.orphaned_credentials?.map((name) => (
-          <div className="setting-row connection-row" key={`orphan:${name}`}>
-            <div className="connection-details">
-              <strong>{name}</strong>
-              <p className="muted small">A stored credential no account uses.</p>
-            </div>
-            <div className="actions wrap">
-              <ConfirmButton
-                disabled={!canWrite}
-                title="Remove credential"
-                description={`Remove the credential stored as “${name}”?`}
-                onConfirm={remove(name)}
-              >
-                <Trash2 size={14} />
-                Remove
-              </ConfirmButton>
-            </div>
-          </div>
-        ))}
-      </div>
-      {accounts.data?.accounts.length === 0 && (
-        <p className="muted small">
-          No accounts yet. An account is what meka signs in to a provider with.
-        </p>
-      )}
-      <div className="panel-footer">
-        <Button disabled={!canWrite} title={requires} onClick={() => setCreating(true)}>
-          <Plus size={16} />
-          New account
-        </Button>
-      </div>
-      <Dialog open={creating} onOpenChange={setCreating} title="New account">
-        {creating && (
-          <AccountForm
-            onSaved={async (account) => {
-              await runtime.queries.invalidateQueries();
-              setCreating(false);
-              // A subscription is added signed out; its sign-in is the next step.
-              if (isSubscription(account.backend)) setSigningIn(account);
-            }}
-          />
-        )}
-      </Dialog>
-      <Dialog
-        open={renaming !== undefined}
-        onOpenChange={(open) => {
-          if (!open) setRenaming(undefined);
-        }}
-        title="Rename account"
-        description="Its profiles and stored credential move with it."
-      >
-        {renaming !== undefined && (
-          <RenameAccount
-            name={renaming}
-            onSaved={async () => {
-              await runtime.queries.invalidateQueries();
-              setRenaming(undefined);
-            }}
-          />
-        )}
-      </Dialog>
-      <Dialog
-        open={signingIn !== undefined}
-        onOpenChange={(open) => {
-          if (!open) setSigningIn(undefined);
-        }}
-        title={`${signingIn && !isSubscription(signingIn.backend) ? 'Change key for' : 'Sign in to'} ${signingIn?.name ?? 'account'}`}
-      >
-        {signingIn && (
-          <AccountSignIn
-            account={signingIn}
-            onDone={async () => {
-              await runtime.queries.invalidateQueries();
-              setSigningIn(undefined);
-            }}
-          />
-        )}
-      </Dialog>
-    </section>
   );
 }
 
@@ -706,15 +1001,18 @@ function AccountForm({ onSaved }: { onSaved: (account: Schema['AccountView']) =>
 function RenameAccount({ name, onSaved }: { name: string; onSaved: () => Promise<void> }) {
   const { api } = useConnection();
   const action = useAction();
+  const rename = useRenameInOrder();
   const [value, setValue] = useState(name);
   async function submit(event: FormEvent) {
     event.preventDefault();
     await action.run(async () => {
       if (!api) return;
-      if (value.trim() !== name)
+      if (value.trim() !== name) {
         await api.mutate('PATCH', `/v1/accounts/${segment(name)}`, {
           name: value.trim(),
         } satisfies Schema['RenameRequest']);
+        rename('accounts', name, value.trim());
+      }
       await onSaved();
     });
   }

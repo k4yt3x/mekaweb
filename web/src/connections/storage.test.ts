@@ -57,6 +57,7 @@ it('takes shared preferences from mekaweb, checked, and leaves this device’s o
     terminalFontSize: 20,
     showTurnContext: true,
     completionSound: 'yes',
+    providerOrder: { accounts: ['work', 'work', 3], profiles: 'opus' },
     dataSaver: false,
     layout: { detailsOpen: false },
   });
@@ -77,6 +78,7 @@ it('takes shared preferences from mekaweb, checked, and leaves this device’s o
     showTurnContext: true,
     inAppNotifications: true,
     completionSound: false,
+    providerOrder: { accounts: ['work'], profiles: [] },
   });
 });
 

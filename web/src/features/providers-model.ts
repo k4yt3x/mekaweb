@@ -1,4 +1,5 @@
 import type { Schema } from '../api/client';
+import type { ProviderOrder } from '../connections/storage';
 
 export const BACKENDS = [
   { id: 'anthropic-messages', label: 'Anthropic Messages API', subscription: false },
@@ -173,4 +174,54 @@ export function createAccountBody(draft: AccountDraft): Schema['CreateAccountReq
       : {}),
     ...(isSubscription(draft.backend) ? {} : { api_key: draft.api_key.trim() }),
   };
+}
+
+/** An account and the profiles that run on it. */
+export interface ProviderGroup {
+  name: string;
+  /** Absent where the account list does not name it: without config:r, or not configured. */
+  account?: Schema['AccountView'];
+  backend: string | null | undefined;
+  profiles: Schema['ProfileView'][];
+}
+/**
+ * Profiles under their accounts, in the order they were put in; an account or profile the order
+ * does not name follows, in meka's order, and an account only a profile names comes after those.
+ */
+export function providerGroups(
+  accounts: Schema['AccountView'][] | undefined,
+  profiles: Schema['ProfileView'][],
+  order: ProviderOrder = { accounts: [], profiles: [] },
+): ProviderGroup[] {
+  const groups = new Map<string, ProviderGroup>(
+    (accounts ?? []).map((account) => [
+      account.name,
+      { name: account.name, account, backend: account.backend, profiles: [] },
+    ]),
+  );
+  for (const profile of ranked(profiles, order.profiles)) {
+    const group = groups.get(profile.account) ?? {
+      name: profile.account,
+      backend: profile.backend,
+      profiles: [],
+    };
+    group.profiles.push(profile);
+    groups.set(profile.account, group);
+  }
+  return ranked([...groups.values()], order.accounts);
+}
+/** Those `order` names first, as it has them, then the rest as they were. */
+function ranked<T extends { name: string }>(items: T[], order: readonly string[]): T[] {
+  const rank = new Map(order.map((name, index) => [name, index]));
+  const place = (item: T) => rank.get(item.name) ?? order.length;
+  return [...items].sort((a, b) => place(a) - place(b));
+}
+/** The order with `from` renamed to `to`, so a renamed account or profile keeps its place. */
+export function renameInOrder(
+  order: ProviderOrder,
+  kind: keyof ProviderOrder,
+  from: string,
+  to: string,
+): ProviderOrder {
+  return { ...order, [kind]: order[kind].map((name) => (name === from ? to : name)) };
 }

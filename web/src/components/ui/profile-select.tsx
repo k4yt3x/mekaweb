@@ -1,6 +1,8 @@
 import * as Select from '@radix-ui/react-select';
 import { Check, ChevronDown } from 'lucide-react';
 import type { Schema } from '../../api/client';
+import { useSettings } from '../../connections/context';
+import { providerGroups } from '../../features/providers-model';
 import { useOverlayPadding } from '../visual-viewport';
 
 export function ProfileSelect({
@@ -20,6 +22,8 @@ export function ProfileSelect({
 }) {
   const missing = value && !profiles.some((profile) => profile.name === value);
   const collisionPadding = useOverlayPadding();
+  // Under their accounts, in the order Providers puts them in.
+  const groups = providerGroups(undefined, profiles, useSettings().providerOrder);
   return (
     <Select.Root value={value ?? ''} onValueChange={onChange} disabled={disabled}>
       <Select.Trigger
@@ -52,18 +56,25 @@ export function ProfileSelect({
                 <Select.ItemText>{value}</Select.ItemText>
               </Select.Item>
             )}
-            {profiles.map((profile) => (
-              <Select.Item
-                className="composer-select-option"
-                key={profile.name}
-                value={profile.name}
-                title={profile.model ?? undefined}
-              >
-                <Select.ItemText>{profile.name}</Select.ItemText>
-                <Select.ItemIndicator className="composer-select-check">
-                  <Check size={14} />
-                </Select.ItemIndicator>
-              </Select.Item>
+            {groups.map((group) => (
+              <Select.Group key={group.name}>
+                {groups.length > 1 && (
+                  <Select.Label className="menu-label">{group.name}</Select.Label>
+                )}
+                {group.profiles.map((profile) => (
+                  <Select.Item
+                    className="composer-select-option"
+                    key={profile.name}
+                    value={profile.name}
+                    title={profile.model ?? undefined}
+                  >
+                    <Select.ItemText>{profile.name}</Select.ItemText>
+                    <Select.ItemIndicator className="composer-select-check">
+                      <Check size={14} />
+                    </Select.ItemIndicator>
+                  </Select.Item>
+                ))}
+              </Select.Group>
             ))}
           </Select.Viewport>
         </Select.Content>

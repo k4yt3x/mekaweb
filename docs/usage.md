@@ -86,7 +86,7 @@ It also names meka's config file and data folder, and when meka last read the fi
 
 ## Providers
 
-**Providers** holds meka's profiles and the accounts they run on. A fresh meka has neither, and mekaweb points here until it does.
+**Providers** lists meka's accounts, each with the profiles that run on it beneath. A fresh meka has neither, and mekaweb points here until it does. Click a profile to edit it; an account's **+** adds a profile on it, and each row's **⋯** holds the rest. Drag an account or a profile by its handle, or press the arrow keys on the handle, to reorder them; profile pickers list profiles under their accounts in that order.
 
 - **Accounts:** **New account** adds one for a backend. An API backend takes its key there, and **Change key** replaces it. A Claude or ChatGPT subscription signs in through the browser: **Start sign-in**, open the page, sign in, and paste the code it shows. ChatGPT instead sends the browser to a `localhost` address, which may not load on another machine; paste that address. On meka's own machine the ChatGPT sign-in can finish by itself. Rename moves the account's profiles and sign-in with it; meka refuses to remove an account a profile uses. An account's **Advanced** settings are fixed once it is added.
 - **Profiles:** A profile names an account and a model, plus fallbacks to try in order when it can't serve a turn. **Advanced** holds the settings its backend accepts, such as the context window, effort, and thinking; one left blank keeps meka's default. On the OpenAI Responses API, a model that does not reason, such as `gpt-4.1`, needs **Encrypted reasoning** and **Reasoning summary** off. The **Default** profile is the one new sessions use unless they pick another.
@@ -109,7 +109,7 @@ Sign in inside the installed app: its storage is separate from Safari's. Turn on
 
 ## Local data and connection
 
-mekaweb keeps the account, devices, push subscriptions, and the preferences every device shares, **Show context added by meka**, **In-app notifications** and **Completion sound**, in its database on the server. The browser keeps appearance, window layout, Data saver, notification permission, read marks, and text drafts. File attachments are kept in memory and are lost on reload. Clearing browser data removes those, and signs the browser out, but does not delete server sessions.
+mekaweb keeps the account, devices, push subscriptions, and the preferences every device shares, **Show context added by meka**, **In-app notifications**, **Completion sound** and the order of **Providers**, in its database on the server. The browser keeps appearance, window layout, Data saver, notification permission, read marks, and text drafts. File attachments are kept in memory and are lost on reload. Clearing browser data removes those, and signs the browser out, but does not delete server sessions.
 
 If mekaweb or meka becomes unreachable, one banner appears above the workspace. mekaweb checks for recovery automatically; **Retry** checks immediately. Recovery preserves your open view and drafts and does not repeat submissions. Warnings about uncertain actions remain with those actions.
 

@@ -4,7 +4,9 @@ import {
   createProfileBody,
   patchProfileBody,
   profileDraft,
+  providerGroups,
   readsProfileKey,
+  renameInOrder,
 } from './providers-model';
 
 it('offers each profile setting only where meka sends it', () => {
@@ -106,4 +108,50 @@ it('adds an account with a key only where the backend takes one', () => {
     max_tool_name_bytes: 64,
     api_key: 'sk-2',
   });
+});
+
+it('lists profiles under their accounts, and an account only a profile names after the rest', () => {
+  const account = (name: string) => ({ name, backend: 'anthropic-messages', authenticated: 'yes' });
+  const profile = (name: string, on: string) => ({
+    name,
+    account: on,
+    backend: 'anthropic-messages',
+    active: false,
+    vision: true,
+  });
+  const groups = providerGroups(
+    [account('work'), account('spare')],
+    [profile('a', 'gone'), profile('b', 'work'), profile('c', 'work')],
+  );
+  expect(groups.map((group) => [group.name, group.profiles.map((p) => p.name)])).toEqual([
+    ['work', ['b', 'c']],
+    ['spare', []],
+    ['gone', ['a']],
+  ]);
+  expect(groups[2]?.account).toBeUndefined();
+  expect(providerGroups(undefined, [profile('a', 'work')])[0]?.backend).toBe('anthropic-messages');
+});
+
+it('puts accounts and profiles in the order given, with ones it does not name after', () => {
+  const account = (name: string) => ({ name, backend: 'anthropic-messages', authenticated: 'yes' });
+  const profile = (name: string, on: string) => ({
+    name,
+    account: on,
+    backend: 'anthropic-messages',
+    active: false,
+    vision: true,
+  });
+  const groups = providerGroups(
+    [account('a'), account('b'), account('c')],
+    [profile('a1', 'a'), profile('a2', 'a'), profile('a3', 'a'), profile('c1', 'c')],
+    { accounts: ['c', 'gone', 'a'], profiles: ['a3', 'a1'] },
+  );
+  expect(groups.map((group) => [group.name, group.profiles.map((p) => p.name)])).toEqual([
+    ['c', ['c1']],
+    ['a', ['a3', 'a1', 'a2']],
+    ['b', []],
+  ]);
+  expect(
+    renameInOrder({ accounts: ['a'], profiles: ['a3', 'a1'] }, 'profiles', 'a1', 'first'),
+  ).toEqual({ accounts: ['a'], profiles: ['a3', 'first'] });
 });

@@ -166,7 +166,14 @@ it('takes the preferences mekaweb kept, and saves changes for every device once 
     expect(saved).toHaveLength(0);
     await vi.advanceTimersByTimeAsync(1000);
     expect(saved).toEqual([
-      { value: { showTurnContext: true, inAppNotifications: true, completionSound: true } },
+      {
+        value: {
+          showTurnContext: true,
+          inAppNotifications: true,
+          completionSound: true,
+          providerOrder: { accounts: [], profiles: [] },
+        },
+      },
     ]);
   } finally {
     stop();

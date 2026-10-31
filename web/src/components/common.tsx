@@ -151,52 +151,75 @@ export function ConfirmButton({
   disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<unknown>();
   return (
     <>
-      <Button
-        variant="ghost"
-        tone="danger"
-        disabled={disabled}
-        onClick={() => {
-          // An earlier attempt's error is not shown again.
-          setError(undefined);
-          setOpen(true);
-        }}
-      >
+      <Button variant="ghost" tone="danger" disabled={disabled} onClick={() => setOpen(true)}>
         {children}
       </Button>
-      <Dialog
+      <ConfirmAction
         open={open}
-        onOpenChange={(value) => {
-          if (!busy) setOpen(value);
-        }}
+        onOpenChange={setOpen}
         title={title}
         description={description}
-      >
-        <ErrorNotice error={error} />
-        <div className="actions">
-          <Button variant="secondary" disabled={busy} onClick={() => setOpen(false)}>
-            Cancel
-          </Button>
-          <Button
-            variant="destructive"
-            disabled={busy}
-            onClick={() => {
-              setBusy(true);
-              setError(undefined);
-              void onConfirm()
-                .then(() => setOpen(false))
-                .catch(setError)
-                .finally(() => setBusy(false));
-            }}
-          >
-            {busy ? 'Working…' : title}
-          </Button>
-        </div>
-      </Dialog>
+        onConfirm={onConfirm}
+      />
     </>
+  );
+}
+/** Asks before the destructive action `title` names, for a caller that opens it from elsewhere. */
+export function ConfirmAction({
+  open,
+  onOpenChange,
+  title,
+  description,
+  onConfirm,
+  onCloseAutoFocus,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  title: string;
+  description: string;
+  onConfirm: () => Promise<unknown>;
+  onCloseAutoFocus?: (event: Event) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>();
+  const close = () => {
+    // An earlier attempt's error is not shown again.
+    setError(undefined);
+    onOpenChange(false);
+  };
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(value) => {
+        if (!busy && !value) close();
+      }}
+      title={title}
+      description={description}
+      onCloseAutoFocus={onCloseAutoFocus}
+    >
+      <ErrorNotice error={error} />
+      <div className="actions">
+        <Button variant="secondary" disabled={busy} onClick={close}>
+          Cancel
+        </Button>
+        <Button
+          variant="destructive"
+          disabled={busy}
+          onClick={() => {
+            setBusy(true);
+            setError(undefined);
+            void onConfirm()
+              .then(close)
+              .catch(setError)
+              .finally(() => setBusy(false));
+          }}
+        >
+          {busy ? 'Working…' : title}
+        </Button>
+      </div>
+    </Dialog>
   );
 }
 export function Timestamp({ value }: { value: string | null | undefined }) {

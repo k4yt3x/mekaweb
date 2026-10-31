@@ -39,6 +39,25 @@ export function normalizeTerminalFontSize(value: unknown): number {
 function normalizeConversationAnchor(value: unknown): ConversationAnchor {
   return value === 'area' ? 'area' : 'page';
 }
+
+/** The order accounts and profiles were put in, by name; one it does not name follows them. */
+export interface ProviderOrder {
+  accounts: string[];
+  profiles: string[];
+}
+function names(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.filter((name): name is string => typeof name === 'string'))].slice(
+    0,
+    1000,
+  );
+}
+export function normalizeProviderOrder(value: unknown): ProviderOrder {
+  return {
+    accounts: names(object(value) ? value.accounts : undefined),
+    profiles: names(object(value) ? value.profiles : undefined),
+  };
+}
 /**
  * The meka this page reaches, through the mekaweb that served it. There is one; `authority` is
  * the sign-in it is reached under, so a new sign-in starts its queries afresh.
@@ -57,6 +76,7 @@ export const PORTABLE_PREFERENCES = [
   'showTurnContext',
   'inAppNotifications',
   'completionSound',
+  'providerOrder',
 ] as const;
 export type PortablePreferences = Pick<Settings, (typeof PORTABLE_PREFERENCES)[number]>;
 export interface Settings {
@@ -73,6 +93,7 @@ export interface Settings {
   showTurnContext: boolean;
   inAppNotifications: boolean;
   completionSound: boolean;
+  providerOrder: ProviderOrder;
   /** This device saves mobile data: see `docs/usage.md`. */
   dataSaver: boolean;
   layout: LayoutPreferences;
@@ -126,6 +147,7 @@ const defaults = (): Settings => ({
   showTurnContext: false,
   inAppNotifications: true,
   completionSound: false,
+  providerOrder: { accounts: [], profiles: [] },
   dataSaver: false,
   layout: {
     navigationCollapsed: false,
@@ -158,6 +180,7 @@ function normalizeSettings(value: unknown): Settings {
     showTurnContext: value.showTurnContext === true,
     inAppNotifications: value.inAppNotifications !== false,
     completionSound: value.completionSound === true,
+    providerOrder: normalizeProviderOrder(value.providerOrder),
     dataSaver: value.dataSaver === true,
     layout: {
       navigationCollapsed: object(value.layout) && value.layout.navigationCollapsed === true,
@@ -365,6 +388,9 @@ export class BrowserStorage {
   }
   completionSound(completionSound: boolean) {
     this.save({ ...this.readSettings(), completionSound });
+  }
+  providerOrder(order: ProviderOrder) {
+    this.save({ ...this.readSettings(), providerOrder: normalizeProviderOrder(order) });
   }
   dataSaver(dataSaver: boolean) {
     this.save({ ...this.readSettings(), dataSaver });
