@@ -55,17 +55,48 @@ export function groupToolResults(messages: readonly Schema['MessageView'][]) {
 
 export type HistoryMessage = ReturnType<typeof groupToolResults>['messages'][number];
 
-/** Whether a block holds someone's words: typed here, or an inbox item they sent. */
+/**
+ * Whether a block holds someone's words: typed here, an inbox item they sent, or a skill or an MCP
+ * prompt they ran.
+ */
 function spoken(block: Schema['ContentBlockView']) {
-  return block.type === 'text' || block.type === 'inbox';
+  return block.type === 'text' || block.type === 'inbox' || block.type === 'invocation';
 }
 
 /** A message someone sent, rather than one meka or a tool wrote into the conversation. */
 export function isInput(message: Schema['MessageView']) {
   return (
     message.role === 'user' &&
-    message.content.some((block) => spoken(block) || block.type === 'image')
+    message.content.some(
+      (block) => spoken(block) || block.type === 'image' || block.type === 'resource',
+    )
   );
+}
+
+/**
+ * The blocks with each file an editor attached among someone's words joined into them as its
+ * mention, `@name`, as meka shows it: the editor sends the words around a mention as blocks of
+ * their own.
+ */
+export function mentionsInline<T extends { block: Schema['ContentBlockView'] }>(
+  items: readonly T[],
+): T[] {
+  if (!items.some(({ block }) => block.type === 'resource')) return [...items];
+  const joined: T[] = [];
+  for (const item of items) {
+    const { block } = item;
+    const piece =
+      block.type === 'text' ? block.text : block.type === 'resource' ? `@${block.name}` : undefined;
+    const last = joined.at(-1);
+    if (piece === undefined) joined.push(item);
+    else if (last?.block.type === 'text')
+      joined[joined.length - 1] = {
+        ...last,
+        block: { ...last.block, text: last.block.text + piece },
+      };
+    else joined.push({ ...item, block: { type: 'text', text: piece } });
+  }
+  return joined;
 }
 
 export function groupAgentMessages(messages: HistoryMessage[]) {
@@ -113,20 +144,23 @@ export function turnIndex(messages: readonly Schema['MessageView'][], offset: nu
   return turns;
 }
 /**
- * What the messages say, as written: their text, the inbox items someone sent, and a scheduled
- * job's words, without thinking, tools, or what meka wrote around them.
+ * What the messages say, as written: their text with the files attached among it by name, the
+ * inbox items someone sent, the words sent with a skill or an MCP prompt, and a scheduled job's
+ * words, without thinking, tools, or what meka wrote around them.
  */
 export function messageText(messages: readonly Schema['MessageView'][]) {
   return messages
     .flatMap((message) =>
-      message.content.flatMap((block) =>
+      mentionsInline(message.content.map((block) => ({ block }))).flatMap(({ block }) =>
         block.type === 'text'
           ? [block.text.trim()]
           : block.type === 'inbox'
             ? [block.body.trim()]
-            : block.type === 'scheduled'
-              ? [block.prompt.trim()]
-              : [],
+            : block.type === 'invocation'
+              ? [block.directive.trim()]
+              : block.type === 'scheduled'
+                ? [block.prompt.trim()]
+                : [],
       ),
     )
     .filter(Boolean)
@@ -134,15 +168,20 @@ export function messageText(messages: readonly Schema['MessageView'][]) {
 }
 
 /**
- * What sending a saved message again takes: its text, and its images by the hash the session holds
- * them under. Undefined when it has nothing to send, or an image without a hash to name it by.
+ * What sending a saved message again takes: its text, the skill it ran, and its images by the hash
+ * the session holds them under. An MCP prompt goes again as the words it expanded to, since only a
+ * skill is run by name over HTTP. Undefined when it has nothing to send, or an image without a
+ * hash to name it by.
  */
 export function resendable(message: Schema['MessageView']) {
   const images = message.content.flatMap((block) => (block.type === 'image' ? [block] : []));
-  const text = messageText([message]);
-  if (images.some((image) => !image.hash) || (!text && !images.length)) return;
+  const invocation = message.content.find((block) => block.type === 'invocation');
+  const skill = invocation?.kind === 'skill' ? invocation.name : '';
+  const text = invocation && !skill ? invocation.text.trim() : messageText([message]);
+  if (images.some((image) => !image.hash) || (!text && !images.length && !skill)) return;
   return {
     text,
+    skill,
     images: images.map((image, index) => ({ name: `Image ${index + 1}`, hash: image.hash! })),
   };
 }
@@ -165,7 +204,8 @@ export function groupLiveMessages(blocks: LiveBlock[], submissions: Submission[]
   const ownItems = new Set(submissions.flatMap((s) => (s.preview && s.itemId ? [s.itemId] : [])));
   const unadmitted = submissions.filter((s) => s.kind === 'turn' && !s.turnId && s.preview);
   const admitting = unadmitted.some((s) => s.state === 'sending');
-  // meka writes no words for an empty message, and puts a skill's body after them.
+  // meka writes no words for an empty message. Before 0.87.0 it put a skill's body after them,
+  // where it now sends the words with the skill.
   const unresolved = unadmitted.flatMap((s) =>
     s.state === 'uncertain' && s.body.message.trim()
       ? [{ message: s.body.message, skill: 'options' in s.body && Boolean(s.body.options?.skill) }]
@@ -196,7 +236,11 @@ export function groupLiveMessages(blocks: LiveBlock[], submissions: Submission[]
     }
     if (block.kind === 'message') {
       const { message, opening } = block;
-      const words = message.content.flatMap((b) => (b.type === 'text' ? [b.text] : [])).join('\n');
+      const words = message.content
+        .flatMap((b) =>
+          b.type === 'text' ? [b.text] : b.type === 'invocation' ? [b.directive] : [],
+        )
+        .join('\n');
       const ownOpening =
         opening &&
         (admitting ||
@@ -205,7 +249,7 @@ export function groupLiveMessages(blocks: LiveBlock[], submissions: Submission[]
       const content = message.content.filter((b) =>
         b.type === 'inbox'
           ? !((b.item_id && ownItems.has(b.item_id)) || unidentified.has(b.body))
-          : !(ownOpening && ['text', 'image', 'turn_context'].includes(b.type)),
+          : !(ownOpening && ['text', 'invocation', 'image', 'turn_context'].includes(b.type)),
       );
       if (content.some((b) => b.type !== 'turn_context'))
         groups.push({ kind: 'message', key: `message-${index}`, message: { ...message, content } });

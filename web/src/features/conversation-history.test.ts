@@ -6,6 +6,7 @@ import {
   groupToolResults,
   isInput,
   liveAfterSaved,
+  mentionsInline,
   messageText,
   pendingInboxMessages,
   recoverableSubmissions,
@@ -483,11 +484,21 @@ it('leaves out only this tab’s own blocks from an opening that carries others'
   expect(
     shown(fed('any', true, context, { type: 'text', text: 'Someone else.' }), [unresolved]),
   ).toEqual(['turn_context', 'text']);
-  // meka writes a skill's body after the words, and no words at all for an empty message.
+  // meka sends the words with the skill they ran; before 0.87.0 it wrote the skill's body after
+  // them. It writes no words at all for an empty message.
   const skilled: Submission = {
     ...unresolved,
     body: { message: 'Hello.', detach: true, options: { skill: 'review' } },
   };
+  const invoked: Schema['ContentBlockView'] = {
+    type: 'invocation',
+    kind: 'skill',
+    name: 'review',
+    directive: 'Hello.',
+    text: 'Hello.\n\nReview carefully.',
+  };
+  expect(shown(fed('any', true, context, invoked), [skilled])).toEqual([]);
+  expect(shown(fed('mine', true, context, invoked), [sent])).toEqual([]);
   const withSkill = { type: 'text', text: 'Hello.\n\nReview carefully.' } as const;
   expect(shown(fed('any', true, context, withSkill), [skilled])).toEqual([]);
   const empty: Submission = { ...unresolved, body: { message: '', detach: true } };
@@ -808,8 +819,8 @@ it('keeps a background report in the turn it reached, and shows what meka relaye
   ]);
   // A fire's words are the job's, copied and sent again as a message's would be.
   expect(messageText([input[4]!, input[6]!, input[8]!])).toBe('Check the logs too.\n\nStretch.');
-  expect(resendable(input[4]!)).toEqual({ text: 'Check the logs too.', images: [] });
-  expect(resendable(input[6]!)).toEqual({ text: 'Stretch.', images: [] });
+  expect(resendable(input[4]!)).toEqual({ text: 'Check the logs too.', skill: '', images: [] });
+  expect(resendable(input[6]!)).toEqual({ text: 'Stretch.', skill: '', images: [] });
   expect(resendable(input[8]!)).toBeUndefined();
 });
 
@@ -833,6 +844,7 @@ it('sends a message again with its images by hash, or not at all if one has none
     resendable(message('user', { type: 'text', text: 'Compare.' }, image('a'), image('b'))),
   ).toEqual({
     text: 'Compare.',
+    skill: '',
     images: [
       { name: 'Image 1', hash: 'a' },
       { name: 'Image 2', hash: 'b' },
@@ -840,8 +852,62 @@ it('sends a message again with its images by hash, or not at all if one has none
   });
   expect(resendable(message('user', image('a')))).toEqual({
     text: '',
+    skill: '',
     images: [{ name: 'Image 1', hash: 'a' }],
   });
   expect(resendable(message('user', { type: 'text', text: 'Hm.' }, image()))).toBeUndefined();
   expect(resendable(message('user', { type: 'turn_context', text: 'Context.' }))).toBeUndefined();
+});
+
+it('takes a skill or an MCP prompt someone ran as their words, and runs a skill again by name', () => {
+  const invoked = (kind: string, directive: string): Schema['ContentBlockView'] => ({
+    type: 'invocation',
+    kind,
+    name: kind === 'skill' ? 'review' : 'docs:explain',
+    directive,
+    text: `${directive}\n\nThe body.`,
+  });
+  const skill = message(
+    'user',
+    { type: 'turn_context', text: 'Context.' },
+    invoked('skill', 'The parser.'),
+  );
+  expect(isInput(skill)).toBe(true);
+  expect(messageText([skill])).toBe('The parser.');
+  expect(resendable(skill)).toEqual({ text: 'The parser.', skill: 'review', images: [] });
+  // A skill run without words goes again; an MCP prompt goes as the words it expanded to.
+  expect(resendable(message('user', invoked('skill', '')))).toEqual({
+    text: '',
+    skill: 'review',
+    images: [],
+  });
+  expect(resendable(message('user', invoked('mcp_prompt', 'Ownership.')))).toEqual({
+    text: 'Ownership.\n\nThe body.',
+    skill: '',
+    images: [],
+  });
+});
+
+it('reads a file an editor attached as its mention, among the words around it', () => {
+  const attached = message(
+    'user',
+    { type: 'text', text: 'Look at ' },
+    { type: 'resource', uri: 'file:///a.rs', name: 'a.rs', text: '<resource>fn a() {}</resource>' },
+    { type: 'text', text: ' and fix it.' },
+    { type: 'image', media_type: 'image/png', hash: 'h' },
+  );
+  expect(isInput(attached)).toBe(true);
+  expect(messageText([attached])).toBe('Look at @a.rs and fix it.');
+  expect(mentionsInline(attached.content.map((block, index) => ({ block, index })))).toEqual([
+    { block: { type: 'text', text: 'Look at @a.rs and fix it.' }, index: 0 },
+    { block: { type: 'image', media_type: 'image/png', hash: 'h' }, index: 3 },
+  ]);
+  // Words with no file among them keep their blocks.
+  const plain = [
+    { type: 'text', text: 'One.' },
+    { type: 'text', text: 'Two.' },
+  ] as const;
+  expect(mentionsInline(plain.map((block) => ({ block })))).toEqual(
+    plain.map((block) => ({ block })),
+  );
 });

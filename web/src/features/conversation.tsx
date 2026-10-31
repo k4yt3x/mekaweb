@@ -59,6 +59,7 @@ import {
   liveAfterSaved,
   groupToolResults,
   isInput,
+  mentionsInline,
   messageText,
   pendingInboxMessages,
   recoverableSubmissions,
@@ -244,10 +245,10 @@ export function Conversation({ state }: { state: SessionState }) {
     !state.loading &&
     !changes.busy;
   const run = (action: () => Promise<unknown>) => void changes.run(action);
-  const resend = (count: number, message: string, images: ImageAttachment[]) =>
+  const resend = (count: number, message: string, images: ImageAttachment[], skill: string) =>
     run(async () => {
       try {
-        await controller?.resend(state.id, count, message, images);
+        await controller?.resend(state.id, count, message, images, skill);
         setEditing(undefined);
       } catch (error) {
         if (!(error instanceof UnsentMessage)) throw error;
@@ -255,10 +256,11 @@ export function Conversation({ state }: { state: SessionState }) {
         setEditing(undefined);
         draft.setText((value) => (value.trim() ? `${value}\n\n${error.text}` : error.text));
         const options = controller?.draft(state.id) ?? emptyComposerOptions;
-        if (error.images.length)
+        if (error.images.length || error.skill)
           controller?.saveDraft(state.id, {
             ...options,
             images: [...options.images, ...error.images],
+            skill: error.skill || options.skill,
           });
         throw new Error(`${error.message} It is back in the message input.`, { cause: error });
       }
@@ -298,7 +300,7 @@ export function Conversation({ state }: { state: SessionState }) {
                 : undefined
             }
             onCancel={() => setEditing(undefined)}
-            onSend={(message) => resend(turn.turns, message, again.images)}
+            onSend={(message) => resend(turn.turns, message, again.images, again.skill)}
           />
         ),
         actions: (
@@ -356,7 +358,7 @@ export function Conversation({ state }: { state: SessionState }) {
                       }
                     : undefined
                 }
-                onRun={() => again && resend(turn.turns, again.text, again.images)}
+                onRun={() => again && resend(turn.turns, again.text, again.images, again.skill)}
               />
               <HistoryAction
                 icon={<GitBranch size={15} />}
@@ -735,7 +737,11 @@ function ScheduledFire({ job, prompt, text }: { job: string; prompt: string; tex
 function sender(message: Schema['MessageView']) {
   const sources = new Set(
     message.content.flatMap((block) =>
-      block.type === 'text' ? [''] : block.type === 'inbox' ? [block.source ?? ''] : [],
+      block.type === 'text' || block.type === 'invocation'
+        ? ['']
+        : block.type === 'inbox'
+          ? [block.source ?? '']
+          : [],
     ),
   );
   const [source] = sources;
@@ -795,7 +801,7 @@ function Message({
   if (!message) return null;
   // Filter only the rendered blocks; preserve message boundaries, indexes, and saved history.
   const content = messages.flatMap(({ blocks, index: messageIndex }) =>
-    blocks.flatMap(({ block, index }) =>
+    mentionsInline(blocks).flatMap(({ block, index }) =>
       showTurnContext || block.type !== 'turn_context' ? [{ block, index, messageIndex }] : [],
     ),
   );
@@ -1090,6 +1096,15 @@ function ContentBlock({
       return <Nudge kind={block.kind} text={block.text} />;
     case 'inbox':
       return <Markdown text={block.body} />;
+    case 'invocation':
+      return (
+        <>
+          {block.directive.trim() && <Markdown text={block.directive} />}
+          <p className="muted small">
+            {block.kind === 'mcp_prompt' ? 'Prompt' : 'Skill'}: {block.name}
+          </p>
+        </>
+      );
     case 'scheduled':
       return <ScheduledFire job={block.job_id} prompt={block.prompt} text={block.text} />;
     case 'background_report':

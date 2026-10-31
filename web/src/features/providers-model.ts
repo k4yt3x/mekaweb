@@ -16,11 +16,14 @@ export function isSubscription(backend: string | null | undefined) {
   return BACKENDS.some((entry) => entry.id === backend && entry.subscription);
 }
 
-// meka 0.85.0: src/config.rs::Backend::reads_account_key and reads_profile_key. meka refuses a
+// meka 0.87.0: src/config.rs::Backend::reads_account_key and reads_profile_key. meka refuses a
 // key the backend never reads, so the forms offer only these.
 export function readsAccountKey(backend: string, key: string) {
   if (key === 'client_id' || key === 'oauth_token_url') return isSubscription(backend);
   if (key === 'interleaved_thinking') return backend === 'anthropic-messages';
+  if (key === 'prompt_cache_key') return backend === 'openai-responses';
+  if (key === 'stream_usage') return backend === 'openai-chat-completions';
+  if (key === 'max_tool_name_bytes') return !isSubscription(backend);
   return true;
 }
 export function readsProfileKey(backend: string | null | undefined, key: string) {
@@ -28,6 +31,8 @@ export function readsProfileKey(backend: string | null | undefined, key: string)
   if (key === 'thinking' || key === 'thinking_budget')
     return backend === 'anthropic-messages' || backend === 'claude-subscription';
   if (key === 'cache_control') return backend === 'anthropic-messages';
+  if (key === 'encrypted_reasoning' || key === 'reasoning_summary')
+    return backend === 'openai-responses';
   if (key === 'deferred_tools') return backend !== 'openai-chat-completions';
   return true;
 }
@@ -49,6 +54,8 @@ export interface ProfileDraft {
   thinking_budget: string;
   cache_control: string;
   thinking_display: string;
+  encrypted_reasoning: string;
+  reasoning_summary: string;
 }
 const counts = [
   'context_window',
@@ -57,7 +64,7 @@ const counts = [
   'thinking_budget',
 ] as const;
 const words = ['effort', 'deferred_tools', 'thinking', 'thinking_display'] as const;
-const switches = ['vision', 'cache_control'] as const;
+const switches = ['vision', 'cache_control', 'encrypted_reasoning', 'reasoning_summary'] as const;
 type Settings = Pick<
   Schema['PatchProfileRequest'],
   (typeof counts)[number] | (typeof words)[number] | (typeof switches)[number]
@@ -82,6 +89,8 @@ export function profileDraft(profile?: Schema['ProfileDetailView']): ProfileDraf
     thinking_budget: text(profile?.thinking_budget),
     cache_control: text(profile?.cache_control),
     thinking_display: text(profile?.thinking_display),
+    encrypted_reasoning: text(profile?.encrypted_reasoning),
+    reasoning_summary: text(profile?.reasoning_summary),
   };
 }
 
@@ -139,18 +148,28 @@ export interface AccountDraft {
   client_id: string;
   oauth_token_url: string;
   interleaved_thinking: string;
+  prompt_cache_key: string;
+  stream_usage: string;
+  max_tool_name_bytes: string;
 }
 export function createAccountBody(draft: AccountDraft): Schema['CreateAccountRequest'] {
+  const reads = (key: keyof AccountDraft) =>
+    Boolean(draft[key].trim()) && readsAccountKey(draft.backend, key);
   const optional = (key: 'base_url' | 'client_id' | 'oauth_token_url') =>
-    draft[key].trim() && readsAccountKey(draft.backend, key) ? { [key]: draft[key].trim() } : {};
+    reads(key) ? { [key]: draft[key].trim() } : {};
+  const toggle = (key: 'interleaved_thinking' | 'prompt_cache_key' | 'stream_usage') =>
+    reads(key) ? { [key]: draft[key] === 'true' } : {};
   return {
     name: draft.name.trim(),
     backend: draft.backend,
     ...optional('base_url'),
     ...optional('client_id'),
     ...optional('oauth_token_url'),
-    ...(draft.interleaved_thinking && readsAccountKey(draft.backend, 'interleaved_thinking')
-      ? { interleaved_thinking: draft.interleaved_thinking === 'true' }
+    ...toggle('interleaved_thinking'),
+    ...toggle('prompt_cache_key'),
+    ...toggle('stream_usage'),
+    ...(reads('max_tool_name_bytes')
+      ? { max_tool_name_bytes: Number(draft.max_tool_name_bytes) }
       : {}),
     ...(isSubscription(draft.backend) ? {} : { api_key: draft.api_key.trim() }),
   };

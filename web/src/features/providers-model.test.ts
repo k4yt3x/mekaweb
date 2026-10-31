@@ -15,6 +15,8 @@ it('offers each profile setting only where meka sends it', () => {
   expect(readsProfileKey('openai-responses', 'thinking')).toBe(false);
   expect(readsProfileKey('openai-chat-completions', 'deferred_tools')).toBe(false);
   expect(readsProfileKey('openai-chat-completions', 'effort')).toBe(true);
+  expect(readsProfileKey('openai-responses', 'encrypted_reasoning')).toBe(true);
+  expect(readsProfileKey('chatgpt-subscription', 'reasoning_summary')).toBe(false);
 });
 
 it('adds a profile with what it states, typed, and drops what its backend never sends', () => {
@@ -72,6 +74,9 @@ it('adds an account with a key only where the backend takes one', () => {
     client_id: ' custom ',
     oauth_token_url: '',
     interleaved_thinking: 'false',
+    prompt_cache_key: 'false',
+    stream_usage: 'false',
+    max_tool_name_bytes: '64',
   };
   expect(createAccountBody(draft)).toEqual({
     name: 'claude',
@@ -89,6 +94,16 @@ it('adds an account with a key only where the backend takes one', () => {
     name: 'claude',
     backend: 'anthropic-messages',
     interleaved_thinking: false,
+    max_tool_name_bytes: 64,
     api_key: 'sk-1',
+  });
+  expect(
+    createAccountBody({ ...draft, backend: 'openai-responses', api_key: 'sk-2', client_id: '' }),
+  ).toEqual({
+    name: 'claude',
+    backend: 'openai-responses',
+    prompt_cache_key: false,
+    max_tool_name_bytes: 64,
+    api_key: 'sk-2',
   });
 });

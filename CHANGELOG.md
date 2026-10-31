@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Providers: switch off the OpenAI requests meka 0.87.0 adds, and cap an account's tool names.
+
+### Changed
+
+- Recognize meka 0.87.0 as a verified server version; meka 0.85.0 and newer still connect.
+
+### Fixed
+
+- A message that ran a skill or attached a file shows on meka 0.87.0, and resends with its skill.
+
 ## [0.30.0] - 2026-10-29
 
 ### Changed

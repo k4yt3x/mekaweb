@@ -1,6 +1,6 @@
 # API schema maintenance
 
-`meka-0.86.0.json` was captured from meka `0.86.0`, commit `13e1e2493ca3185a086c3758656bb9ed1259d158`, through `/v1/openapi.json` with `[serve].docs = true`. The generated REST types are committed in `web/src/api/schema.d.ts`; runtime connections do not require schema access.
+`meka-0.87.0.json` was captured from meka `0.87.0`, commit `b1f3da77ee77891e171fae06b798ea1d169df591`, through `/v1/openapi.json` with `[serve].docs = true`. The generated REST types are committed in `web/src/api/schema.d.ts`; runtime connections do not require schema access.
 
 mekaweb requires meka 0.85.0 or newer and refuses older servers when it connects. Compared with 0.68.0, the 0.70.0 and 0.71.0 APIs change these shapes the client used:
 
@@ -70,18 +70,27 @@ mekaweb requires meka 0.85.0 or newer and refuses older servers when it connects
 
 0.86.0 changes no shape the client uses. The export archive is format 17, and 0.86.0 reads a format 16 archive as it is.
 
+0.87.0 changes these:
+
+- A user message keeps the kind of what meka expanded. An `invocation` block is a skill or an MCP prompt run by name, with its `kind`, `skill` or `mcp_prompt`, the `name`, and the `directive`, the words sent with it; a `resource` block is a file an editor attached, with its `uri` and `name`, in its place among the `text` blocks. On each, `text` is what the model read, body or contents included. A turn sent with `options.skill` opens with an `invocation` where it opened with the words and the skill's body as one `text` block; older rows keep that form. The client shows the directive and the skill's name, as it shows a skill it sent, and runs the skill again by name when the message is sent again. An MCP prompt is sent again as the words it expanded to, since a turn names only a skill. A resource shows as its mention, `@name`, joined into the words around it, as meka's screen shows it.
+- Feed event ids start above the clock's microseconds when a process loads the session, so a `Last-Event-ID` from before a restart is answered with a `feed.gap` naming no count. The client keeps ids as strings and compares them as `BigInt`s, which the larger values do not change.
+- `openai-responses` asks for encrypted reasoning, a reasoning summary, and a cache key, and `openai-chat-completions` for usage on every streamed request. A profile turns the first two off with `encrypted_reasoning` and `reasoning_summary`, and an account the others with `prompt_cache_key` and `stream_usage`; `max_tool_name_bytes` caps an API-key account's tool names. The forms offer each where meka's `Backend::reads_account_key` and `reads_profile_key` say the backend reads it. An account takes its settings only when it is added.
+- A cron job takes `timezone`, and a job lists it; without one, a pattern is read in the server's zone as before, and the form still sends none.
+- `GET /v1/instructions` names `path` and `source` only to a token with `config:r` or `config:w`; mekaweb's token holds every scope.
+- The export archive is format 18. BMP is converted to PNG rather than passed through; an image stored before keeps its type.
+
 0.70.0 also adds turn records, the `/v1/stream` server feed, conditional rewind and fork through `ETag` and `If-Match`, `conversation.rewound`, `permission_resolved`, `approvals_pending`, the `parent` list filter, and the session's open `checklist` with `checklist.updated`. The client shows the open checklist above the message input. Notices are ephemeral: a running turn's show inline where they arrived, warnings and errors also stay below the conversation, and none survives a reload. The session feed parser ignores events it does not handle.
 
 A shell command may print 64 MiB, all of which `tool_call.completed` carries, while the saved result stays a bounded preview. The SSE parser therefore skips data past 2,000,000 characters and keeps the frame's id, so a reconnect cannot replay it. A skipped tool completion keeps its call, outcome, and correlation from the ends of its JSON, and other skipped events become a notice.
 
 The feed's 409 covers `session-not-loaded`: a token with only `sessions:r` does not load a session by attaching. The client then shows the saved conversation and retries the feed until the server loads the session. `POST /compact` runs as a turn on the feed, with `source: "compaction"` on `turn.started`; the client shows it as compacting and does not notify when it ends.
 
-Schema capture is a manual maintenance step. Choose a disposable meka instance with `[serve].docs = true`, confirm its version, and download its schema. For a 0.86.0 instance listening on port 8081:
+Schema capture is a manual maintenance step. Choose a disposable meka instance with `[serve].docs = true`, confirm its version, and download its schema. For a 0.87.0 instance listening on port 8081:
 
 ```sh
-curl --fail --silent --show-error http://127.0.0.1:8081/v1/openapi.json --output docs/api/meka-0.86.0.json
+curl --fail --silent --show-error http://127.0.0.1:8081/v1/openapi.json --output docs/api/meka-0.87.0.json
 cd web
-npx prettier --write ../docs/api/meka-0.86.0.json
+npx prettier --write ../docs/api/meka-0.87.0.json
 npm run api:generate
 ```
 

@@ -4,7 +4,7 @@
     "title": "meka HTTP API",
     "description": "Service-to-service API for driving meka agent turns programmatically. Mirrors the wire format described in the HTTP API docs. A field that has no value is omitted from every response and event, never sent as `null`.",
     "license": { "name": "AGPL-3.0-or-later" },
-    "version": "0.86.0"
+    "version": "0.87.0"
   },
   "paths": {
     "/v1/accounts": {
@@ -647,9 +647,12 @@
           }
         },
         "security": [
-          {
-            "bearerAuth": ["sessions:r", "mcp:r", "skills:r", "memory:r", "schedule:r", "config:r"]
-          }
+          { "bearerAuth": ["sessions:r"] },
+          { "bearerAuth": ["mcp:r"] },
+          { "bearerAuth": ["skills:r"] },
+          { "bearerAuth": ["memory:r"] },
+          { "bearerAuth": ["schedule:r"] },
+          { "bearerAuth": ["config:r"] }
         ]
       }
     },
@@ -784,9 +787,12 @@
           }
         },
         "security": [
-          {
-            "bearerAuth": ["sessions:r", "mcp:r", "skills:r", "memory:r", "schedule:r", "config:r"]
-          }
+          { "bearerAuth": ["sessions:r"] },
+          { "bearerAuth": ["mcp:r"] },
+          { "bearerAuth": ["skills:r"] },
+          { "bearerAuth": ["memory:r"] },
+          { "bearerAuth": ["schedule:r"] },
+          { "bearerAuth": ["config:r"] }
         ]
       },
       "post": {
@@ -1690,9 +1696,12 @@
           }
         },
         "security": [
-          {
-            "bearerAuth": ["sessions:r", "mcp:r", "skills:r", "memory:r", "schedule:r", "config:r"]
-          }
+          { "bearerAuth": ["sessions:r"] },
+          { "bearerAuth": ["mcp:r"] },
+          { "bearerAuth": ["skills:r"] },
+          { "bearerAuth": ["memory:r"] },
+          { "bearerAuth": ["schedule:r"] },
+          { "bearerAuth": ["config:r"] }
         ]
       },
       "post": {
@@ -1942,9 +1951,12 @@
           }
         },
         "security": [
-          {
-            "bearerAuth": ["sessions:r", "mcp:r", "skills:r", "memory:r", "schedule:r", "config:r"]
-          }
+          { "bearerAuth": ["sessions:r"] },
+          { "bearerAuth": ["mcp:r"] },
+          { "bearerAuth": ["skills:r"] },
+          { "bearerAuth": ["memory:r"] },
+          { "bearerAuth": ["schedule:r"] },
+          { "bearerAuth": ["config:r"] }
         ]
       },
       "post": {
@@ -3482,8 +3494,8 @@
     "/v1/sessions/{id}/stream": {
       "get": {
         "tags": ["turn"],
-        "summary": "`GET /v1/sessions/{id}/stream`: rejoin the current turn's SSE stream.",
-        "description": "Replays the events after `Last-Event-ID` from a bounded per-turn ring, then follows the live\nstream. When the turn has already ended, the backlog plus its terminal event are delivered and\nthe connection closes, so a client that dropped at the last moment still learns the outcome.\n\nTwo limits worth stating plainly. The ring holds `[serve] stream_replay_events` events, so a\nclient that was away longer than that gets a `notice` saying its replay has a hole rather than a\ntranscript that silently skips. And only the most recent turn is retained: reconnecting after a\n*newer* turn has started returns that turn's stream, which the `turn_id` on the re-issued\n`turn.started` identifies.\n\nA sub-agent's id names its own feed for as long as this process runs it: the same events a\nsession's feed carries, read-only, with `turn.started` naming the parent and its `agent_spawn`\ncall. Its prompts park on the parent's feed, so `attend` is refused here.",
+        "summary": "`GET /v1/sessions/{id}/stream`: the session's feed, every event of every turn.",
+        "description": "Replays the events after `Last-Event-ID` from the feed's bounded ring, which spans turns, then\nfollows the live feed for as long as the connection is held. A client that rejoins after a turn\nended still learns how it ended from the replay.\n\nThe ring holds the latest `[serve] stream_replay_events` events within its byte budget, so a\nclient that was away longer than that is handed a `feed.gap` event saying its replay has a hole\nrather than a transcript that silently skips.\n\nA sub-agent's id names its own feed for as long as this process runs it: the same events a\nsession's feed carries, read-only, with `turn.started` naming the parent and its `agent_spawn`\ncall. Its prompts park on the parent's feed, so `attend` is refused here.",
         "operationId": "stream_turn",
         "parameters": [
           {
@@ -3977,9 +3989,12 @@
           }
         },
         "security": [
-          {
-            "bearerAuth": ["sessions:r", "mcp:r", "skills:r", "memory:r", "schedule:r", "config:r"]
-          }
+          { "bearerAuth": ["sessions:r"] },
+          { "bearerAuth": ["mcp:r"] },
+          { "bearerAuth": ["skills:r"] },
+          { "bearerAuth": ["memory:r"] },
+          { "bearerAuth": ["schedule:r"] },
+          { "bearerAuth": ["config:r"] }
         ]
       }
     },
@@ -4284,10 +4299,23 @@
             "type": ["boolean", "null"],
             "description": "Whether the interleaved-thinking beta is sent, when the account states it."
           },
+          "max_tool_name_bytes": {
+            "type": ["integer", "null"],
+            "description": "The longest tool name the endpoint takes, when the account states it.",
+            "minimum": 0
+          },
           "name": { "type": "string" },
           "oauth_token_url": {
             "type": ["string", "null"],
             "description": "The OAuth token endpoint the account's logins and refreshes post to, when it states one."
+          },
+          "prompt_cache_key": {
+            "type": ["boolean", "null"],
+            "description": "Whether `prompt_cache_key` is sent, when the account states it."
+          },
+          "stream_usage": {
+            "type": ["boolean", "null"],
+            "description": "Whether a streamed request asks for its usage, when the account states it."
           }
         }
       },
@@ -4609,6 +4637,29 @@
           },
           {
             "type": "object",
+            "description": "A skill or an MCP prompt somebody invoked by name: `kind` is `skill` or `mcp_prompt`,\n`name` what was invoked (an MCP prompt as `server:prompt`), `directive` the words typed\nwith it, a file an editor attached among them named by its mention (`@name`), blank when\nnone were, and `text` what the model read, the expanded body and file contents included.",
+            "required": ["kind", "name", "directive", "text", "type"],
+            "properties": {
+              "directive": { "type": "string" },
+              "kind": { "type": "string" },
+              "name": { "type": "string" },
+              "text": { "type": "string" },
+              "type": { "type": "string", "enum": ["invocation"] }
+            }
+          },
+          {
+            "type": "object",
+            "description": "A resource an editor attached among the person's words, where it was attached: its `uri`\nand `name`, with `text` the tag the model read, contents included.",
+            "required": ["uri", "name", "text", "type"],
+            "properties": {
+              "name": { "type": "string" },
+              "text": { "type": "string" },
+              "type": { "type": "string", "enum": ["resource"] },
+              "uri": { "type": "string" }
+            }
+          },
+          {
+            "type": "object",
             "required": ["media_type", "type"],
             "properties": {
               "hash": {
@@ -4729,10 +4780,23 @@
             "type": ["boolean", "null"],
             "description": "Whether to send the interleaved-thinking beta, read by `anthropic-messages` alone."
           },
+          "max_tool_name_bytes": {
+            "type": ["integer", "null"],
+            "description": "The longest tool name the endpoint takes, in bytes, read by the three API-key backends.",
+            "minimum": 0
+          },
           "name": { "type": "string" },
           "oauth_token_url": {
             "type": ["string", "null"],
             "description": "The OAuth token endpoint, read by the two subscription backends alone."
+          },
+          "prompt_cache_key": {
+            "type": ["boolean", "null"],
+            "description": "Whether to send `prompt_cache_key`, read by `openai-responses` alone."
+          },
+          "stream_usage": {
+            "type": ["boolean", "null"],
+            "description": "Whether a streamed request asks for its usage, read by `openai-chat-completions` alone."
           }
         },
         "additionalProperties": false
@@ -4760,7 +4824,7 @@
           },
           "cron": {
             "type": ["string", "null"],
-            "description": "5-field cron pattern, evaluated in the host's local time."
+            "description": "5-field cron pattern, read in `timezone`."
           },
           "every": {
             "type": ["string", "null"],
@@ -4778,6 +4842,10 @@
           "prompt": {
             "type": "string",
             "description": "What the agent is asked to do when the job fires."
+          },
+          "timezone": {
+            "type": ["string", "null"],
+            "description": "IANA time zone a `cron` pattern is read in; the host machine's when omitted. Refused beside\n`at` or `every`, which read none."
           }
         },
         "additionalProperties": false
@@ -4799,6 +4867,7 @@
           },
           "deferred_tools": { "type": ["string", "null"] },
           "effort": { "type": ["string", "null"] },
+          "encrypted_reasoning": { "type": ["boolean", "null"] },
           "fallbacks": {
             "type": "array",
             "items": { "type": "string" },
@@ -4808,6 +4877,7 @@
           "max_request_bytes": { "type": ["integer", "null"], "format": "int64", "minimum": 0 },
           "model": { "type": "string" },
           "name": { "type": "string" },
+          "reasoning_summary": { "type": ["boolean", "null"] },
           "thinking": { "type": ["string", "null"] },
           "thinking_budget": { "type": ["integer", "null"], "format": "int64", "minimum": 0 },
           "thinking_display": { "type": ["string", "null"] },
@@ -5042,11 +5112,11 @@
           },
           "path": {
             "type": ["string", "null"],
-            "description": "The file `PUT /v1/instructions` writes, `instructions.md` in the config directory, when\nthat file is what this server reads; absent when another source is in charge."
+            "description": "The file `PUT /v1/instructions` writes, `instructions.md` in the config directory, when\nthat file is what this server reads; absent when another source is in charge, and for a\ncaller without `config:r` or `config:w`."
           },
           "source": {
             "type": ["string", "null"],
-            "description": "Where the instructions came from, for an operator diagnosing \"why is it behaving like\nthat\". Absent when none are configured."
+            "description": "Where the instructions came from, for an operator diagnosing \"why is it behaving like\nthat\". Absent when none are configured, and for a caller without `config:r` or `config:w`."
           },
           "writable": {
             "type": "boolean",
@@ -5629,6 +5699,7 @@
           },
           "deferred_tools": { "type": ["string", "null"] },
           "effort": { "type": ["string", "null"] },
+          "encrypted_reasoning": { "type": ["boolean", "null"] },
           "fallbacks": { "type": ["array", "null"], "items": { "type": "string" } },
           "max_output_tokens": { "type": ["integer", "null"], "format": "int64", "minimum": 0 },
           "max_request_bytes": { "type": ["integer", "null"], "format": "int64", "minimum": 0 },
@@ -5637,6 +5708,7 @@
             "type": ["string", "null"],
             "description": "The name the profile moves to, taking every session recorded on it along. Sent on its\nown: a rename moves rows in the store, and is not combined with a change to the file."
           },
+          "reasoning_summary": { "type": ["boolean", "null"] },
           "thinking": { "type": ["string", "null"] },
           "thinking_budget": { "type": ["integer", "null"], "format": "int64", "minimum": 0 },
           "thinking_display": { "type": ["string", "null"] },
@@ -5763,11 +5835,13 @@
           "context_window": { "type": ["integer", "null"], "format": "int64", "minimum": 0 },
           "deferred_tools": { "type": ["string", "null"] },
           "effort": { "type": ["string", "null"] },
+          "encrypted_reasoning": { "type": ["boolean", "null"] },
           "fallbacks": { "type": "array", "items": { "type": "string" } },
           "max_output_tokens": { "type": ["integer", "null"], "format": "int64", "minimum": 0 },
           "max_request_bytes": { "type": ["integer", "null"], "format": "int64", "minimum": 0 },
           "model": { "type": ["string", "null"] },
           "name": { "type": "string" },
+          "reasoning_summary": { "type": ["boolean", "null"] },
           "thinking": { "type": ["string", "null"] },
           "thinking_budget": { "type": ["integer", "null"], "format": "int64", "minimum": 0 },
           "thinking_display": { "type": ["string", "null"] },
@@ -5975,9 +6049,13 @@
           "prompt": { "type": "string" },
           "schedule": {
             "type": "string",
-            "description": "Human-readable rendering of the schedule, e.g. `every 30m`, `cron 0 9 * * 1-5`, or an RFC\n3339 instant for a one-shot."
+            "description": "Human-readable rendering of the schedule, e.g. `every 30m`, `0 9 * * 1-5 in Asia/Tokyo`,\nor the instant a one-shot fires."
           },
           "session_id": { "type": "string", "format": "uuid" },
+          "timezone": {
+            "type": ["string", "null"],
+            "description": "The IANA zone a cron job's pattern is read in; absent for one read in the host machine's\nzone, and for every other kind."
+          },
           "withheld": {
             "type": ["string", "null"],
             "description": "Why this job will not fire on its next occurrence, when something is holding it back.\n\nAbsent means it will, as far as the reader can establish. A held job and a healthy watcher\nwith nothing to report are otherwise identical from outside: neither fires, and\n`last_fired_at` is absent for a brand-new job too. Computed per request from the session's\ncurrent level, not stored, so it tracks a `PATCH /v1/sessions/{id}` without the job being\nrewritten."
@@ -6139,7 +6217,7 @@
           },
           "title": {
             "type": "string",
-            "description": "The title a user set, else the first user message's words, whitespace collapsed and cut to\n80 characters. Empty until either has happened."
+            "description": "The title a user set, else the first user message's words, whitespace collapsed and cut to\n200 characters. Empty until either has happened."
           },
           "updated_at": {
             "type": "string",

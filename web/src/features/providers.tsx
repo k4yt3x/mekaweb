@@ -230,7 +230,11 @@ function ProfileForm({
   const others = profiles.filter(
     (profile) => profile.name !== initial?.name && !draft.fallbacks.includes(profile.name),
   );
-  const tristate = (key: 'vision' | 'cache_control', label: string, hint?: string) => (
+  const tristate = (
+    key: 'vision' | 'cache_control' | 'encrypted_reasoning' | 'reasoning_summary',
+    label: string,
+    hint?: string,
+  ) => (
     <Field label={label} hint={hint}>
       <select value={draft[key]} onChange={(event) => set({ [key]: event.target.value })}>
         {['', 'true', 'false'].map((value) => (
@@ -378,6 +382,8 @@ function ProfileForm({
             {reads('thinking_display') &&
               choice('thinking_display', 'Thinking display', ['summarized', 'updates', 'redacted'])}
             {reads('cache_control') && tristate('cache_control', 'Cache breakpoint')}
+            {reads('encrypted_reasoning') && tristate('encrypted_reasoning', 'Encrypted reasoning')}
+            {reads('reasoning_summary') && tristate('reasoning_summary', 'Reasoning summary')}
           </div>
           <datalist id="profile-effort">
             {['low', 'medium', 'high', 'xhigh', 'max'].map((value) => (
@@ -571,9 +577,27 @@ function AccountForm({ onSaved }: { onSaved: (account: Schema['AccountView']) =>
     client_id: '',
     oauth_token_url: '',
     interleaved_thinking: '',
+    prompt_cache_key: '',
+    stream_usage: '',
+    max_tool_name_bytes: '',
   });
   const set = (patch: Partial<AccountDraft>) => setDraft((old) => ({ ...old, ...patch }));
   const subscription = isSubscription(draft.backend);
+  const toggle = (
+    key: 'interleaved_thinking' | 'prompt_cache_key' | 'stream_usage',
+    label: string,
+  ) =>
+    readsAccountKey(draft.backend, key) && (
+      <Field label={label}>
+        <select value={draft[key]} onChange={(event) => set({ [key]: event.target.value })}>
+          {['', 'true', 'false'].map((value) => (
+            <option key={value} value={value}>
+              {optionLabels[value]}
+            </option>
+          ))}
+        </select>
+      </Field>
+    );
   async function submit(event: FormEvent) {
     event.preventDefault();
     await action.run(async () => {
@@ -626,48 +650,48 @@ function AccountForm({ onSaved }: { onSaved: (account: Schema['AccountView']) =>
             onChange={(event) => set({ base_url: event.target.value })}
           />
         </Field>
-        {(subscription || readsAccountKey(draft.backend, 'interleaved_thinking')) && (
-          <details>
-            <summary>Advanced</summary>
-            <div className="form-stack">
-              {subscription && (
-                <>
-                  <Field label="OAuth client ID">
-                    <input
-                      spellCheck={false}
-                      placeholder="Default"
-                      value={draft.client_id}
-                      onChange={(event) => set({ client_id: event.target.value })}
-                    />
-                  </Field>
-                  <Field label="OAuth token URL">
-                    <input
-                      type="url"
-                      spellCheck={false}
-                      placeholder="Default"
-                      value={draft.oauth_token_url}
-                      onChange={(event) => set({ oauth_token_url: event.target.value })}
-                    />
-                  </Field>
-                </>
-              )}
-              {readsAccountKey(draft.backend, 'interleaved_thinking') && (
-                <Field label="Interleaved thinking header">
-                  <select
-                    value={draft.interleaved_thinking}
-                    onChange={(event) => set({ interleaved_thinking: event.target.value })}
-                  >
-                    {['', 'true', 'false'].map((value) => (
-                      <option key={value} value={value}>
-                        {optionLabels[value]}
-                      </option>
-                    ))}
-                  </select>
+        <details>
+          <summary>Advanced</summary>
+          <div className="form-stack">
+            {subscription && (
+              <>
+                <Field label="OAuth client ID">
+                  <input
+                    spellCheck={false}
+                    placeholder="Default"
+                    value={draft.client_id}
+                    onChange={(event) => set({ client_id: event.target.value })}
+                  />
                 </Field>
-              )}
-            </div>
-          </details>
-        )}
+                <Field label="OAuth token URL">
+                  <input
+                    type="url"
+                    spellCheck={false}
+                    placeholder="Default"
+                    value={draft.oauth_token_url}
+                    onChange={(event) => set({ oauth_token_url: event.target.value })}
+                  />
+                </Field>
+              </>
+            )}
+            {toggle('interleaved_thinking', 'Interleaved thinking header')}
+            {toggle('prompt_cache_key', 'Prompt cache key')}
+            {toggle('stream_usage', 'Streamed usage')}
+            {readsAccountKey(draft.backend, 'max_tool_name_bytes') && (
+              <Field label="Max tool name bytes">
+                <input
+                  type="number"
+                  min={16}
+                  step={1}
+                  inputMode="numeric"
+                  placeholder="Default"
+                  value={draft.max_tool_name_bytes}
+                  onChange={(event) => set({ max_tool_name_bytes: event.target.value })}
+                />
+              </Field>
+            )}
+          </div>
+        </details>
         <ErrorNotice error={action.error} />
         <div className="actions">
           <Button type="submit" disabled={action.busy}>

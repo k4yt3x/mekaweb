@@ -628,6 +628,13 @@ it('sends a turn again after rewinding to before it', async () => {
     'tag',
   );
   expect(submit).toHaveBeenCalledWith('s', 'Again', expect.objectContaining({ images: [] }));
+  // A skill the message ran runs with it again.
+  await f.controller.resend('s', 1, 'Again', [], 'review');
+  expect(submit).toHaveBeenLastCalledWith(
+    's',
+    'Again',
+    expect.objectContaining({ images: [], skill: 'review' }),
+  );
 });
 
 it('hands back a message whose turn was rewound but which could not be sent', async () => {
@@ -637,10 +644,10 @@ it('hands back a message whose turn was rewound but which could not be sent', as
   vi.spyOn(f.controller, 'submitMessage').mockRejectedValue(new Error('Wait for the feed.'));
   const images = [{ name: 'Image 1', hash: 'stored' }];
   const failure: unknown = await f.controller
-    .resend('s', 1, 'Again', images)
+    .resend('s', 1, 'Again', images, 'review')
     .catch((error) => error);
   expect(failure).toBeInstanceOf(UnsentMessage);
-  expect(failure).toMatchObject({ text: 'Again', images });
+  expect(failure).toMatchObject({ text: 'Again', images, skill: 'review' });
   expect((failure as Error).message).toContain('Wait for the feed.');
 });
 

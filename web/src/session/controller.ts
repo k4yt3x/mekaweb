@@ -122,6 +122,7 @@ export class UnsentMessage extends Error {
   constructor(
     readonly text: string,
     readonly images: ImageAttachment[],
+    readonly skill: string,
     cause: unknown,
   ) {
     super(`The turn was removed, but its message was not sent: ${errorMessage(cause)}`, {
@@ -2008,12 +2009,18 @@ export class SessionController {
    * once queued keeps the message on screen to send again; one refused before that throws
    * `UnsentMessage`, so the caller can keep what the rewind already removed.
    */
-  async resend(id: string, turns: number, message: string, images: ImageAttachment[] = []) {
+  async resend(
+    id: string,
+    turns: number,
+    message: string,
+    images: ImageAttachment[] = [],
+    skill = '',
+  ) {
     await this.rewind(id, turns);
     try {
-      return await this.submitMessage(id, message, { ...emptyComposerOptions, images });
+      return await this.submitMessage(id, message, { ...emptyComposerOptions, images, skill });
     } catch (error) {
-      throw new UnsentMessage(message, images, error);
+      throw new UnsentMessage(message, images, skill, error);
     }
   }
   /**

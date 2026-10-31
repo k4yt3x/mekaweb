@@ -884,16 +884,14 @@ export interface paths {
       cookie?: never;
     };
     /**
-     * `GET /v1/sessions/{id}/stream`: rejoin the current turn's SSE stream.
-     * @description Replays the events after `Last-Event-ID` from a bounded per-turn ring, then follows the live
-     *     stream. When the turn has already ended, the backlog plus its terminal event are delivered and
-     *     the connection closes, so a client that dropped at the last moment still learns the outcome.
+     * `GET /v1/sessions/{id}/stream`: the session's feed, every event of every turn.
+     * @description Replays the events after `Last-Event-ID` from the feed's bounded ring, which spans turns, then
+     *     follows the live feed for as long as the connection is held. A client that rejoins after a turn
+     *     ended still learns how it ended from the replay.
      *
-     *     Two limits worth stating plainly. The ring holds `[serve] stream_replay_events` events, so a
-     *     client that was away longer than that gets a `notice` saying its replay has a hole rather than a
-     *     transcript that silently skips. And only the most recent turn is retained: reconnecting after a
-     *     *newer* turn has started returns that turn's stream, which the `turn_id` on the re-issued
-     *     `turn.started` identifies.
+     *     The ring holds the latest `[serve] stream_replay_events` events within its byte budget, so a
+     *     client that was away longer than that is handed a `feed.gap` event saying its replay has a hole
+     *     rather than a transcript that silently skips.
      *
      *     A sub-agent's id names its own feed for as long as this process runs it: the same events a
      *     session's feed carries, read-only, with `turn.started` naming the parent and its `agent_spawn`
@@ -1112,9 +1110,15 @@ export interface components {
       client_id?: string | null;
       /** @description Whether the interleaved-thinking beta is sent, when the account states it. */
       interleaved_thinking?: boolean | null;
+      /** @description The longest tool name the endpoint takes, when the account states it. */
+      max_tool_name_bytes?: number | null;
       name: string;
       /** @description The OAuth token endpoint the account's logins and refreshes post to, when it states one. */
       oauth_token_url?: string | null;
+      /** @description Whether `prompt_cache_key` is sent, when the account states it. */
+      prompt_cache_key?: boolean | null;
+      /** @description Whether a streamed request asks for its usage, when the account states it. */
+      stream_usage?: boolean | null;
     };
     /** @description What `GET /v1/accounts` answers. */
     AccountsResponse: {
@@ -1377,6 +1381,21 @@ export interface components {
           type: 'background_report';
         }
       | {
+          directive: string;
+          kind: string;
+          name: string;
+          text: string;
+          /** @enum {string} */
+          type: 'invocation';
+        }
+      | {
+          name: string;
+          text: string;
+          /** @enum {string} */
+          type: 'resource';
+          uri: string;
+        }
+      | {
           /**
            * @description Content hash of the stored bytes; `GET /v1/sessions/{id}/blobs/{hash}` returns them.
            *     Absent only for an image the store never externalized.
@@ -1483,9 +1502,15 @@ export interface components {
       client_id?: string | null;
       /** @description Whether to send the interleaved-thinking beta, read by `anthropic-messages` alone. */
       interleaved_thinking?: boolean | null;
+      /** @description The longest tool name the endpoint takes, in bytes, read by the three API-key backends. */
+      max_tool_name_bytes?: number | null;
       name: string;
       /** @description The OAuth token endpoint, read by the two subscription backends alone. */
       oauth_token_url?: string | null;
+      /** @description Whether to send `prompt_cache_key`, read by `openai-responses` alone. */
+      prompt_cache_key?: boolean | null;
+      /** @description Whether a streamed request asks for its usage, read by `openai-chat-completions` alone. */
+      stream_usage?: boolean | null;
     };
     CreateGate: {
       /**
@@ -1506,13 +1531,18 @@ export interface components {
     CreateJobRequest: {
       /** @description One-shot time: an RFC 3339 instant, or a duration from now (`"20m"`, `"1h 30m"`). */
       at?: string | null;
-      /** @description 5-field cron pattern, evaluated in the host's local time. */
+      /** @description 5-field cron pattern, read in `timezone`. */
       cron?: string | null;
       /** @description Recurring interval (`"30m"`, `"6h"`). */
       every?: string | null;
       gate?: components['schemas']['CreateGate'] | null;
       /** @description What the agent is asked to do when the job fires. */
       prompt: string;
+      /**
+       * @description IANA time zone a `cron` pattern is read in; the host machine's when omitted. Refused beside
+       *     `at` or `every`, which read none.
+       */
+      timezone?: string | null;
     };
     /**
      * @description The body of `POST /v1/profiles`: `[profiles.<name>]` as it will be written. A setting left
@@ -1528,6 +1558,7 @@ export interface components {
       default?: boolean;
       deferred_tools?: string | null;
       effort?: string | null;
+      encrypted_reasoning?: boolean | null;
       /** @description The profiles a turn moves to when this one cannot serve it, in order. */
       fallbacks?: string[];
       /** Format: int64 */
@@ -1536,6 +1567,7 @@ export interface components {
       max_request_bytes?: number | null;
       model: string;
       name: string;
+      reasoning_summary?: boolean | null;
       thinking?: string | null;
       /** Format: int64 */
       thinking_budget?: number | null;
@@ -1751,12 +1783,13 @@ export interface components {
       content?: string | null;
       /**
        * @description The file `PUT /v1/instructions` writes, `instructions.md` in the config directory, when
-       *     that file is what this server reads; absent when another source is in charge.
+       *     that file is what this server reads; absent when another source is in charge, and for a
+       *     caller without `config:r` or `config:w`.
        */
       path?: string | null;
       /**
        * @description Where the instructions came from, for an operator diagnosing "why is it behaving like
-       *     that". Absent when none are configured.
+       *     that". Absent when none are configured, and for a caller without `config:r` or `config:w`.
        */
       source?: string | null;
       /** @description Whether `PUT /v1/instructions` would change what this server's sessions run under. */
@@ -2252,6 +2285,7 @@ export interface components {
       default?: boolean | null;
       deferred_tools?: string | null;
       effort?: string | null;
+      encrypted_reasoning?: boolean | null;
       fallbacks?: string[] | null;
       /** Format: int64 */
       max_output_tokens?: number | null;
@@ -2263,6 +2297,7 @@ export interface components {
        *     own: a rename moves rows in the store, and is not combined with a change to the file.
        */
       name?: string | null;
+      reasoning_summary?: boolean | null;
       thinking?: string | null;
       /** Format: int64 */
       thinking_budget?: number | null;
@@ -2380,6 +2415,7 @@ export interface components {
       context_window?: number | null;
       deferred_tools?: string | null;
       effort?: string | null;
+      encrypted_reasoning?: boolean | null;
       fallbacks?: string[];
       /** Format: int64 */
       max_output_tokens?: number | null;
@@ -2387,6 +2423,7 @@ export interface components {
       max_request_bytes?: number | null;
       model?: string | null;
       name: string;
+      reasoning_summary?: boolean | null;
       thinking?: string | null;
       /** Format: int64 */
       thinking_budget?: number | null;
@@ -2541,12 +2578,17 @@ export interface components {
       next_fire_at: string;
       prompt: string;
       /**
-       * @description Human-readable rendering of the schedule, e.g. `every 30m`, `cron 0 9 * * 1-5`, or an RFC
-       *     3339 instant for a one-shot.
+       * @description Human-readable rendering of the schedule, e.g. `every 30m`, `0 9 * * 1-5 in Asia/Tokyo`,
+       *     or the instant a one-shot fires.
        */
       schedule: string;
       /** Format: uuid */
       session_id: string;
+      /**
+       * @description The IANA zone a cron job's pattern is read in; absent for one read in the host machine's
+       *     zone, and for every other kind.
+       */
+      timezone?: string | null;
       /**
        * @description Why this job will not fire on its next occurrence, when something is holding it back.
        *
@@ -2727,7 +2769,7 @@ export interface components {
       project: string;
       /**
        * @description The title a user set, else the first user message's words, whitespace collapsed and cut to
-       *     80 characters. Empty until either has happened.
+       *     200 characters. Empty until either has happened.
        */
       title: string;
       /** @description RFC 3339, moved by any session-level change, a `PATCH` included. */

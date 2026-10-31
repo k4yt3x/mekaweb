@@ -1,4 +1,4 @@
-// meka passes the first five formats through and converts the rest to PNG.
+// meka passes the first four formats through and converts the rest, BMP included, to PNG.
 const fileExtensions = [
   'png',
   'jpg',
