@@ -911,3 +911,42 @@ it('reads a file an editor attached as its mention, among the words around it', 
     plain.map((block) => ({ block })),
   );
 });
+
+it('keeps work that finished while the reply was written in the turn it carries on', () => {
+  const report: Schema['ContentBlockView'] = {
+    type: 'background_report',
+    task_ids: ['7f3a1c22'],
+    text: 'Build finished.',
+  };
+  const groups = groupLiveMessages(
+    [
+      { kind: 'text', text: 'Done.' },
+      fed('turn', false, report),
+      { kind: 'text', text: 'And the build passed.' },
+    ],
+    [],
+  );
+  expect(groups).toMatchObject([
+    {
+      kind: 'agent',
+      blocks: [
+        { block: { kind: 'text' } },
+        { block: { kind: 'report', tasks: ['7f3a1c22'], text: 'Build finished.' } },
+        { block: { kind: 'text' } },
+      ],
+    },
+  ]);
+  // Someone's words beside it make it their message, as history shows it.
+  const steer: Schema['ContentBlockView'] = {
+    type: 'inbox',
+    class: 'steer',
+    body: 'Also.',
+    text: 'Also.',
+    item_id: 'theirs',
+  };
+  expect(
+    groupLiveMessages([{ kind: 'text', text: 'Done.' }, fed('turn', false, report, steer)], []).map(
+      (group) => group.kind,
+    ),
+  ).toEqual(['agent', 'message']);
+});

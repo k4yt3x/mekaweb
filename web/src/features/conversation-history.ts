@@ -228,6 +228,11 @@ export function groupLiveMessages(blocks: LiveBlock[], submissions: Submission[]
     | { kind: 'message'; key: string; message: Schema['MessageView'] }
     | { kind: 'agent'; key: string; blocks: { block: AgentBlock; index: number }[] }
   )[] = [];
+  const agent = (block: AgentBlock, index: number) => {
+    const previous = groups.at(-1);
+    if (previous?.kind === 'agent') previous.blocks.push({ block, index });
+    else groups.push({ kind: 'agent', key: `agent-${index}`, blocks: [{ block, index }] });
+  };
   blocks.forEach((block, index) => {
     if (block.kind === 'submission') {
       const submission = pending.get(block.key);
@@ -251,14 +256,17 @@ export function groupLiveMessages(blocks: LiveBlock[], submissions: Submission[]
           ? !((b.item_id && ownItems.has(b.item_id)) || unidentified.has(b.body))
           : !(ownOpening && ['text', 'invocation', 'image', 'turn_context'].includes(b.type)),
       );
-      if (content.some((b) => b.type !== 'turn_context'))
+      // Work that finished while the reply was written follows the reply and carries the turn on,
+      // so it stays in the turn, as a report at a tool round's end does.
+      if (!opening && content.length && content.every((b) => b.type === 'background_report'))
+        for (const report of content)
+          agent({ kind: 'report', tasks: report.task_ids, text: report.text }, index);
+      else if (content.some((b) => b.type !== 'turn_context'))
         groups.push({ kind: 'message', key: `message-${index}`, message: { ...message, content } });
       return;
     }
     if (block.kind === 'text' && !block.text.trim()) return;
-    const previous = groups.at(-1);
-    if (previous?.kind === 'agent') previous.blocks.push({ block, index });
-    else groups.push({ kind: 'agent', key: `agent-${index}`, blocks: [{ block, index }] });
+    agent(block, index);
   });
   return groups;
 }
