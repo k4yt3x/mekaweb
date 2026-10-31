@@ -123,13 +123,16 @@ export function InlineAttachment({
   image: { media_type: string; data: string };
   index: number;
 }) {
+  // Decoded once per image, not per render: a new blob is a new URL, which reloads the picture,
+  // and a sent message renders again with every token of the reply.
+  const { media_type, data } = image;
   const decoded = useMemo(() => {
     try {
-      return { blob: inputImageBlob(image) };
+      return { blob: inputImageBlob({ media_type, data }) };
     } catch {
       return { error: new Error('This image could not be decoded for preview.') };
     }
-  }, [image]);
+  }, [media_type, data]);
   return decoded.blob ? (
     <ImagePreview
       blob={decoded.blob}

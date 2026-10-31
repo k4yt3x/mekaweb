@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.31.0] - 2026-10-31
+
 ### Added
 
 - Providers: switch off the OpenAI requests meka 0.87.0 adds, and cap an account's tool names.
@@ -18,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - A message that ran a skill or attached a file shows on meka 0.87.0, and resends with its skill.
+- An image in a message you sent no longer flickers and shifts the page while the reply streams.
 
 ## [0.30.0] - 2026-10-29
 
@@ -587,7 +590,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Light and dark themes, narrow layouts, and collapsible, resizable session panels.
 - Hosting at the root or a subpath, with GitHub Pages deployment on version tags.
 
-[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.30.0...HEAD
+[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.31.0...HEAD
+[0.31.0]: https://github.com/k4yt3x/mekaweb/compare/0.30.0...0.31.0
 [0.30.0]: https://github.com/k4yt3x/mekaweb/compare/0.29.0...0.30.0
 [0.29.0]: https://github.com/k4yt3x/mekaweb/compare/0.28.0...0.29.0
 [0.28.0]: https://github.com/k4yt3x/mekaweb/compare/0.27.0...0.28.0

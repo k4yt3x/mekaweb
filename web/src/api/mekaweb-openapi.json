@@ -6,7 +6,7 @@
     "license": {
       "name": "AGPL-3.0-or-later"
     },
-    "version": "0.30.0"
+    "version": "0.31.0"
   },
   "paths": {
     "/api/account/devices": {
