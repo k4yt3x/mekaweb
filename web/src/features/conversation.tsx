@@ -48,6 +48,9 @@ import { Button } from '../components/ui/button';
 import { Empty, ErrorNotice, Loading } from '../components/common';
 import { NoticeMessage, TurnNotice } from '../components/notice-message';
 import { ToolCard } from '../components/tool-card';
+import { EditPreview } from '../components/edit-preview';
+import { describeRun, isEdit, segments, toolPart, type Part, type Step } from '../session/steps';
+import { Steps } from './folded-steps';
 import { Markdown, MarkdownPreview } from '../components/markdown';
 import { Attachment, InlineAttachment, ImageViewerProvider } from '../components/image-attachment';
 import { scrollRegion } from '../components/scrolling';
@@ -68,6 +71,7 @@ import {
   spawnedAgent,
   turnIndex,
   type HistoryMessage,
+  type LiveGroup,
   type ToolResultBlock,
   type ToolUseBlock,
 } from './conversation-history';
@@ -142,7 +146,7 @@ export function Conversation({ state }: { state: SessionState }) {
   useMarkSeen(state.id, state.session?.updated_at);
   const [inputHeight, setInputHeight] = useState(DEFAULT_INPUT_HEIGHT);
   const [resizeGeneration, setResizeGeneration] = useState(0);
-  const { showTurnContext } = useSettings();
+  const { showTurnContext, foldSteps } = useSettings();
   const scroller = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
   const dock = useRef<HTMLDivElement>(null);
@@ -219,12 +223,51 @@ export function Conversation({ state }: { state: SessionState }) {
     />
   );
   const appendActivity = waiting && live[waiting.index - 1]?.kind === 'agent';
+  // The turn running, whose steps fold only as the agent says more after them; one started
+  // elsewhere, and named nowhere here yet, is the one saved history ends in.
+  const running = isSessionRunning(state);
+  const runningTurn = running
+    ? (state.submissions.filter((submission) => submission.state === 'running').at(-1)?.turnId ??
+      state.turnId ??
+      state.saved?.messages.at(-1)?.turn_id ??
+      undefined)
+    : undefined;
+  // Whether the agent says anything after each live group, and so after all saved history: its
+  // steps are done then, whichever group they are in, as a message sent mid-turn splits them.
+  const liveSaysAfter = useMemo(() => {
+    const after: boolean[] = [];
+    let later = false;
+    for (let index = live.length - 1; index >= 0; index--) {
+      after[index] = later;
+      const group = live[index]!;
+      if (group.kind === 'agent' && group.blocks.some(({ block }) => block.kind === 'text'))
+        later = true;
+    }
+    return { after, any: later };
+  }, [live]);
   const changes = useAction(setFeedbackError);
   const [editing, setEditing] = useState<number>();
   // Read once per history, not on every streamed token.
   const saved = useMemo(() => state.saved?.messages ?? [], [state.saved]);
   const turns = useMemo(() => turnIndex(saved, state.offset), [saved, state.offset]);
   const kinds = useMemo(() => messages.map(turnKind), [messages]);
+  // Whether the agent says anything in saved history after each group.
+  const savedSaysAfter = useMemo(() => {
+    const after: boolean[] = [];
+    let later = false;
+    for (let position = messages.length - 1; position >= 0; position--) {
+      after[position] = later;
+      if (
+        messages[position]!.some(
+          ({ message, blocks }) =>
+            message.role === 'assistant' &&
+            blocks.some(({ block }) => block.type === 'text' && block.text.trim()),
+        )
+      )
+        later = true;
+    }
+    return after;
+  }, [messages]);
   // Each turn closes under the last group it added, once its record says how it ended.
   const records = useTurnRecords(state);
   const turnEnds = useMemo(() => {
@@ -458,7 +501,11 @@ export function Conversation({ state }: { state: SessionState }) {
             <div
               className="conversation-width"
               onClick={(event) => {
-                if (event.target instanceof Element && event.target.closest('summary'))
+                // Opening something shows it where it is, rather than following the latest.
+                if (
+                  event.target instanceof Element &&
+                  event.target.closest('summary, .steps-toggle')
+                )
                   following.current = false;
               }}
             >
@@ -498,6 +545,14 @@ export function Conversation({ state }: { state: SessionState }) {
                   offset={state.offset}
                   toolResults={history.results}
                   showTurnContext={showTurnContext}
+                  fold={foldSteps}
+                  ended={
+                    !runningTurn ||
+                    group.at(-1)?.message.turn_id !== runningTurn ||
+                    savedSaysAfter[position]! ||
+                    liveSaysAfter.any
+                  }
+                  hold={showLatest}
                   {...turnActions(group, position)}
                 />
               ))}
@@ -534,25 +589,13 @@ export function Conversation({ state }: { state: SessionState }) {
                               status={isSessionRunning(state) ? 'Live' : 'Saving…'}
                             />
                           )}
-                          {group.blocks.map(({ block, index }) =>
-                            block.kind === 'tool' ? (
-                              <Tool
-                                key={block.id}
-                                tool={state.tools[block.id]}
-                                sessionId={state.id}
-                              />
-                            ) : block.kind === 'thinking' ? (
-                              <Thinking key={index} text={block.text} />
-                            ) : block.kind === 'nudge' ? (
-                              <Nudge key={index} kind={block.nudge} text={block.text} />
-                            ) : block.kind === 'report' ? (
-                              <BackgroundReport key={index} tasks={block.tasks} text={block.text} />
-                            ) : block.kind === 'notice' ? (
-                              <TurnNotice key={index} notice={block} />
-                            ) : (
-                              <Markdown key={index} text={block.text} />
-                            ),
-                          )}
+                          <LiveBlocks
+                            blocks={group.blocks}
+                            state={state}
+                            fold={foldSteps}
+                            ended={!running || liveSaysAfter.after[index]!}
+                            hold={showLatest}
+                          />
                           {waiting?.index === index + 1 && (
                             <AgentActivity status={waiting.status} />
                           )}
@@ -748,6 +791,131 @@ function sender(message: Schema['MessageView']) {
   const [source] = sources;
   return (sources.size === 1 && source) || 'You';
 }
+/** How items fold: what each is, as a part and as a step, its key, the call it is, and itself. */
+interface Folding<T> {
+  sessionId: string;
+  fold: boolean;
+  ended: boolean;
+  hold: boolean;
+  part: (item: T) => Part;
+  step: (item: T) => Step;
+  key: (item: T) => string;
+  call: (item: T) => string | undefined;
+  render: (item: T) => ReactNode;
+}
+
+/**
+ * `items` with their runs of steps in {@link Steps}. A run's React key is its first item's, which
+ * stays as it grows; it is remembered by its turn and its first call, which are the same live and
+ * saved, the turn telling apart calls a provider names alike in different turns.
+ */
+function foldItems<T>(items: readonly T[], folding: Folding<T>): ReactNode[] {
+  return segments(items.map(folding.part), folding.ended, folding.fold).map((segment) => {
+    if (segment.kind === 'item') return folding.render(items[segment.at]!);
+    const run = items.slice(segment.from, segment.to + 1);
+    const key = folding.key(run[0]!);
+    const { text, failed } = describeRun(run.map(folding.step));
+    return (
+      <Steps
+        key={`steps:${key}`}
+        id={`${folding.sessionId}:${run.map(folding.call).find(Boolean) ?? key}`}
+        finished={segment.finished}
+        count={run.length}
+        hold={folding.hold}
+        label={text}
+        failed={failed}
+      >
+        {run.map(folding.render)}
+      </Steps>
+    );
+  });
+}
+
+type LiveItem = Extract<LiveGroup, { kind: 'agent' }>['blocks'][number];
+
+/** The live turn's output, its finished runs of steps folding as it says more: see {@link Steps}. */
+function LiveBlocks({
+  blocks,
+  state,
+  fold,
+  ended,
+  hold,
+}: {
+  blocks: readonly LiveItem[];
+  state: SessionState;
+  fold: boolean;
+  ended: boolean;
+  hold: boolean;
+}) {
+  const part = ({ block }: LiveItem): Part =>
+    block.kind === 'tool'
+      ? toolPart(state.tools[block.id]?.name ?? '')
+      : block.kind === 'text'
+        ? 'words'
+        : block.kind === 'notice'
+          ? 'other'
+          : 'step';
+  const step = ({ block }: LiveItem): Step => {
+    if (block.kind === 'tool') {
+      const tool = state.tools[block.id];
+      return { kind: 'tool', name: tool?.name ?? '', failed: tool?.state === 'error' };
+    }
+    return block.kind === 'thinking' ? { kind: 'thinking' } : { kind: 'note' };
+  };
+  const render = ({ block, index }: LiveItem) =>
+    block.kind === 'tool' ? (
+      <Tool key={block.id} tool={state.tools[block.id]} sessionId={state.id} />
+    ) : block.kind === 'thinking' ? (
+      <Thinking key={index} text={block.text} />
+    ) : block.kind === 'nudge' ? (
+      <Nudge key={index} kind={block.nudge} text={block.text} />
+    ) : block.kind === 'report' ? (
+      <BackgroundReport key={index} tasks={block.tasks} text={block.text} />
+    ) : block.kind === 'notice' ? (
+      <TurnNotice key={index} notice={block} />
+    ) : (
+      <Markdown key={index} text={block.text} />
+    );
+  return foldItems(blocks, {
+    sessionId: state.id,
+    fold,
+    ended,
+    hold,
+    part,
+    step,
+    key: ({ block, index }) => (block.kind === 'tool' ? block.id : `live:${index}`),
+    call: ({ block }) => (block.kind === 'tool' ? `${state.turnId ?? ''}:${block.id}` : undefined),
+    render,
+  });
+}
+
+/** What a saved block is to folding. */
+function savedPart(block: Schema['ContentBlockView']): Part {
+  switch (block.type) {
+    case 'text':
+      return block.text.trim() ? 'words' : 'other';
+    case 'thinking':
+    case 'redacted_thinking':
+    case 'nudge':
+    case 'background_report':
+    case 'tool_result':
+      return 'step';
+    case 'tool_use':
+      return toolPart(block.name);
+    default:
+      return 'other';
+  }
+}
+
+/** A saved step, as its run's line counts it. */
+function savedStep(block: Schema['ContentBlockView'], result: ToolResultBlock | undefined): Step {
+  if (block.type === 'tool_use')
+    return { kind: 'tool', name: block.name, failed: result?.is_error ?? false };
+  if (block.type === 'tool_result') return { kind: 'tool', name: '', failed: block.is_error };
+  if (block.type === 'nudge' || block.type === 'background_report') return { kind: 'note' };
+  return { kind: 'thinking' };
+}
+
 function Thinking({ text }: { text: string }) {
   const [open, setOpen] = useState(false);
   return (
@@ -784,6 +952,9 @@ function Message({
   toolResults,
   offset,
   showTurnContext,
+  fold = false,
+  ended = true,
+  hold = false,
   actions,
   editor,
 }: {
@@ -794,6 +965,12 @@ function Message({
   toolResults: ReadonlyMap<ToolUseBlock, ToolResultBlock>;
   offset: number;
   showTurnContext: boolean;
+  /** Whether an agent's finished runs of steps fold: see {@link Steps}. */
+  fold?: boolean;
+  /** Whether its turn is over, or has said more since, so every run of it is finished. */
+  ended?: boolean;
+  /** Whether the reader is away from the latest, so runs finishing now wait to fold. */
+  hold?: boolean;
   actions?: ReactNode;
   editor?: ReactNode;
 }) {
@@ -801,9 +978,13 @@ function Message({
   const message = messages[0]?.message;
   if (!message) return null;
   // Filter only the rendered blocks; preserve message boundaries, indexes, and saved history.
+  // Blank words show nothing, and would part a run of steps.
   const content = messages.flatMap(({ blocks, index: messageIndex }) =>
     mentionsInline(blocks).flatMap(({ block, index }) =>
-      showTurnContext || block.type !== 'turn_context' ? [{ block, index, messageIndex }] : [],
+      (showTurnContext || block.type !== 'turn_context') &&
+      !(block.type === 'text' && !block.text.trim())
+        ? [{ block, index, messageIndex }]
+        : [],
     ),
   );
   if (message.compaction)
@@ -850,6 +1031,32 @@ function Message({
     );
   if (!content.length && message.content.length > 0) return null;
   const isUserInput = isInput(message);
+  const turnOf = new Map(messages.map(({ index, message }) => [index, message.turn_id ?? '']));
+  const render = ({ block, index, messageIndex }: (typeof content)[number]) => (
+    <ContentBlock
+      key={`${offset + messageIndex}:${index}`}
+      block={block}
+      sessionId={sessionId}
+      result={block.type === 'tool_use' ? toolResults.get(block) : undefined}
+    />
+  );
+  // Only the agent's turns have steps to fold.
+  const body =
+    message.role !== 'assistant'
+      ? content.map(render)
+      : foldItems(content, {
+          sessionId,
+          fold,
+          ended,
+          hold,
+          part: ({ block }) => savedPart(block),
+          step: ({ block }) =>
+            savedStep(block, block.type === 'tool_use' ? toolResults.get(block) : undefined),
+          key: ({ index, messageIndex }) => `${offset + messageIndex}:${index}`,
+          call: ({ block, messageIndex }) =>
+            block.type === 'tool_use' ? `${turnOf.get(messageIndex)}:${block.id}` : undefined,
+          render,
+        });
   return (
     <article
       className={`message message-${message.role}${isUserInput ? ' message-input' : ''}`}
@@ -870,15 +1077,7 @@ function Message({
         }
         createdAt={message.created_at}
       />
-      {editor ||
-        content.map(({ block, index, messageIndex }) => (
-          <ContentBlock
-            key={`${offset + messageIndex}:${index}`}
-            block={block}
-            sessionId={sessionId}
-            result={block.type === 'tool_use' ? toolResults.get(block) : undefined}
-          />
-        ))}
+      {editor || body}
       {!editor && actions}
     </article>
   );
@@ -1121,6 +1320,12 @@ function ContentBlock({
           input={block.input}
           status={result ? (result.is_error ? 'Error' : 'Completed') : 'Arguments'}
           isError={result?.is_error ?? false}
+          // Only a change made shows: one that failed, or never finished, made none.
+          preview={
+            isEdit(block.name) && result && !result.is_error ? (
+              <EditPreview name={block.name} input={block.input} />
+            ) : undefined
+          }
         >
           {agentCalls.has(block.name) && (
             <SubagentSection
@@ -1212,6 +1417,12 @@ function Tool({ tool, sessionId }: { tool: LiveTool | undefined; sessionId: stri
         }[tool.state]
       }
       isError={tool.state === 'error'}
+      // A change shows as it is written and made, not once it failed or was stopped.
+      preview={
+        isEdit(tool.name) && ['composing', 'executing', 'completed'].includes(tool.state) ? (
+          <EditPreview name={tool.name} input={tool.input} />
+        ) : undefined
+      }
     >
       {/* The completion carries the whole output, so the stream gives way to the Result; a call
           that ended without one keeps what streamed. */}

@@ -90,6 +90,7 @@ export interface Connection {
  */
 export const PORTABLE_PREFERENCES = [
   'showTurnContext',
+  'foldSteps',
   'inAppNotifications',
   'completionSound',
   'providerOrder',
@@ -111,6 +112,8 @@ export interface Settings {
   /** Whether the editor wraps long lines, as Alt+Z switches. */
   editorWordWrap: boolean;
   showTurnContext: boolean;
+  /** Whether a turn's thinking and tool calls fold into a line once the agent says more. */
+  foldSteps: boolean;
   inAppNotifications: boolean;
   completionSound: boolean;
   providerOrder: ProviderOrder;
@@ -165,6 +168,7 @@ const defaults = (): Settings => ({
   editorFontSize: EDITOR_FONT.default,
   editorWordWrap: false,
   showTurnContext: false,
+  foldSteps: true,
   inAppNotifications: true,
   completionSound: false,
   providerOrder: { accounts: [], profiles: [] },
@@ -225,6 +229,7 @@ function normalizeSettings(value: unknown): Settings {
     editorFontSize: normalizeEditorFontSize(value.editorFontSize),
     editorWordWrap: value.editorWordWrap === true,
     showTurnContext: value.showTurnContext === true,
+    foldSteps: value.foldSteps !== false,
     inAppNotifications: value.inAppNotifications !== false,
     completionSound: value.completionSound === true,
     providerOrder: normalizeProviderOrder(value.providerOrder),
@@ -399,6 +404,9 @@ export class BrowserStorage {
   }
   showTurnContext(showTurnContext: boolean) {
     this.save({ ...this.readSettings(), showTurnContext });
+  }
+  foldSteps(foldSteps: boolean) {
+    this.save({ ...this.readSettings(), foldSteps });
   }
   inAppNotifications(inAppNotifications: boolean) {
     this.save({ ...this.readSettings(), inAppNotifications });

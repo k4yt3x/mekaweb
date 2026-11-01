@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.34.0] - 2026-11-01
+
+### Added
+
+- Thinking and tool calls fold into a line once the agent replies; edits show what they change.
+
 ## [0.33.0] - 2026-11-01
 
 ### Added
@@ -615,7 +621,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Light and dark themes, narrow layouts, and collapsible, resizable session panels.
 - Hosting at the root or a subpath, with GitHub Pages deployment on version tags.
 
-[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.33.0...HEAD
+[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.34.0...HEAD
+[0.34.0]: https://github.com/k4yt3x/mekaweb/compare/0.33.0...0.34.0
 [0.33.0]: https://github.com/k4yt3x/mekaweb/compare/0.32.0...0.33.0
 [0.32.0]: https://github.com/k4yt3x/mekaweb/compare/0.31.0...0.32.0
 [0.31.0]: https://github.com/k4yt3x/mekaweb/compare/0.30.0...0.31.0

@@ -53,6 +53,7 @@ it('takes shared preferences from mekaweb, checked, and leaves this device’s o
   adapter.subscribe(() => changes.push(adapter.getSnapshot()));
   adapter.applyPreferences({
     theme: 'light',
+    foldSteps: false,
     conversationFontSize: 12,
     conversationOffset: 40,
     terminalFontSize: 20,
@@ -70,6 +71,7 @@ it('takes shared preferences from mekaweb, checked, and leaves this device’s o
     terminalFontSize: TERMINAL_FONT.default,
     editorFontSize: EDITOR_FONT.default,
     showTurnContext: true,
+    foldSteps: false,
     completionSound: false,
     dataSaver: true,
     layout: { panel: 'context' },
@@ -79,6 +81,7 @@ it('takes shared preferences from mekaweb, checked, and leaves this device’s o
   expect(changes).toHaveLength(1);
   expect(adapter.preferences()).toEqual({
     showTurnContext: true,
+    foldSteps: false,
     inAppNotifications: true,
     completionSound: false,
     providerOrder: { accounts: ['work'], profiles: [] },

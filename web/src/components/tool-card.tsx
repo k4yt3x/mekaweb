@@ -12,6 +12,7 @@ export function ToolCard({
   displaySummary,
   status,
   isError,
+  preview,
   children,
 }: {
   name: string;
@@ -19,6 +20,8 @@ export function ToolCard({
   displaySummary?: string | undefined;
   status: string;
   isError: boolean;
+  /** What shows under the call, opened or not: the change an edit makes. */
+  preview?: ReactNode;
   children: ReactNode;
 }) {
   const summary = useMemo(
@@ -27,7 +30,7 @@ export function ToolCard({
   );
   const Icon = toolIcons[toolIconKey(name)] ?? Command;
   const path = toolPath(name, input);
-  return (
+  const card = (
     <details className={`tool-card ${isError ? 'tool-error' : ''}`}>
       <summary>
         <Icon className="tool-symbol" size={14} aria-hidden="true" />
@@ -54,5 +57,12 @@ export function ToolCard({
         {children}
       </div>
     </details>
+  );
+  if (!preview) return card;
+  return (
+    <div className="tool-card-frame">
+      {card}
+      {preview}
+    </div>
   );
 }

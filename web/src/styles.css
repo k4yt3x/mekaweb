@@ -3197,6 +3197,119 @@ progress::-moz-progress-bar {
   color: var(--muted);
   flex-shrink: 0;
 }
+/* A call with a preview under it, such as an edit's change: one card, the preview always shown. */
+.tool-card-frame {
+  margin: 12px 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  overflow: hidden;
+}
+.tool-card-frame > .tool-card {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+}
+.edit-preview {
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+}
+.edit-lines {
+  margin: 0;
+  padding: 6px 0;
+  line-height: 1.5;
+}
+.edit-lines > * {
+  display: block;
+  min-width: max-content;
+  padding-right: 13px;
+  text-decoration: none;
+  white-space: pre;
+}
+.edit-sign {
+  display: inline-block;
+  width: 3ch;
+  color: var(--muted);
+  text-align: center;
+  user-select: none;
+}
+.edit-removed {
+  background: color-mix(in srgb, var(--danger) 13%, transparent);
+}
+.edit-added {
+  background: color-mix(in srgb, var(--success) 15%, transparent);
+}
+.edit-removed > .edit-sign {
+  color: var(--danger);
+}
+.edit-added > .edit-sign {
+  color: var(--success);
+}
+.edit-gap {
+  padding-left: 1ch;
+  color: var(--muted);
+}
+.edit-footer {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 5px 13px;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.85em;
+}
+.edit-footer > button {
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+}
+/* A finished run of steps, folded into a line that tells what it did. */
+.steps-toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  margin: 10px 0;
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.85em;
+  text-align: left;
+  cursor: pointer;
+}
+.steps-toggle:hover {
+  color: var(--text);
+}
+.steps-chevron {
+  flex-shrink: 0;
+  transition: transform 0.12s;
+}
+.steps-toggle[aria-expanded='true'] > .steps-chevron {
+  transform: rotate(90deg);
+}
+.steps-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.steps-failed {
+  flex-shrink: 0;
+  color: var(--danger);
+}
+/* Opened, the run sits under its line. */
+.steps-body[data-run] {
+  margin-left: 6px;
+  padding-left: 14px;
+  border-left: 1px solid var(--border);
+}
 .live-preview {
   min-width: 0;
 }
@@ -3390,7 +3503,8 @@ progress::-moz-progress-bar {
 .code-line {
   display: inline;
 }
-.dark .code-line span {
+.dark .code-line span,
+.dark .edit-line > span:not(.edit-sign) {
   color: var(--shiki-dark) !important;
 }
 .attachment {
@@ -3799,6 +3913,11 @@ select option {
 /* Without a card's padding, a reply's row tucks further into the space before the next message. */
 .message:not(.message-input) > .turn-actions {
   margin-bottom: -22px;
+}
+/* A message box after that row stands as far from it as the next reply stands from the box. */
+.message:not(.message-input):has(> .turn-actions) + .message-input,
+.message:not(.message-input):has(> .turn-actions) + .live-preview > .message-input:first-child {
+  margin-top: 13px;
 }
 .turn-actions .button-icon {
   width: 30px;
@@ -4706,6 +4825,7 @@ body:has(.panel-resize-handle[data-resizing='true']) {
   font-size: 0.93em;
 }
 .conversation-history .tool-card,
+.conversation-history .tool-card-frame,
 .conversation-history .conversation-notice,
 .conversation-history pre {
   font-size: inherit;
@@ -4716,6 +4836,7 @@ body:has(.panel-resize-handle[data-resizing='true']) {
 }
 .conversation-history .json,
 .conversation-history .plain-text,
+.conversation-history .edit-lines,
 .conversation-history .tool-output,
 .conversation-history .code-block > pre > code {
   font-size: 0.9em;

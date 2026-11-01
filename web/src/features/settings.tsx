@@ -346,6 +346,11 @@ export function SettingsPage() {
             checked={settings.showTurnContext}
             onCheckedChange={(checked) => runtime.storage.showTurnContext(checked)}
           />
+          <SwitchField
+            label="Fold finished steps"
+            checked={settings.foldSteps}
+            onCheckedChange={(checked) => runtime.storage.foldSteps(checked)}
+          />
         </div>
       </section>
       {state.info?.scopes.includes('sessions:r') && <InstructionsPanel />}

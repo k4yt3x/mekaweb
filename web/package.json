@@ -1,6 +1,6 @@
 {
   "name": "mekaweb",
-  "version": "0.33.0",
+  "version": "0.34.0",
   "private": true,
   "description": "The web interface for meka",
   "license": "AGPL-3.0-or-later",
@@ -90,7 +90,8 @@
   },
   "overrides": {
     "dompurify": "$dompurify",
-    "katex": "$katex"
+    "katex": "$katex",
+    "minimatch": "^11.0.3"
   },
   "workspaces": [
     "tools/schema"
