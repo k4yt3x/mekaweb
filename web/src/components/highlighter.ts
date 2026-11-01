@@ -1,6 +1,6 @@
 import { createHighlighterCore } from 'shiki/core';
 import { createJavaScriptRegexEngine } from 'shiki/engine/javascript';
-import { bundledLanguages } from 'shiki/langs';
+import { bundledLanguages, bundledLanguagesInfo } from 'shiki/langs';
 import light from '@shikijs/themes/github-light-default';
 import dark from '@shikijs/themes/github-dark';
 // Shiki's map includes its own aliases; these fill common tags it lacks.
@@ -39,4 +39,24 @@ export async function load(language: string) {
       return undefined;
     }
   };
+}
+
+/**
+ * The highlighter with the grammar for `language` loaded, for an editor to highlight with, and
+ * that grammar's own name, which its aliases lead to; none for a language Shiki does not know.
+ */
+export async function loadGrammar(language: string) {
+  const name = languageName(language);
+  if (!name) return undefined;
+  const id =
+    bundledLanguagesInfo.find((info) => info.id === name || info.aliases?.includes(name))?.id ??
+    name;
+  const engine = await highlighter;
+  await engine.loadLanguage((await bundledLanguages[name]()).default);
+  return { engine, id };
+}
+
+/** The highlighter, with its two themes, for an editor to take them from. */
+export function loadThemes() {
+  return highlighter;
 }

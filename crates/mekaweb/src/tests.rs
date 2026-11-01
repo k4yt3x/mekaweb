@@ -636,24 +636,39 @@ async fn files_list_and_uploads_land_through_the_api() {
 }
 
 #[tokio::test]
-async fn a_folder_watched_tells_of_its_changes_until_the_sign_in_ends() {
+async fn folders_watched_tell_of_their_changes_until_the_sign_in_ends() {
     let (_app, router, _, dir) = mekaweb().await;
     let cookie = sign_in(&router).await;
     let work = dir.path().join("work");
-    let watch = |path: &std::path::Path| {
-        let path = percent_encoding::utf8_percent_encode(
-            &path.display().to_string(),
-            percent_encoding::NON_ALPHANUMERIC,
-        )
-        .to_string();
-        request("GET", &format!("/api/files/watch?path={path}"))
+    std::fs::create_dir(work.join("inner")).unwrap();
+    let watch = |paths: serde_json::Value| {
+        request("POST", "/api/files/watch")
             .header(header::COOKIE, &cookie)
-            .body(Body::empty())
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                serde_json::json!({ "paths": paths }).to_string(),
+            ))
             .unwrap()
     };
-    let missing = send(&router, watch(&work.join("missing"))).await;
-    assert_eq!(missing.status(), StatusCode::NOT_FOUND);
-    let response = send(&router, watch(&work)).await;
+    let too_many: Vec<String> = (0..65).map(|i| format!("{}/{i}", work.display())).collect();
+    assert_eq!(
+        send(&router, watch(serde_json::json!(too_many)))
+            .await
+            .status(),
+        StatusCode::BAD_REQUEST
+    );
+    let missing = work.join("missing").display().to_string();
+    let inner = work.join("inner").display().to_string();
+    let response = send(
+        &router,
+        watch(serde_json::json!([
+            work.display().to_string(),
+            inner,
+            missing,
+            "not/absolute"
+        ])),
+    )
+    .await;
     assert_eq!(response.status(), StatusCode::OK);
     assert!(
         response.headers()[header::CONTENT_TYPE]
@@ -662,20 +677,42 @@ async fn a_folder_watched_tells_of_its_changes_until_the_sign_in_ends() {
             .starts_with("text/event-stream")
     );
     let mut body = response.into_body().into_data_stream();
-    std::fs::write(work.join("new.txt"), "x").unwrap();
-    let told = tokio::time::timeout(Duration::from_secs(10), async {
-        let mut seen = String::new();
-        while let Some(chunk) = body.next().await {
-            seen.push_str(&String::from_utf8_lossy(&chunk.unwrap()));
-            if seen.contains("event: change") {
-                break;
+    let mut seen = String::new();
+    let mut until = async |wanted: &str| {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while !seen.contains(wanted) {
+                let Some(chunk) = body.next().await else {
+                    break;
+                };
+                seen.push_str(&String::from_utf8_lossy(&chunk.unwrap()));
             }
+        })
+        .await
+        .unwrap();
+        assert!(seen.contains(wanted), "{wanted:?} in {seen:?}");
+    };
+    until(&format!("event: gone\ndata: {missing}")).await;
+    until("event: unwatched\ndata: not/absolute").await;
+    // A stream with nothing left to follow stays open, for its folders to be tried again by
+    // opening another rather than at once.
+    let lone = send(&router, watch(serde_json::json!([missing]))).await;
+    let mut lone = lone.into_body().into_data_stream();
+    let mut told = String::new();
+    let open = tokio::time::timeout(Duration::from_millis(1500), async {
+        while let Some(chunk) = lone.next().await {
+            told.push_str(&String::from_utf8_lossy(&chunk.unwrap()));
         }
-        seen
     })
-    .await
-    .unwrap();
-    assert!(told.contains("event: change"), "{told:?}");
+    .await;
+    assert!(open.is_err(), "the stream stayed open");
+    assert!(told.contains("event: gone"), "{told:?}");
+    std::fs::write(work.join("inner").join("new.txt"), "x").unwrap();
+    until(&format!("event: change\ndata: {inner}")).await;
+    std::fs::remove_dir_all(work.join("inner")).unwrap();
+    until(&format!("event: gone\ndata: {inner}")).await;
+    std::fs::write(work.join("new.txt"), "x").unwrap();
+    until(&format!("event: change\ndata: {}", work.display())).await;
+    drop(until);
     let out = send(
         &router,
         request("POST", "/api/auth/sign-out")
@@ -700,16 +737,20 @@ async fn entries_chosen_download_as_one_zip_by_the_id_kept_for_them() {
     std::fs::write(work.join("a.txt"), "alpha").unwrap();
     std::fs::write(work.join("b.txt"), "beta").unwrap();
     std::fs::write(work.join("c.txt"), "gamma").unwrap();
-    let select = |names: serde_json::Value| {
+    let select = |paths: serde_json::Value| {
         request("POST", "/api/files/zip/selection")
             .header(header::COOKIE, &cookie)
             .header(header::CONTENT_TYPE, "application/json")
             .body(Body::from(
-                serde_json::json!({ "path": work, "names": names }).to_string(),
+                serde_json::json!({ "paths": paths }).to_string(),
             ))
             .unwrap()
     };
-    let made = send(&router, select(serde_json::json!(["a.txt", "c.txt"]))).await;
+    let made = send(
+        &router,
+        select(serde_json::json!([work.join("a.txt"), work.join("c.txt")])),
+    )
+    .await;
     assert_eq!(made.status(), StatusCode::OK);
     let id = json(made).await["id"].as_str().unwrap().to_owned();
     let download = |query: String| {
@@ -728,11 +769,55 @@ async fn entries_chosen_download_as_one_zip_by_the_id_kept_for_them() {
         .collect();
     names.sort_unstable();
     assert_eq!(names, ["work/", "work/a.txt", "work/c.txt"]);
-    // A name is one name, and an id is one given.
-    let refused = send(&router, select(serde_json::json!(["../a.txt"]))).await;
+    // A path is absolute, and an id is one given.
+    let refused = send(&router, select(serde_json::json!(["a.txt"]))).await;
     assert_eq!(refused.status(), StatusCode::BAD_REQUEST);
+    let empty = send(&router, select(serde_json::json!([]))).await;
+    assert_eq!(empty.status(), StatusCode::BAD_REQUEST);
     let unknown = send(&router, download("selection=nothing".to_owned())).await;
     assert_eq!(unknown.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn text_saved_through_the_api_lands_only_over_what_was_read() {
+    let (_app, router, _, dir) = mekaweb().await;
+    let cookie = sign_in(&router).await;
+    let path = dir.path().join("work").join("notes.md");
+    std::fs::write(&path, "one").unwrap();
+    let encoded = percent_encoding::utf8_percent_encode(
+        &path.display().to_string(),
+        percent_encoding::NON_ALPHANUMERIC,
+    )
+    .to_string();
+    let read = send(
+        &router,
+        request("GET", &format!("/api/files/text?path={encoded}&edit=true"))
+            .header(header::COOKIE, &cookie)
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(read.status(), StatusCode::OK);
+    let version = json(read).await["version"].as_str().unwrap().to_owned();
+    let save = |text: &str, version: Option<&str>| {
+        request("PUT", "/api/files/text")
+            .header(header::COOKIE, &cookie)
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                serde_json::json!({ "path": path, "text": text, "version": version }).to_string(),
+            ))
+            .unwrap()
+    };
+    // Larger than the API's other bodies may be.
+    let long = "x".repeat(512 * 1024);
+    let saved = send(&router, save(&long, Some(&version))).await;
+    assert_eq!(saved.status(), StatusCode::OK);
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), long);
+    let stale = send(&router, save("two", Some(&version))).await;
+    assert_eq!(stale.status(), StatusCode::CONFLICT);
+    assert_eq!(json(stale).await["type"], "urn:mekaweb:changed");
+    let there = send(&router, save("two", None)).await;
+    assert_eq!(there.status(), StatusCode::CONFLICT);
 }
 
 #[tokio::test]

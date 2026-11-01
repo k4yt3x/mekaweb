@@ -57,6 +57,7 @@ export function MessageComposer({
   settings,
   onError,
   above,
+  meter,
   children,
 }: {
   text: string;
@@ -81,6 +82,8 @@ export function MessageComposer({
   onError: (error: unknown) => void;
   /** Shown just above the input, inside the composer's width. */
   above?: ReactNode;
+  /** Shown beside Send: how full the session's context is. */
+  meter?: ReactNode;
   children?: ReactNode;
 }) {
   const inputId = useId();
@@ -379,6 +382,7 @@ export function MessageComposer({
             <div className="composer-selectors">
               <PermissionSelect {...permission} />
               <ProfileSelect {...profile} />
+              {meter}
             </div>
             <Button
               size="icon"

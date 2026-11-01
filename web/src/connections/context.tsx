@@ -1,5 +1,5 @@
 import { createContext, useContext, useSyncExternalStore } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQueries, useQuery } from '@tanstack/react-query';
 import type { Query } from '../api/client';
 import type { ConnectionRuntime } from './runtime';
 
@@ -50,12 +50,30 @@ export function useGateway<T>(
   const runtime = useRuntime();
   const { account } = useConnection();
   return useQuery({
-    queryKey: ['gateway', account?.device_id, path, query],
+    queryKey: gatewayKey(account?.device_id, path, query),
     queryFn: ({ signal }) => runtime.gateway.get<T>(path, query, signal),
     enabled: Boolean(account) && enabled,
     staleTime: 5000,
     refetchInterval,
     retry: false,
+  });
+}
+/** Where a resource of mekaweb's own API is kept, for this device. */
+export function gatewayKey(device: string | undefined, path: string, query?: Query) {
+  return ['gateway', device, path, query] as const;
+}
+/** The same resource of mekaweb's own API, for each of `queries`, in their order. */
+export function useGatewayAll<T>(path: string, queries: readonly Query[]) {
+  const runtime = useRuntime();
+  const { account } = useConnection();
+  return useQueries({
+    queries: queries.map((query) => ({
+      queryKey: gatewayKey(account?.device_id, path, query),
+      queryFn: ({ signal }: { signal: AbortSignal }) => runtime.gateway.get<T>(path, query, signal),
+      enabled: Boolean(account),
+      staleTime: 5000,
+      retry: false,
+    })),
   });
 }
 export function useCan(scope: string) {

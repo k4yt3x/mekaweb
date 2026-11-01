@@ -6,6 +6,8 @@ Dependencies and exact versions are recorded in `web/package-lock.json`; their l
 
 The themed select, dropdown menu, and reading options popover use Radix primitives (MIT). The terminal uses xterm.js and its fit addon (MIT).
 
+The editor uses Monaco (MIT) on desktops and CodeMirror (MIT) on touch screens, highlighting through Shiki's Monaco bridge (MIT). File and folder icons come from Material Icon Theme (MIT); the map of names to icons is generated from its manifest by `web/scripts/file-icons.mjs`.
+
 The server's Rust dependencies and exact versions are recorded in `Cargo.lock`; their licenses are distributed in their crates. The binary statically links OpenSSL (Apache-2.0), built from source for `webauthn-rs`, SQLite (public domain), and AWS-LC (ISC AND (Apache-2.0 OR ISC) AND OpenSSL), for TLS to push services.
 
 Chinese, Japanese, and Korean emphasis uses remark-cjk-friendly (MIT).

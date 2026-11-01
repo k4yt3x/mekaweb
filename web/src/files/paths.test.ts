@@ -1,5 +1,16 @@
 import { expect, it } from 'vitest';
-import { basename, crumbs, formatSize, isRoot, join, language, parent, toolPath } from './paths';
+import {
+  basename,
+  crumbs,
+  formatSize,
+  isRoot,
+  join,
+  language,
+  movedTo,
+  parent,
+  toolPath,
+  within,
+} from './paths';
 
 it('joins and splits absolute paths', () => {
   expect(join('/', 'a')).toBe('/a');
@@ -61,4 +72,22 @@ it('names languages by extension', () => {
   expect(language('Dockerfile')).toBe('dockerfile');
   expect(language('notes')).toBeUndefined();
   expect(language('a.toml')).toBe('toml');
+});
+
+it('tells a path within a folder from one beside it', () => {
+  expect(within('/work/src/a.ts', '/work')).toBe(true);
+  expect(within('/work', '/work')).toBe(true);
+  expect(within('/work/', '/work')).toBe(true);
+  expect(within('/workshop/a', '/work')).toBe(false);
+  expect(within('/work', '/work/src')).toBe(false);
+  expect(within('/etc/hosts', '/')).toBe(true);
+  expect(within('C:\\Projects\\app', 'C:\\Projects')).toBe(true);
+  expect(within('C:\\Projects2', 'C:\\Projects')).toBe(false);
+  expect(within('D:\\x', 'C:\\')).toBe(false);
+});
+
+it('follows a path to where it, or a folder holding it, moved', () => {
+  expect(movedTo('/work/a.ts', '/work/a.ts', '/work/b.ts')).toBe('/work/b.ts');
+  expect(movedTo('/work/src/a.ts', '/work/src', '/work/lib')).toBe('/work/lib/a.ts');
+  expect(movedTo('/work/srcs/a.ts', '/work/src', '/work/lib')).toBe('/work/srcs/a.ts');
 });

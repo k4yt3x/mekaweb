@@ -16,9 +16,9 @@ use chrono::{DateTime, Utc};
 #[cfg(all(unix, test))]
 pub(crate) use unix::new_file_mode;
 #[cfg(unix)]
-pub(crate) use unix::{Disk, Folder, mode_of, open_regular, prepare, write_all_at};
+pub(crate) use unix::{Disk, Folder, mode_of, open_regular, prepare, same_file, write_all_at};
 #[cfg(windows)]
-pub(crate) use windows::{Disk, Folder, mode_of, open_regular, prepare, write_all_at};
+pub(crate) use windows::{Disk, Folder, mode_of, open_regular, prepare, same_file, write_all_at};
 
 use super::Kind;
 

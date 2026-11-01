@@ -51,7 +51,8 @@ export class ConnectionRuntime {
   private recoveryAbort: AbortController | undefined;
   private recoveryPromise: Promise<void> | undefined;
   private syncTimer: ReturnType<typeof setTimeout> | undefined;
-  private forgetting: (() => void) | undefined;
+  private forgetting = new Set<() => void>();
+  private guards = new Set<() => string | undefined>();
   private synced: string | undefined;
   constructor(
     readonly storage: BrowserStorage,
@@ -206,7 +207,11 @@ export class ConnectionRuntime {
    * so a failure is thrown and the device stays signed in.
    */
   async signOut() {
-    this.forgetting?.();
+    for (const guard of this.guards) {
+      const reason = guard();
+      if (reason) throw new Error(reason);
+    }
+    for (const forget of this.forgetting) forget();
     try {
       await this.gateway.send('POST', '/api/auth/sign-out');
     } catch (error) {
@@ -224,9 +229,13 @@ export class ConnectionRuntime {
     this.synced = undefined;
     this.publish({ auth: 'signed-out', busy: false, ...(notice ? { notice } : {}) });
   }
-  /** Sets what stops the work this device has under way for the account, before signing out. */
+  /** Adds to what stops the work this device has under way for the account, before signing out. */
   onSignOut(forget: () => void) {
-    this.forgetting = forget;
+    this.forgetting.add(forget);
+  }
+  /** Adds what may hold signing out back, saying why: work that would be lost. */
+  guardSignOut(guard: () => string | undefined) {
+    this.guards.add(guard);
   }
   /** Connects to meka again, as after it was unavailable. */
   reconnect() {

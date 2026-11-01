@@ -74,6 +74,7 @@ import {
 import { MessageComposer } from '../components/message-composer';
 import { CopyAction, HistoryAction, MessageEditor, TurnActions } from './turn-actions';
 import { ChecklistStrip } from './checklist-strip';
+import { ContextMeter } from './session-context';
 import { TurnSummary } from './turn-summary';
 import { useMentions } from '../components/workspace';
 import {
@@ -1433,6 +1434,7 @@ function Composer({
   return (
     <MessageComposer
       above={<ChecklistStrip items={state.session?.checklist ?? []} />}
+      meter={state.session ? <ContextMeter session={state.id} /> : undefined}
       text={draft.text}
       onTextChange={draft.setText}
       readOnly={!canWrite || Boolean(state.session?.parent_id) || state.deleting}

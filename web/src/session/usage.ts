@@ -15,3 +15,11 @@ export function contextMetrics(context: Schema['ContextResponse']) {
     remainingTokens: known ? Math.max(0, context.window! - context.used!) : null,
   };
 }
+
+/**
+ * Whether `used`, a share of the context window in percent, is near where meka compacts it, at
+ * `compactAt` percent, or near full where it does not.
+ */
+export function contextNear(used: number, compactAt: number | null | undefined) {
+  return used >= (compactAt ?? 90) - 10;
+}

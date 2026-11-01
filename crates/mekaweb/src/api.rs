@@ -22,6 +22,9 @@ use crate::app::App;
 /// The largest JSON body the API takes.
 const MAX_JSON_BYTES: usize = 256 * 1024;
 
+/// The largest body a file's text is saved with: the most it may hold, room made for escaping.
+const MAX_SAVE_BYTES: usize = 3 * crate::files::MAX_EDIT_BYTES as usize;
+
 #[derive(OpenApi)]
 #[openapi(
     info(
@@ -56,7 +59,6 @@ pub(crate) fn routes() -> OpenApiRouter<App> {
         .routes(routes!(status::status))
         .routes(routes!(files::list))
         .routes(routes!(files::watch))
-        .routes(routes!(files::text))
         .routes(routes!(files::raw))
         .routes(routes!(files::zip))
         .routes(routes!(files::select_for_zip))
@@ -71,6 +73,12 @@ pub(crate) fn routes() -> OpenApiRouter<App> {
         .routes(routes!(push::push_state))
         .routes(routes!(push::subscribe, push::unsubscribe))
         .routes(routes!(push::test_push))
+        // Saving text takes a larger body than the rest; within, its limit is what holds.
+        .merge(
+            OpenApiRouter::new()
+                .routes(routes!(files::text, files::save_text))
+                .layer(DefaultBodyLimit::max(MAX_SAVE_BYTES)),
+        )
         .layer(DefaultBodyLimit::max(MAX_JSON_BYTES))
 }
 

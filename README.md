@@ -7,8 +7,9 @@ mekaweb is a server you install beside meka, on Linux, macOS or Windows. It sign
 Besides meka's sessions, memory, skills, schedules, MCP servers, accounts and profiles, mekaweb adds what meka leaves to the host:
 
 - **Sign-in** with a password or a passkey, a list of the devices signed in, and a sign-in log.
-- **Files** beside each session, at its working directory: preview, upload, download, mention a file in a message.
-- **A terminal** docked under each session that keeps running when you leave, to come back to from any device.
+- **Files** beside each session, as a tree from its working directory: upload, download, move, mention a file in a message.
+- **An editor** for the files, VS Code's Monaco, that follows what the agent changes on disk.
+- **Terminals** in each session's editor tabs, which keep running when you leave, for any device to come back to.
 - **Push notifications** when a turn finishes, fails, or waits for your approval or answer, even with the app closed.
 - **Data saver** for mobile data, and preferences shared by every device.
 

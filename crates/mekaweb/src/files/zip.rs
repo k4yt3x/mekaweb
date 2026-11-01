@@ -6,7 +6,7 @@
 
 use std::{
     cell::RefCell,
-    collections::HashSet,
+    collections::HashMap,
     ffi::OsString,
     io::{Read, Write},
     rc::Rc,
@@ -78,11 +78,11 @@ impl Write for ChannelWriter {
 }
 
 /// Writes the folder `dir` as a zip into `sender`, its entries under `prefix/`; with `only`, just
-/// those names in it. Runs until the archive ends or the download stops.
+/// the entries those names lead to in it. Runs until the archive ends or the download stops.
 pub(crate) fn write(
     dir: Folder,
     prefix: String,
-    only: Option<Vec<String>>,
+    only: Option<Vec<Vec<String>>>,
     sender: mpsc::Sender<std::io::Result<Bytes>>,
 ) {
     let error_sender = sender.clone();
@@ -92,6 +92,7 @@ pub(crate) fn write(
         pending: Rc::clone(&pending),
     };
     let mut zip = ZipWriter::new_stream(writer);
+    let only = only.map(|paths| Chosen::of(&paths));
     let result =
         add_tree(&mut zip, &pending, dir, &entry_name(&prefix), only).and_then(|left_out| {
             if left_out > 0 {
@@ -116,11 +117,44 @@ fn entry_name(name: &str) -> String {
     name.replace('\\', "_")
 }
 
-/// A folder being added: its path in the archive, and the names in it left to add.
+/// What is chosen in a folder: names in it, each with all it holds or what is chosen in it.
+#[derive(Debug, Default)]
+struct Chosen(HashMap<OsString, Option<Self>>);
+
+impl Chosen {
+    /// What the entries `paths`, each given by its names from the folder, choose in it.
+    fn of(paths: &[Vec<String>]) -> Self {
+        let mut chosen = Self::default();
+        for path in paths {
+            chosen.add(path);
+        }
+        chosen
+    }
+
+    /// Chooses the entry `path` leads to, and so all it holds.
+    fn add(&mut self, path: &[String]) {
+        let Some((first, rest)) = path.split_first() else {
+            return;
+        };
+        let name = OsString::from(first);
+        if rest.is_empty() {
+            self.0.insert(name, None);
+            return;
+        }
+        // A folder chosen whole holds this already.
+        if let Some(inner) = self.0.entry(name).or_insert_with(|| Some(Self::default())) {
+            inner.add(rest);
+        }
+    }
+}
+
+/// A folder being added: its path in the archive, the names in it left to add, and, when only some
+/// of what it holds is chosen, what is.
 struct Adding {
     folder: Folder,
     path: String,
     left: std::vec::IntoIter<OsString>,
+    chosen: Option<Chosen>,
 }
 
 impl Adding {
@@ -139,32 +173,25 @@ impl Adding {
             folder,
             path,
             left: names.into_iter(),
+            chosen: None,
         })
     }
 }
 
-/// Adds the folder `dir` and what it holds under `prefix/`, or with `only` just those names in
+/// Adds the folder `dir` and what it holds under `prefix/`, or with `only` just what is chosen in
 /// it; how many entries were left out.
 fn add_tree<W: Write>(
     zip: &mut ZipWriter<zip::write::StreamWriter<W>>,
     pending: &RefCell<Pending>,
     dir: Folder,
     prefix: &str,
-    only: Option<Vec<String>>,
+    only: Option<Chosen>,
 ) -> std::io::Result<usize> {
     let disk = dir.disk()?;
     let mut left_out = 0;
     let names = dir.names()?;
     let mut top = Adding::start(zip, dir, prefix.to_owned(), names)?;
-    if let Some(only) = only {
-        // A name gone since it was chosen is not there to add.
-        let only: HashSet<OsString> = only.into_iter().map(OsString::from).collect();
-        top.left = top
-            .left
-            .filter(|name| only.contains(name))
-            .collect::<Vec<_>>()
-            .into_iter();
-    }
+    top.chosen = only;
     let mut stack = vec![top];
     loop {
         let depth = stack.len();
@@ -174,6 +201,14 @@ fn add_tree<W: Write>(
         let Some(name) = current.left.next() else {
             stack.pop();
             continue;
+        };
+        // A name gone since it was chosen is not there to add; one not chosen is not added.
+        let inner = match &mut current.chosen {
+            Some(chosen) => match chosen.0.remove(&name) {
+                Some(inner) => inner,
+                None => continue,
+            },
+            None => None,
         };
         let Some(text) = name.to_str() else {
             left_out += 1;
@@ -204,7 +239,8 @@ fn add_tree<W: Write>(
                     left_out += 1;
                     continue;
                 };
-                let next = Adding::start(zip, folder, path, names)?;
+                let mut next = Adding::start(zip, folder, path, names)?;
+                next.chosen = inner;
                 stack.push(next);
             }
             Kind::File => {
@@ -322,8 +358,8 @@ mod tests {
 
     use super::*;
 
-    /// What a zip of `folder` holds, with `only` just those names in it.
-    async fn zipped(folder: &std::path::Path, only: Option<Vec<String>>) -> Vec<u8> {
+    /// What a zip of `folder` holds, with `only` just the entries those names lead to in it.
+    async fn zipped(folder: &std::path::Path, only: Option<Vec<Vec<String>>>) -> Vec<u8> {
         let dir = Folder::open(folder).unwrap();
         let (sender, mut receiver) = mpsc::channel(4);
         let writing =
@@ -371,6 +407,14 @@ mod tests {
         assert_eq!(text, "beta");
     }
 
+    /// Each path as its names.
+    fn chosen(paths: &[&str]) -> Vec<Vec<String>> {
+        paths
+            .iter()
+            .map(|path| path.split('/').map(str::to_owned).collect())
+            .collect()
+    }
+
     #[tokio::test]
     async fn only_the_names_chosen_are_zipped() {
         let dir = tempfile::tempdir().unwrap();
@@ -379,7 +423,7 @@ mod tests {
         std::fs::write(folder.join("a.txt"), "alpha").unwrap();
         std::fs::write(folder.join("b.txt"), "beta").unwrap();
         std::fs::write(folder.join("inner/c.txt"), "gamma").unwrap();
-        let only = vec!["a.txt".to_owned(), "inner".to_owned(), "gone".to_owned()];
+        let only = chosen(&["a.txt", "inner", "gone"]);
         let archive = zipped(&folder, Some(only)).await;
         let zip = zip::ZipArchive::new(std::io::Cursor::new(archive)).unwrap();
         let mut names: Vec<String> = zip
@@ -392,6 +436,38 @@ mod tests {
             "folder/a.txt",
             "folder/inner/",
             "folder/inner/c.txt"
+        ]);
+    }
+
+    #[tokio::test]
+    async fn entries_chosen_deeper_are_zipped_with_the_folders_holding_them() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("folder");
+        std::fs::create_dir_all(folder.join("src/deep")).unwrap();
+        std::fs::create_dir_all(folder.join("docs")).unwrap();
+        std::fs::write(folder.join("src/main.rs"), "main").unwrap();
+        std::fs::write(folder.join("src/lib.rs"), "lib").unwrap();
+        std::fs::write(folder.join("src/deep/x.rs"), "x").unwrap();
+        std::fs::write(folder.join("docs/a.md"), "a").unwrap();
+        std::fs::write(folder.join("docs/b.md"), "b").unwrap();
+        // A folder chosen whole holds what is chosen in it already.
+        let only = chosen(&["src/main.rs", "docs", "docs/a.md", "src/deep/x.rs"]);
+        let archive = zipped(&folder, Some(only)).await;
+        let zip = zip::ZipArchive::new(std::io::Cursor::new(archive)).unwrap();
+        let mut names: Vec<String> = zip
+            .file_names()
+            .map(|name| name.unwrap().into_owned())
+            .collect();
+        names.sort();
+        assert_eq!(names, [
+            "folder/",
+            "folder/docs/",
+            "folder/docs/a.md",
+            "folder/docs/b.md",
+            "folder/src/",
+            "folder/src/deep/",
+            "folder/src/deep/x.rs",
+            "folder/src/main.rs"
         ]);
     }
 

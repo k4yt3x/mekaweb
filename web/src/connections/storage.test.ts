@@ -4,6 +4,7 @@ import {
   CONVERSATION_FONT,
   CONVERSATION_OFFSET,
   TERMINAL_FONT,
+  EDITOR_FONT,
   CONVERSATION_WIDTH,
 } from './storage';
 function storage(): Storage {
@@ -46,7 +47,7 @@ it('takes shared preferences from mekaweb, checked, and leaves this device’s o
   const local = storage();
   const adapter = new BrowserStorage(local);
   adapter.dataSaver(true);
-  adapter.layout({ detailsOpen: true });
+  adapter.layout({ panel: 'context' });
   adapter.conversationFontSize(18);
   const changes: unknown[] = [];
   adapter.subscribe(() => changes.push(adapter.getSnapshot()));
@@ -55,21 +56,23 @@ it('takes shared preferences from mekaweb, checked, and leaves this device’s o
     conversationFontSize: 12,
     conversationOffset: 40,
     terminalFontSize: 20,
+    editorFontSize: 20,
     showTurnContext: true,
     completionSound: 'yes',
     providerOrder: { accounts: ['work', 'work', 3], profiles: 'opus' },
     dataSaver: false,
-    layout: { detailsOpen: false },
+    layout: { panel: 'files' },
   });
   expect(adapter.getSnapshot()).toMatchObject({
     theme: 'system',
     conversationFontSize: 18,
     conversationOffset: CONVERSATION_OFFSET.default,
     terminalFontSize: TERMINAL_FONT.default,
+    editorFontSize: EDITOR_FONT.default,
     showTurnContext: true,
     completionSound: false,
     dataSaver: true,
-    layout: { detailsOpen: true },
+    layout: { panel: 'context' },
   });
   expect(changes).toHaveLength(1);
   adapter.applyPreferences({ showTurnContext: true });
@@ -89,12 +92,12 @@ it('merges preference changes across tabs without replacing other settings or dr
   const other = new BrowserStorage(local);
   first.conversationMaxWidth(1250);
   other.conversationFontSize(18);
-  first.layout({ detailsOpen: true });
+  first.layout({ panel: 'tasks' });
   other.refresh();
   expect(other.getSnapshot()).toMatchObject({
     conversationMaxWidth: 1250,
     conversationFontSize: 18,
-    layout: { detailsOpen: true },
+    layout: { panel: 'tasks' },
   });
   expect(other.draft('mekaweb', 's')).toEqual(draft);
 });
@@ -126,8 +129,9 @@ it('bounds stored panel widths, fonts, widths and offsets', () => {
     'mekaweb:v1:settings',
     JSON.stringify({
       version: 1,
-      layout: { sessionsWidth: -100, detailsWidth: 90000, filesWidth: 1 },
+      layout: { sessionsWidth: -100, panelWidth: 90000, conversationWidth: 1 },
       terminalFontSize: 99,
+      editorFontSize: 2,
       conversationFontSize: '24px',
       conversationMaxWidth: '100vw',
       conversationAnchor: 'left',
@@ -135,8 +139,9 @@ it('bounds stored panel widths, fonts, widths and offsets', () => {
     }),
   );
   expect(new BrowserStorage(local).getSnapshot()).toMatchObject({
-    layout: { sessionsWidth: 180, detailsWidth: 600, filesWidth: 300 },
+    layout: { sessionsWidth: 180, panelWidth: 900, conversationWidth: 340 },
     terminalFontSize: 32,
+    editorFontSize: 8,
     conversationFontSize: CONVERSATION_FONT.default,
     conversationMaxWidth: CONVERSATION_WIDTH.default,
     conversationAnchor: 'page',
@@ -149,6 +154,31 @@ it('bounds stored panel widths, fonts, widths and offsets', () => {
     conversationMaxWidth: 'full',
     conversationOffset: 41,
   });
+});
+
+it('opens the panel that was open before one showed at a time, at its width', () => {
+  const saved = (layout: Record<string, unknown>) => {
+    const local = storage();
+    local.setItem('mekaweb:v1:settings', JSON.stringify({ version: 1, layout }));
+    return new BrowserStorage(local).getSnapshot().layout;
+  };
+  expect(saved({ filesOpen: true, detailsOpen: true, filesWidth: 520, detailsWidth: 300 })).toEqual(
+    { navigationCollapsed: false, sessionsCollapsed: false, panel: 'files', panelWidth: 520 },
+  );
+  expect(saved({ detailsOpen: true, detailsWidth: 300, terminalHeight: 400 })).toEqual({
+    navigationCollapsed: false,
+    sessionsCollapsed: false,
+    panel: 'context',
+    panelWidth: 300,
+  });
+  expect(saved({ panel: 'nowhere' })).toEqual({
+    navigationCollapsed: false,
+    sessionsCollapsed: false,
+  });
+  const adapter = new BrowserStorage(storage());
+  adapter.layout({ panel: 'schedules' });
+  adapter.layout({ panel: undefined });
+  expect(adapter.getSnapshot().layout).not.toHaveProperty('panel');
 });
 
 it('restores the reading defaults without touching the theme', () => {

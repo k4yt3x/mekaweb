@@ -5,10 +5,15 @@ const SETTINGS = PREFIX + 'settings';
 export const CONVERSATION_FONT = { default: 14, step: 1 } as const;
 export const CONVERSATION_WIDTH = { default: 850, step: 100 } as const;
 export const CONVERSATION_OFFSET = { default: 0, step: 10, limit: 10_000 } as const;
-/** A docked terminal's height, in pixels. */
-export const TERMINAL_HEIGHT = { default: 280, min: 120, max: 1200 } as const;
 export const TERMINAL_FONT = { default: 13, min: 8, max: 32 } as const;
-export const FILES_WIDTH = { default: 400, min: 300, max: 900 } as const;
+export const EDITOR_FONT = { default: 13, min: 8, max: 32 } as const;
+/** The side panel's width, in pixels. */
+export const PANEL_WIDTH = { default: 400, min: 280, max: 900 } as const;
+/** The conversation's width beside the terminal, in pixels. */
+export const CONVERSATION_COLUMN = { default: 420, min: 340, max: 4000 } as const;
+/** The side panels, of which one shows at a time. */
+export const PANELS = ['files', 'context', 'tasks', 'schedules'] as const;
+export type Panel = (typeof PANELS)[number];
 type ConversationMaxWidth = number | 'full';
 export type ConversationAnchor = 'page' | 'area';
 
@@ -31,9 +36,20 @@ export function normalizeConversationOffset(value: unknown): number {
   return Math.round(Math.max(-limit, Math.min(limit, value))) + 0;
 }
 
-export function normalizeTerminalFontSize(value: unknown): number {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return TERMINAL_FONT.default;
-  return Math.round(Math.max(TERMINAL_FONT.min, Math.min(TERMINAL_FONT.max, value)));
+function fontSizeWithin(
+  value: unknown,
+  range: { default: number; min: number; max: number },
+): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return range.default;
+  return Math.round(Math.max(range.min, Math.min(range.max, value)));
+}
+
+function normalizeTerminalFontSize(value: unknown): number {
+  return fontSizeWithin(value, TERMINAL_FONT);
+}
+
+function normalizeEditorFontSize(value: unknown): number {
+  return fontSizeWithin(value, EDITOR_FONT);
 }
 
 function normalizeConversationAnchor(value: unknown): ConversationAnchor {
@@ -90,6 +106,10 @@ export interface Settings {
   conversationOffset: number;
   /** The terminal's font size, in pixels; Ctrl with the wheel or keys changes it for a while. */
   terminalFontSize: number;
+  /** The editor's font size, in pixels; Ctrl with the wheel or keys changes it for a while. */
+  editorFontSize: number;
+  /** Whether the editor wraps long lines, as Alt+Z switches. */
+  editorWordWrap: boolean;
   showTurnContext: boolean;
   inAppNotifications: boolean;
   completionSound: boolean;
@@ -107,14 +127,12 @@ export interface ConversationAppearance {
 export interface LayoutPreferences {
   navigationCollapsed: boolean;
   sessionsCollapsed: boolean;
-  detailsOpen: boolean;
-  /** Whether Files is open beside the conversation. */
-  filesOpen: boolean;
+  /** The side panel open, if any. */
+  panel?: Panel | undefined;
   sessionsWidth?: number;
-  detailsWidth?: number;
-  filesWidth?: number;
-  /** How tall a session's terminal is, docked under the conversation. */
-  terminalHeight?: number;
+  panelWidth?: number;
+  /** The conversation's width beside the terminal. */
+  conversationWidth?: number;
 }
 /** The server's `updated_at` for each session as last viewed here; see `src/session/unread.ts`. */
 export interface SeenSessions {
@@ -144,6 +162,8 @@ const defaults = (): Settings => ({
   conversationAnchor: 'page',
   conversationOffset: CONVERSATION_OFFSET.default,
   terminalFontSize: TERMINAL_FONT.default,
+  editorFontSize: EDITOR_FONT.default,
+  editorWordWrap: false,
   showTurnContext: false,
   inAppNotifications: true,
   completionSound: false,
@@ -152,8 +172,6 @@ const defaults = (): Settings => ({
   layout: {
     navigationCollapsed: false,
     sessionsCollapsed: false,
-    detailsOpen: false,
-    filesOpen: false,
   },
 });
 function object(value: unknown): value is Record<string, unknown> {
@@ -167,6 +185,33 @@ function parse(value: string | null): unknown {
     return undefined;
   }
 }
+/** A width kept as a whole number of pixels within `bounds`, if `value` is one at all. */
+function width(value: unknown, bounds: { min: number; max: number }): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value)
+    ? Math.round(Math.max(bounds.min, Math.min(bounds.max, value)))
+    : undefined;
+}
+function normalizeLayout(layout: Record<string, unknown>): LayoutPreferences {
+  // Before one panel showed at a time, Files and the session details opened apart; Files was
+  // shown first where both were open, and the details opened at their context.
+  const panel =
+    PANELS.find((name) => name === layout.panel) ??
+    (layout.filesOpen === true ? 'files' : layout.detailsOpen === true ? 'context' : undefined);
+  const sessionsWidth = width(layout.sessionsWidth, { min: 180, max: 480 });
+  const panelWidth = width(
+    layout.panelWidth ?? layout.filesWidth ?? layout.detailsWidth,
+    PANEL_WIDTH,
+  );
+  const conversationWidth = width(layout.conversationWidth, CONVERSATION_COLUMN);
+  return {
+    navigationCollapsed: layout.navigationCollapsed === true,
+    sessionsCollapsed: layout.sessionsCollapsed === true,
+    ...(panel ? { panel } : {}),
+    ...(sessionsWidth !== undefined ? { sessionsWidth } : {}),
+    ...(panelWidth !== undefined ? { panelWidth } : {}),
+    ...(conversationWidth !== undefined ? { conversationWidth } : {}),
+  };
+}
 function normalizeSettings(value: unknown): Settings {
   if (!object(value) || value.version !== 1) return defaults();
   return {
@@ -177,48 +222,14 @@ function normalizeSettings(value: unknown): Settings {
     conversationAnchor: normalizeConversationAnchor(value.conversationAnchor),
     conversationOffset: normalizeConversationOffset(value.conversationOffset),
     terminalFontSize: normalizeTerminalFontSize(value.terminalFontSize),
+    editorFontSize: normalizeEditorFontSize(value.editorFontSize),
+    editorWordWrap: value.editorWordWrap === true,
     showTurnContext: value.showTurnContext === true,
     inAppNotifications: value.inAppNotifications !== false,
     completionSound: value.completionSound === true,
     providerOrder: normalizeProviderOrder(value.providerOrder),
     dataSaver: value.dataSaver === true,
-    layout: {
-      navigationCollapsed: object(value.layout) && value.layout.navigationCollapsed === true,
-      sessionsCollapsed: object(value.layout) && value.layout.sessionsCollapsed === true,
-      detailsOpen: object(value.layout) && value.layout.detailsOpen === true,
-      filesOpen: object(value.layout) && value.layout.filesOpen === true,
-      ...(object(value.layout) &&
-      typeof value.layout.sessionsWidth === 'number' &&
-      Number.isFinite(value.layout.sessionsWidth)
-        ? { sessionsWidth: Math.round(Math.max(180, Math.min(480, value.layout.sessionsWidth))) }
-        : {}),
-      ...(object(value.layout) &&
-      typeof value.layout.detailsWidth === 'number' &&
-      Number.isFinite(value.layout.detailsWidth)
-        ? { detailsWidth: Math.round(Math.max(280, Math.min(600, value.layout.detailsWidth))) }
-        : {}),
-      ...(object(value.layout) &&
-      typeof value.layout.filesWidth === 'number' &&
-      Number.isFinite(value.layout.filesWidth)
-        ? {
-            filesWidth: Math.round(
-              Math.max(FILES_WIDTH.min, Math.min(FILES_WIDTH.max, value.layout.filesWidth)),
-            ),
-          }
-        : {}),
-      ...(object(value.layout) &&
-      typeof value.layout.terminalHeight === 'number' &&
-      Number.isFinite(value.layout.terminalHeight)
-        ? {
-            terminalHeight: Math.round(
-              Math.max(
-                TERMINAL_HEIGHT.min,
-                Math.min(TERMINAL_HEIGHT.max, value.layout.terminalHeight),
-              ),
-            ),
-          }
-        : {}),
-    },
+    layout: normalizeLayout(object(value.layout) ? value.layout : {}),
   };
 }
 export class BrowserStorage {
@@ -357,6 +368,12 @@ export class BrowserStorage {
   terminalFontSize(value: number) {
     this.save({ ...this.readSettings(), terminalFontSize: normalizeTerminalFontSize(value) });
   }
+  editorFontSize(value: number) {
+    this.save({ ...this.readSettings(), editorFontSize: normalizeEditorFontSize(value) });
+  }
+  editorWordWrap(editorWordWrap: boolean) {
+    this.save({ ...this.readSettings(), editorWordWrap });
+  }
   conversationOffset(value: number) {
     this.save({ ...this.readSettings(), conversationOffset: normalizeConversationOffset(value) });
   }
@@ -397,7 +414,7 @@ export class BrowserStorage {
   }
   layout(patch: Partial<LayoutPreferences>) {
     const settings = this.readSettings();
-    this.save({ ...settings, layout: { ...settings.layout, ...patch } });
+    this.save({ ...settings, layout: normalizeLayout({ ...settings.layout, ...patch }) });
   }
   private draftIndex(): string[] {
     const value = parse(this.read(PREFIX + 'draft-index'));

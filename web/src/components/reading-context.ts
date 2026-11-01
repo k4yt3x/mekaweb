@@ -4,6 +4,8 @@ import type { ConversationAppearance } from '../connections/storage';
 export type ReadingOptions = ConversationAppearance;
 export type ReadingState = {
   options: ReadingOptions;
+  /** What the conversation is centered on: the page, unless it cannot be there, then its area. */
+  anchor: ReadingOptions['anchor'];
   adjusted: boolean;
   change: (options: Partial<ReadingOptions> | null) => void;
   saveDefaults: (options: ReadingOptions) => void;

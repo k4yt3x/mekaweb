@@ -14,6 +14,7 @@ import {
   CONVERSATION_FONT,
   CONVERSATION_OFFSET,
   CONVERSATION_WIDTH,
+  EDITOR_FONT,
   TERMINAL_FONT,
 } from '../connections/storage';
 import type { Schema } from '../api/client';
@@ -124,6 +125,22 @@ export function SettingsPage() {
               />
             </Field>
           )}
+          <Field label="Editor font size">
+            <PixelInput
+              label="Editor font size"
+              value={settings.editorFontSize}
+              step={1}
+              min={EDITOR_FONT.min}
+              hint={
+                appleKeyboard()
+                  ? 'Cmd with =, - or 0, or a pinch, changes it until the editor closes.'
+                  : 'Ctrl with the wheel, =, - or 0 changes it until the editor closes.'
+              }
+              onCommit={(size) => {
+                if (typeof size === 'number') runtime.storage.editorFontSize(size);
+              }}
+            />
+          </Field>
         </div>
         <div className="panel-footer">
           <Button
@@ -133,12 +150,14 @@ export function SettingsPage() {
               settings.conversationMaxWidth === CONVERSATION_WIDTH.default &&
               settings.conversationAnchor === 'page' &&
               settings.conversationOffset === CONVERSATION_OFFSET.default &&
-              settings.terminalFontSize === TERMINAL_FONT.default
+              settings.terminalFontSize === TERMINAL_FONT.default &&
+              settings.editorFontSize === EDITOR_FONT.default
             }
             title="Reset the font sizes, width, and position; the color theme is kept"
             onClick={() => {
               runtime.storage.resetConversationAppearance();
               runtime.storage.terminalFontSize(TERMINAL_FONT.default);
+              runtime.storage.editorFontSize(EDITOR_FONT.default);
             }}
           >
             <RotateCcw size={16} />

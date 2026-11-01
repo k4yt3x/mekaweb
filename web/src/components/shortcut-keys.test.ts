@@ -95,6 +95,12 @@ describe('shortcut matching', () => {
     expect(matchesShortcut('toggleTerminal', { ...backquote, ctrlKey: false }, false)).toBe(false);
     expect(shortcutKeys('toggleTerminal', true)).toEqual(['Ctrl', '`']);
     expect(shortcutAria('toggleTerminal', false)).toBe('Control+`');
+    // With Shift, the key types a tilde: a new terminal, as in VS Code.
+    const tilde = { ...backquote, key: '~', shiftKey: true };
+    expect(matchesShortcut('newTerminal', tilde, false)).toBe(true);
+    expect(matchesShortcut('newTerminal', tilde, true)).toBe(true);
+    expect(matchesShortcut('toggleTerminal', tilde, false)).toBe(false);
+    expect(matchesShortcut('newTerminal', backquote, false)).toBe(false);
   });
 
   it('provides platform-specific display and accessible keys', () => {

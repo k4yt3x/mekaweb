@@ -9,3 +9,4 @@ playwright/.auth/
 .cache/
 .vite/
 package-lock.json
+src/files/file-icons.json

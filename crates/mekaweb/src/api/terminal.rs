@@ -34,8 +34,7 @@ use crate::{
 pub(crate) struct NewTerminal {
     /// The folder to start in; the home folder unless given.
     pub(crate) cwd: Option<String>,
-    /// The meka session it belongs to, if any: it is found by it, and closes with it. A session
-    /// whose terminal is open gets that one.
+    /// The meka session it belongs to, if any: it is found by it, and closes with it.
     pub(crate) session: Option<String>,
     #[serde(default = "default_cols")]
     pub(crate) cols: u16,

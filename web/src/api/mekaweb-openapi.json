@@ -6,7 +6,7 @@
     "license": {
       "name": "AGPL-3.0-or-later"
     },
-    "version": "0.32.0"
+    "version": "0.33.0"
   },
   "paths": {
     "/api/account/devices": {
@@ -874,6 +874,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "edit",
+            "in": "query",
+            "description": "Read up to 10 MiB, to edit, rather than 2 MiB.",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -905,6 +914,68 @@
             }
           },
           "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": ["files"],
+        "summary": "Saves text as a file: over it only if it is still at the `version` it was read at, or as a new\nfile. One changed since is refused with 409 and the problem type `changed`; one deleted since,\nwith 404.",
+        "operationId": "save_text",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveText"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Saved"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
             "content": {
               "application/json": {
                 "schema": {
@@ -1098,23 +1169,23 @@
       }
     },
     "/api/files/watch": {
-      "get": {
+      "post": {
         "tags": ["files"],
-        "summary": "Changes to a folder, as an event stream: a `change` event whenever what it holds may have\nchanged, at most about once a second, after which it is to be listed again. Events missed while\nthe stream was not open are not told, so a folder is listed again on reconnecting.",
+        "summary": "Changes to folders, as an event stream: a `change` event, its data the folder as asked for,\nwhenever what that holds may have changed, at most about once a second for each, after which it\nis to be listed again. A folder that is not there, or goes away, is told of by a `gone` event,\nand one that cannot be watched, or is no path, by an `unwatched` event; the others are followed\non. Events missed while the stream was not open are not told, so the folders are listed again on\nreconnecting. One stream follows many folders: a browser holds few connections to a server.",
         "operationId": "watch",
-        "parameters": [
-          {
-            "name": "path",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string"
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Watch"
+              }
             }
-          }
-        ],
+          },
+          "required": true
+        },
         "responses": {
           "200": {
-            "description": "`change` events",
+            "description": "`change`, `gone` and `unwatched` events",
             "content": {
               "text/event-stream": {}
             }
@@ -1129,15 +1200,6 @@
             }
           },
           "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
-          },
-          "404": {
             "content": {
               "application/json": {
                 "schema": {
@@ -1213,7 +1275,7 @@
     "/api/files/zip/selection": {
       "post": {
         "tags": ["files"],
-        "summary": "Keeps entries chosen in a folder for a zip of them, which `GET /api/files/zip` then downloads\nby the id given: their names would make too long an address.",
+        "summary": "Keeps entries chosen for a zip of them, under the folder they are all in, which\n`GET /api/files/zip` then downloads by the id given: their names would make too long an\naddress.",
         "operationId": "select_for_zip",
         "requestBody": {
           "content": {
@@ -1863,19 +1925,14 @@
       },
       "NewSelection": {
         "type": "object",
-        "description": "Entries chosen in a folder, to download as one zip.",
-        "required": ["path", "names"],
+        "description": "Entries chosen, to download as one zip under the folder they are all in.",
+        "required": ["paths"],
         "properties": {
-          "names": {
+          "paths": {
             "type": "array",
             "items": {
               "type": "string"
-            },
-            "description": "Their names in it."
-          },
-          "path": {
-            "type": "string",
-            "description": "The folder they are in."
+            }
           }
         }
       },
@@ -1899,7 +1956,7 @@
           },
           "session": {
             "type": ["string", "null"],
-            "description": "The meka session it belongs to, if any: it is found by it, and closes with it. A session\nwhose terminal is open gets that one."
+            "description": "The meka session it belongs to, if any: it is found by it, and closes with it."
           }
         }
       },
@@ -2057,6 +2114,43 @@
           "name": {
             "type": "string",
             "description": "The name; empty goes back to the default."
+          }
+        }
+      },
+      "SaveText": {
+        "type": "object",
+        "description": "Text to save as a file.",
+        "required": ["path", "text"],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "version": {
+            "type": ["string", "null"],
+            "description": "The version the file was read at, which it must still be at; none to make a new file,\nnever over anything there."
+          }
+        }
+      },
+      "Saved": {
+        "type": "object",
+        "description": "A text file as saved.",
+        "required": ["version", "size"],
+        "properties": {
+          "modified": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "size": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "version": {
+            "type": "string",
+            "description": "What it holds now, to save over it next."
           }
         }
       },
@@ -2229,12 +2323,16 @@
       },
       "Text": {
         "type": "object",
-        "description": "A text file's contents, for a preview.",
+        "description": "A text file's contents, for a preview or to edit.",
         "required": ["text", "size", "truncated", "binary"],
         "properties": {
           "binary": {
             "type": "boolean",
             "description": "Whether the file looks binary, in which case `text` is empty."
+          },
+          "modified": {
+            "type": ["string", "null"],
+            "format": "date-time"
           },
           "size": {
             "type": "integer",
@@ -2248,6 +2346,10 @@
           "truncated": {
             "type": "boolean",
             "description": "Whether the file is longer than what was read."
+          },
+          "version": {
+            "type": ["string", "null"],
+            "description": "What the file held, to save over it only as it was: none for one cut short or binary."
           }
         }
       },
@@ -2294,6 +2396,20 @@
               "type": "string"
             },
             "description": "The versions it was checked against."
+          }
+        }
+      },
+      "Watch": {
+        "type": "object",
+        "description": "Folders to follow for changes.",
+        "required": ["paths"],
+        "properties": {
+          "paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Each folder, at most 64, as the events name it."
           }
         }
       }

@@ -205,6 +205,26 @@ impl Folder {
         )?)
     }
 
+    /// Whether a file in it, which `metadata` describes, is saved over in place rather than
+    /// replaced by a new one: it has other names, which a new file would part it from, or another
+    /// owner or group than a new file would get, which would cost whoever shares it their access.
+    pub(crate) fn writes_in_place(&self, metadata: &Metadata) -> bool {
+        use std::os::unix::fs::MetadataExt;
+        metadata.nlink() > 1
+            || metadata.uid() != rustix::process::geteuid().as_raw()
+            || Some(metadata.gid()) != self.new_file_group()
+    }
+
+    /// The group a new file in it gets: its own where it passes it on, else the process's.
+    fn new_file_group(&self) -> Option<u32> {
+        let stat = rustix::fs::fstat(&self.fd).ok()?;
+        Some(if mode_bits(stat.st_mode) & 0o2000 != 0 {
+            stat.st_gid
+        } else {
+            rustix::process::getegid().as_raw()
+        })
+    }
+
     /// Gives the finished upload `file` its mode: that of the regular file `name` in it, if it
     /// replaces that, else the one new files get.
     pub(crate) fn give_mode(&self, file: &File, name: &OsStr, replace: bool) -> io::Result<()> {
@@ -250,6 +270,16 @@ fn stat_of(stat: &rustix::fs::Stat) -> Stat {
 )]
 fn mode_bits(mode: RawMode) -> u32 {
     u32::from(mode)
+}
+
+/// Whether `a` and `b` describe the same file as it was: the same one, unchanged since.
+pub(crate) fn same_file(a: &Metadata, b: &Metadata) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    a.dev() == b.dev()
+        && a.ino() == b.ino()
+        && a.len() == b.len()
+        && a.mtime() == b.mtime()
+        && a.mtime_nsec() == b.mtime_nsec()
 }
 
 /// A file's permission bits.

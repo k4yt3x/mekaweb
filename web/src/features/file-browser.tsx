@@ -1,40 +1,44 @@
 import {
   useEffect,
-  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
   type DragEvent,
   type FormEvent,
-  type ReactNode,
 } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import * as ContextMenu from '@radix-ui/react-context-menu';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import {
   AtSign,
+  ChevronsDownUp,
   Copy,
   Download,
   Eye,
   EyeOff,
   File as FileIcon,
-  FileSymlink,
+  FilePlus,
   Folder,
   FolderInput,
   FolderPlus,
-  FolderUp,
   House,
   LocateFixed,
   MessageSquarePlus,
   MoreHorizontal,
   Pencil,
   RefreshCw,
+  SquareTerminal,
   Trash2,
   Upload,
   X,
 } from 'lucide-react';
 import { errorMessage } from '../api/client';
-import { useGateway, useRuntime } from '../connections/context';
+import {
+  gatewayKey,
+  useConnection,
+  useGateway,
+  useGatewayAll,
+  useRuntime,
+} from '../connections/context';
 import { useAction } from '../components/actions';
 import { Button } from '../components/ui/button';
 import { Dialog } from '../components/ui/dialog';
@@ -48,22 +52,35 @@ import {
   basename,
   crumbs,
   formatSize,
-  isRoot,
   join,
+  movedTo,
   parent,
   rawUrl,
   selectionZipUrl,
   separator,
+  within,
   zipUrl,
 } from '../files/paths';
 import { pending, Uploads, type UploadBatch, type UploadItem } from '../files/uploader';
 import { droppedItems, pickedFolder, readDropped } from '../files/dropped';
-import { useFolderWatch } from '../files/watch';
+import { editorStore } from '../editor/use-editor';
+import { useFolderWatches } from '../files/watch';
+import {
+  entryRows,
+  isFolder,
+  rangeOf,
+  shownFolders,
+  treeRows,
+  type Listings,
+} from '../files/tree-model';
 import { useSessionNavigation } from './session-navigation';
 import { mentionPath, useWorkspace } from '../components/workspace';
-import { FileViewer } from './file-viewer';
+import { DRAGGED_PATHS, FileTree, type Choosing, type MenuParts } from './file-tree';
 
 type Entry = Gateway['Entry'];
+type Listing = Gateway['Listing'];
+
+const LIST = '/api/files/list';
 
 /** A request from elsewhere to show a folder, and maybe a file in it. */
 export interface FilesTarget {
@@ -101,17 +118,27 @@ function sharedUploads(runtime: ReturnType<typeof useRuntime>, landed: () => voi
 
 /** The folder Files last showed for each place, so closing it loses nothing until a reload. */
 const lastFolders = new Map<string, string>();
+/** The folders open in the tree for each place. */
+const openFolders = new Map<string, ReadonlySet<string>>();
 /** The request from elsewhere each place last followed, so showing Files again does not repeat it. */
 const followedTargets = new Map<string, number>();
 
-function isFolder(entry: Entry): boolean {
-  return entry.kind === 'folder' || (entry.kind === 'symlink' && entry.target_kind === 'folder');
+/** What is chosen in the tree: the paths, the one a range starts from, and how it was begun. */
+interface Chosen {
+  paths: ReadonlySet<string>;
+  anchor?: string | undefined;
+  /**
+   * Shown with its bar even when one is chosen: begun by a long press, so taps go on choosing, or
+   * left by an action that failed on it.
+   */
+  held: boolean;
 }
+const nothing: Chosen = { paths: new Set(), held: false };
 
 /**
- * Files, as a session shows them: any folder mekaweb's user may read, opening where it was last
- * for `place`, at first `start`, the working directory. The path above the list takes a path
- * typed into it.
+ * Files, as a session shows them: a tree of any folder mekaweb's user may read, opening where it
+ * was last for `place`, at first `start`, the working directory. The path above the tree takes a
+ * path typed into it, and its folders, clicked, show from there.
  */
 export function FileBrowser({
   place,
@@ -124,38 +151,44 @@ export function FileBrowser({
 }) {
   const runtime = useRuntime();
   const queries = useQueryClient();
+  const { account } = useConnection();
+  const device = account?.device_id;
   const workspace = useWorkspace();
   const coarse = useMediaQuery('(pointer: coarse)');
   // Opened by a request from elsewhere, not followed yet, it starts where that asks.
   const fresh = target && followedTargets.get(place) !== target.nonce ? target : undefined;
-  const [path, setPath] = useState(() => fresh?.path ?? lastFolders.get(place) ?? start);
+  const [root, setRoot] = useState(() => fresh?.path ?? lastFolders.get(place) ?? start);
   const [hidden, setHidden] = useState(false);
-  const [preview, setPreview] = useState<{ entry?: Entry; name: string } | undefined>(
-    fresh?.open ? { name: fresh.open } : undefined,
+  const [open, setOpenState] = useState<ReadonlySet<string>>(
+    () => openFolders.get(place) ?? new Set(),
   );
-  useEffect(() => {
-    if (!target || followedTargets.get(place) === target.nonce) return;
-    followedTargets.set(place, target.nonce);
-    // What a link points at may have just been written: the listing is asked for again.
-    void queries.invalidateQueries({ queryKey: ['gateway'] });
-  }, [place, target, queries]);
-  /** Goes to `next`; a file waiting to be shown is not shown there. */
-  function go(next: string) {
-    setPath(next);
-    setPreview(undefined);
+  /** Changes the open folders from what they are by then, as an action that awaits finds them. */
+  function updateOpen(change: (open: ReadonlySet<string>) => ReadonlySet<string>) {
+    setOpenState((current) => {
+      const next = change(current);
+      openFolders.set(place, next);
+      return next;
+    });
   }
-  const [moving, setMoving] = useState<Entry>();
-  const [making, setMaking] = useState(false);
-  const [dragging, setDragging] = useState(false);
+  // What such a request asks to be shown is chosen, and scrolled to once it shows.
+  const asked = fresh && (fresh.open ? join(fresh.path, fresh.open) : fresh.path);
+  const [chosen, setChosen] = useState<Chosen>(() =>
+    asked ? { paths: new Set([asked]), held: false } : nothing,
+  );
+  const [focused, setFocused] = useState(asked);
+  const [revealing, setRevealing] = useState<{ path: string; nonce: number } | undefined>(() =>
+    fresh && asked ? { path: asked, nonce: fresh.nonce } : undefined,
+  );
+  const [renaming, setRenaming] = useState<string>();
+  const [creating, setCreating] = useState<{ parent: string; folder: boolean }>();
+  const [dropTarget, setDropTarget] = useState<string>();
+  const dragged = useRef<string[]>(undefined);
+  const action = useAction();
   const input = useRef<HTMLInputElement>(null);
   const folderInput = useRef<HTMLInputElement>(null);
-  const listing = useGateway<Gateway['Listing']>('/api/files/list', { path });
+  const listing = useGateway<Listing>(LIST, { path: root });
   // The working directory as the server resolves it, where it is written from home.
-  const home = useGateway<Gateway['Listing']>(
-    '/api/files/list',
-    { path: start },
-    start.startsWith('~'),
-  );
+  const home = useGateway<Listing>(LIST, { path: start }, start.startsWith('~'));
   const startFolder = home.data?.path ?? start;
   // Where `~` is, as each listing says.
   const homeFolder = listing.data?.home ?? undefined;
@@ -164,88 +197,198 @@ export function FileBrowser({
   );
   const batches = useSyncExternalStore(store.subscribe, store.getSnapshot);
   // The server says where a path typed as `~/x` or with `..` is.
-  const folder = listing.data?.path ?? path;
+  const folder = listing.data?.path ?? root;
   // Only a folder that listed is kept, so a mistyped path is not where Files opens next.
   const listed = listing.data?.path;
   useEffect(() => {
     if (listed) lastFolders.set(place, listed);
   }, [place, listed]);
-  // What changes in the folder shown, by anything, is listed again.
-  useFolderWatch(listed, () => void listing.refetch());
+  /** What the tree knows of each folder's entries: the shown one's, then those in the cache. */
+  const listings: Listings = {
+    get: (path) => {
+      if (path === folder)
+        return listing.data
+          ? { entries: listing.data.entries }
+          : listing.error
+            ? { error: listing.error }
+            : undefined;
+      const state = queries.getQueryState<Listing>(gatewayKey(device, LIST, { path }));
+      return state?.data
+        ? { entries: state.data.entries }
+        : state?.error
+          ? { error: state.error }
+          : undefined;
+    },
+  };
+  const folders = listed ? shownFolders(folder, listings, open) : [];
+  // Each open folder shown is listed, and listed again as it changes.
+  useGatewayAll<Listing>(
+    LIST,
+    folders.slice(1).map((path) => ({ path })),
+  );
+  function refetch(path: string) {
+    if (path === folder) void listing.refetch();
+    else void queries.invalidateQueries({ queryKey: gatewayKey(device, LIST, { path }) });
+  }
+  useFolderWatches(folders, refetch);
   const refresh = () => void queries.invalidateQueries({ queryKey: ['gateway'] });
-  // A request from elsewhere, such as a tool call's link, moves the browser.
+  const rows = listed ? treeRows({ root: folder, listings, open, hidden, creating }) : [];
+  const shownEntries = entryRows(rows);
+  const byPath = new Map(shownEntries.map((row) => [row.path, row]));
+  // Only what shows counts as chosen.
+  const selected = shownEntries.filter((row) => chosen.paths.has(row.path));
+  const selectedPaths = new Set(selected.map((row) => row.path));
+  const held = chosen.held && selected.length > 0;
+  /** Shows `next` as the tree's folder. */
+  function go(next: string) {
+    setRoot(next);
+    setChosen(nothing);
+    setCreating(undefined);
+    setRenaming(undefined);
+  }
+  // A request from elsewhere, such as a tool call's link, shows its folder, and its file in it.
   const [seen, setSeen] = useState(target?.nonce);
   if (target && target.nonce !== seen) {
     setSeen(target.nonce);
-    setPath(target.path);
-    setPreview(target.open ? { name: target.open } : undefined);
+    const file = target.open ? join(target.path, target.open) : undefined;
+    if (within(target.path, folder) && listed) {
+      // Inside the folder shown, the folders down to it open.
+      const next = new Set(open);
+      for (let at = target.path; at !== folder && within(at, folder); at = parent(at)) next.add(at);
+      updateOpen(() => next);
+    } else setRoot(target.path);
+    setRevealing({ path: file ?? target.path, nonce: target.nonce });
+    setChosen({ paths: new Set([file ?? target.path]), held: false });
+    setFocused(file ?? target.path);
   }
-  const entries = useMemo(() => {
-    const list = (listing.data?.entries ?? []).filter((entry) => hidden || !entry.hidden);
-    return [...list].sort((a, b) => {
-      if (isFolder(a) !== isFolder(b)) return isFolder(a) ? -1 : 1;
-      return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+  useEffect(() => {
+    if (!target || followedTargets.get(place) === target.nonce) return;
+    followedTargets.set(place, target.nonce);
+    // What a link points at may have just been written: the listing is asked for again.
+    void queries.invalidateQueries({ queryKey: ['gateway'] });
+  }, [place, target, queries]);
+  function toggle(path: string, opened: boolean) {
+    updateOpen((current) => {
+      const next = new Set(current);
+      if (opened) next.add(path);
+      else for (const each of next) if (within(each, path)) next.delete(each);
+      return next;
     });
-  }, [listing.data, hidden]);
-  // A file asked for by name is shown once the listing has it; going elsewhere forgets it.
-  const shown = preview
-    ? (preview.entry ?? listing.data?.entries.find((entry) => entry.name === preview.name))
-    : undefined;
-  // What is selected belongs to the folder it was selected in, and only what is shown counts.
-  const [selection, setSelection] = useState<{
-    folder: string;
-    names: ReadonlySet<string>;
-    anchor: string;
-    /**
-     * Shown with its bar even when one is selected: begun by a long press, so taps go on
-     * selecting, or left by an action that failed on it.
-     */
-    held: boolean;
-  }>();
-  const selectedNames = selection?.folder === folder ? selection.names : undefined;
-  const selected = entries.filter((entry) => selectedNames?.has(entry.name));
-  const held = Boolean(selection?.held) && selected.length > 0;
-  /**
-   * Selects `name` as a click does: alone, or with `toggle` added to what is selected or taken from
-   * it; with `range`, everything from the last one clicked to it.
-   */
-  function choose(name: string, { toggle = false, range = false, touch = false } = {}) {
-    const names = new Set(toggle ? selected.map((entry) => entry.name) : []);
-    const from =
-      range && selection ? entries.findIndex((entry) => entry.name === selection.anchor) : -1;
-    const to = entries.findIndex((entry) => entry.name === name);
-    if (from >= 0 && to >= 0) {
-      for (const entry of entries.slice(Math.min(from, to), Math.max(from, to) + 1))
-        names.add(entry.name);
-      setSelection({ ...selection!, folder, names });
+  }
+  function choose(path: string, { toggle = false, range = false, touch = false }: Choosing) {
+    if (range && chosen.anchor) {
+      const span = rangeOf(rows, chosen.anchor, path);
+      const paths = new Set(toggle ? [...selectedPaths, ...span] : span);
+      setChosen({ ...chosen, paths });
       return;
     }
-    if (toggle && names.has(name)) names.delete(name);
-    else names.add(name);
-    setSelection({ folder, names, anchor: name, held: touch });
+    const paths = new Set(toggle ? selectedPaths : []);
+    if (toggle && paths.has(path)) paths.delete(path);
+    else paths.add(path);
+    setChosen({ paths, anchor: path, held: touch || (toggle && chosen.held) });
   }
-  const barred = selected.length > 1 || held;
-  const actions = useSelectionActions({
-    folder,
-    selected,
-    onDone: (left) =>
-      setSelection(
-        left.length ? { folder, names: new Set(left), anchor: left[0]!, held: true } : undefined,
-      ),
-    onChanged: refresh,
-  });
-  function selectAll() {
-    setSelection({
-      folder,
-      names: new Set(entries.map((entry) => entry.name)),
-      anchor: entries[0]?.name ?? '',
-      held: Boolean(selection?.held),
+  /** The folder a new entry goes in: the one chosen, the one holding the file chosen, or the root. */
+  function newEntryFolder() {
+    const row = byPath.get(focused ?? '') ?? selected[0];
+    if (!row) return folder;
+    return row.folder ? row.path : row.parent;
+  }
+  function startCreating(isFolder: boolean) {
+    const into = newEntryFolder();
+    if (into !== folder && !open.has(into)) toggle(into, true);
+    setRenaming(undefined);
+    setCreating({ parent: into, folder: isFolder });
+  }
+  async function create(into: string, name: string, isFolder: boolean) {
+    const path = join(into, name);
+    const done = await action.run(async () => {
+      if (isFolder) await runtime.gateway.send('POST', '/api/files/folders', { path });
+      else await runtime.gateway.send('PUT', '/api/files/text', { path, text: '', version: null });
+      return true;
     });
+    if (!done) return false;
+    setCreating(undefined);
+    refetch(into);
+    setChosen({ paths: new Set([path]), anchor: path, held: false });
+    setFocused(path);
+    if (!isFolder) workspace?.openFile(path);
+    return true;
   }
-  async function drop(event: DragEvent) {
-    event.preventDefault();
-    setDragging(false);
-    const into = folder;
+  async function rename(path: string, name: string) {
+    const to = join(parent(path), name);
+    const done = await action.run(async () => {
+      await runtime.gateway.send('POST', '/api/files/move', { from: path, to });
+      return true;
+    });
+    if (!done) return false;
+    editorStore(runtime).moved(path, to);
+    setRenaming(undefined);
+    refetch(parent(path));
+    updateOpen((current) => movedOpen(current, path, to));
+    setChosen({ paths: new Set([to]), anchor: to, held: false });
+    setFocused(to);
+    return true;
+  }
+  const actions = useSelectionActions({
+    shown: shownEntries,
+    selected: selected.map((row) => ({ path: row.path, entry: row.entry })),
+    onDone: (left) =>
+      setChosen(left.length ? { paths: new Set(left), anchor: left[0], held: true } : nothing),
+    onChanged: refresh,
+    onRename: (path) => {
+      setCreating(undefined);
+      setRenaming(path);
+    },
+  });
+  /** Moves the entries `paths` into the folder `into`, as a drag dropped there does. */
+  async function moveInto(into: string, paths: string[]) {
+    const moving = outermost(paths).filter((path) => parent(path) !== into && !within(into, path));
+    if (!moving.length) return;
+    const left: string[] = [];
+    await action.run(async () => {
+      let reason: unknown;
+      for (const path of moving) {
+        try {
+          await runtime.gateway.send('POST', '/api/files/move', {
+            from: path,
+            to: join(into, basename(path)),
+          });
+          editorStore(runtime).moved(path, join(into, basename(path)));
+        } catch (error) {
+          left.push(path);
+          reason ??= error;
+        }
+      }
+      refresh();
+      if (left.length)
+        throw new Error(
+          `${left.length === 1 ? basename(left[0]!) : `${left.length.toLocaleString()} items`} could not be moved: ${errorMessage(reason)}`,
+        );
+    });
+    const landed = moving
+      .filter((path) => !left.includes(path))
+      .map((path) => join(into, basename(path)));
+    // The folder they went into opens, and what was open in those that moved stays open.
+    updateOpen((current) => {
+      let next = current;
+      for (const path of moving)
+        if (!left.includes(path)) next = movedOpen(next, path, join(into, basename(path)));
+      return into === folder ? next : new Set([...next, into]);
+    });
+    setChosen({ paths: new Set([...landed, ...left]), anchor: landed[0], held: false });
+  }
+  async function drop(into: string, event: DragEvent) {
+    const paths = event.dataTransfer.getData(DRAGGED_PATHS);
+    if (paths) {
+      dragged.current = undefined;
+      try {
+        await moveInto(into, JSON.parse(paths) as string[]);
+      } catch {
+        // A drag from elsewhere that only looks like one of the tree's.
+      }
+      return;
+    }
+    if (!event.dataTransfer.types.includes('Files')) return;
     const tree = await readDropped(droppedItems(event.dataTransfer));
     store.add(tree.files, into, {
       note: tree.unread
@@ -253,56 +396,76 @@ export function FileBrowser({
         : undefined,
       folders: tree.folders,
     });
+    if (into !== folder) toggle(into, true);
   }
+  const barred = selected.length > 1 || held;
+  const rootItems = ({ Item, Separator }: MenuParts) => (
+    <>
+      <Item className="menu-item" onSelect={() => startCreating(false)}>
+        <FilePlus size={14} />
+        New file
+      </Item>
+      <Item className="menu-item" onSelect={() => startCreating(true)}>
+        <FolderPlus size={14} />
+        New folder
+      </Item>
+      <Separator className="menu-separator" />
+      <FolderItems
+        Item={Item}
+        path={folder}
+        onUploadFolder={coarse ? undefined : () => folderInput.current?.click()}
+      />
+    </>
+  );
   return (
-    <div
-      className="file-browser"
-      data-dragging={dragging || undefined}
-      onDragOver={(event) => {
-        if (event.dataTransfer.types.includes('Files')) {
-          event.preventDefault();
-          setDragging(true);
-        }
-      }}
-      onDragLeave={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false);
-      }}
-      onDrop={(event) => void drop(event)}
-      onClick={(event) => {
-        // A click on nothing in particular lets go of what is selected.
-        if (event.target === event.currentTarget) setSelection(undefined);
-      }}
-    >
+    <div className="file-browser">
       <PathBar path={folder} onGo={go} />
-      {/* One selected with a mouse is just shown; its own menu acts on it. */}
       {barred ? (
         <SelectionBar
           actions={actions}
-          all={selected.length === entries.length}
-          onSelectAll={(all) => (all ? selectAll() : setSelection(undefined))}
+          all={selected.length === shownEntries.length}
+          onSelectAll={(all) =>
+            setChosen(
+              all
+                ? {
+                    paths: new Set(shownEntries.map((row) => row.path)),
+                    anchor: shownEntries[0]?.path,
+                    held: chosen.held,
+                  }
+                : nothing,
+            )
+          }
         />
       ) : (
         <div className="file-toolbar">
           <Button
             variant="ghost"
             size="icon"
-            aria-label="Go to the home folder"
-            title={homeFolder ? `Go to the home folder, ${homeFolder}` : 'Go to the home folder'}
-            disabled={folder === homeFolder}
-            onClick={() => go('~')}
+            aria-label="New file"
+            title="New file"
+            onClick={() => startCreating(false)}
           >
-            <House size={16} />
+            <FilePlus size={16} />
           </Button>
           <Button
             variant="ghost"
             size="icon"
-            aria-label="Go to the working directory"
-            title={`Go to the working directory, ${startFolder}`}
-            disabled={folder === startFolder}
-            onClick={() => go(start)}
+            aria-label="New folder"
+            title="New folder"
+            onClick={() => startCreating(true)}
           >
-            <LocateFixed size={16} />
+            <FolderPlus size={16} />
           </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="Upload files"
+            title="Upload files"
+            onClick={() => input.current?.click()}
+          >
+            <Upload size={16} />
+          </Button>
+          <span className="file-toolbar-gap" />
           <Button
             variant="ghost"
             size="icon"
@@ -315,6 +478,16 @@ export function FileBrowser({
           <Button
             variant="ghost"
             size="icon"
+            aria-label="Collapse folders"
+            title="Collapse folders"
+            disabled={!open.size}
+            onClick={() => updateOpen(() => new Set())}
+          >
+            <ChevronsDownUp size={16} />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
             aria-label={hidden ? 'Hide hidden files' : 'Show hidden files'}
             title={hidden ? 'Hide hidden files' : 'Show hidden files'}
             aria-pressed={hidden}
@@ -322,24 +495,14 @@ export function FileBrowser({
           >
             {hidden ? <Eye size={16} /> : <EyeOff size={16} />}
           </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label="New folder"
-            title="New folder"
-            onClick={() => setMaking(true)}
-          >
-            <FolderPlus size={16} />
-          </Button>
           <FolderMenu
             path={folder}
+            home={homeFolder}
+            start={start}
+            startFolder={startFolder}
+            onGo={go}
             onUploadFolder={coarse ? undefined : () => folderInput.current?.click()}
           />
-          <span className="file-toolbar-gap" />
-          <Button size="sm" onClick={() => input.current?.click()}>
-            <Upload size={14} />
-            Upload
-          </Button>
         </div>
       )}
       <input
@@ -350,7 +513,7 @@ export function FileBrowser({
         onChange={(event) => {
           store.add(
             Array.from(event.target.files ?? [], (file) => ({ file })),
-            folder,
+            newEntryFolder(),
           );
           event.target.value = '';
         }}
@@ -363,75 +526,78 @@ export function FileBrowser({
         type="file"
         hidden
         onChange={(event) => {
-          store.add(pickedFolder(Array.from(event.target.files ?? [])), folder);
+          store.add(pickedFolder(Array.from(event.target.files ?? [])), newEntryFolder());
           event.target.value = '';
         }}
       />
-      {barred && actions.error}
+      {actions.error}
+      <ErrorNotice error={action.error} />
       <UploadList batches={batches} store={store} />
       <ErrorNotice error={listing.error} />
       {listing.isPending && <Loading />}
-      {listing.data && (
-        <div
-          className="file-list"
-          role="list"
-          aria-label="Files"
-          onKeyDown={(event) => {
-            if (event.key === 'Escape' && selected.length) {
-              event.stopPropagation();
-              setSelection(undefined);
-            } else if (event.key === 'a' && (event.ctrlKey || event.metaKey)) {
-              event.preventDefault();
-              selectAll();
-            }
+      {listed && (
+        <FileTree
+          rows={rows}
+          root={folder}
+          rootName={basename(folder) || folder}
+          selected={selectedPaths}
+          selecting={held}
+          focused={focused}
+          renaming={renaming}
+          dropTarget={dropTarget}
+          reveal={revealing}
+          menu={(paths, parts) => actions.items(paths, parts)}
+          rootMenu={rootItems}
+          onChoose={choose}
+          onClear={() => setChosen(nothing)}
+          onSelectAll={() =>
+            setChosen({
+              paths: new Set(shownEntries.map((row) => row.path)),
+              anchor: shownEntries[0]?.path,
+              held: chosen.held,
+            })
+          }
+          onFocus={setFocused}
+          onToggle={toggle}
+          onOpen={(row) => workspace?.openFile(row.path)}
+          onStartRename={(path) => {
+            setCreating(undefined);
+            setRenaming(path);
           }}
-        >
-          {!isRoot(folder) && (
-            <ParentRow onOpen={() => go(parent(folder))} onClear={() => setSelection(undefined)} />
-          )}
-          {entries.map((entry) => (
-            <EntryRow
-              key={join(folder, entry.name)}
-              path={join(folder, entry.name)}
-              entry={entry}
-              selected={Boolean(selectedNames?.has(entry.name))}
-              selecting={held}
-              group={
-                selected.length > 1 && selectedNames?.has(entry.name) ? actions.items : undefined
-              }
-              onChoose={(how) => choose(entry.name, how)}
-              onOpen={() => {
-                if (isFolder(entry)) go(join(folder, entry.name));
-                else setPreview({ entry, name: entry.name });
-              }}
-              onMove={() => setMoving(entry)}
-              onChanged={refresh}
-            />
-          ))}
-          {!entries.length && (
+          onRename={rename}
+          onRenameDone={() => {
+            setRenaming(undefined);
+            action.reset();
+          }}
+          onCreate={create}
+          onCreateDone={() => {
+            setCreating(undefined);
+            action.reset();
+          }}
+          onDelete={actions.remove}
+          onRetry={refetch}
+          onDragPaths={(paths) => {
+            dragged.current = paths;
+          }}
+          onDropTarget={(into) => {
+            // Entries are not dropped into themselves, nor where they are.
+            const paths = dragged.current;
+            if (into && paths?.some((path) => within(into, path) || parent(path) === into))
+              setDropTarget(undefined);
+            else setDropTarget(into);
+          }}
+          onDrop={(into, event) => void drop(into, event)}
+          empty={
             <p className="muted small empty-folder">
-              {listing.data.entries.length
+              {listing.data?.entries.length
                 ? 'Only hidden files are here.'
                 : 'This folder is empty.'}
               {!coarse && ' Drop files or folders here to upload them.'}
             </p>
-          )}
-        </div>
+          }
+        />
       )}
-      <NewFolderDialog open={making} onOpenChange={setMaking} folder={folder} onMade={refresh} />
       {actions.dialogs}
-      <MoveDialog
-        entry={moving}
-        path={moving ? join(folder, moving.name) : ''}
-        onClose={() => setMoving(undefined)}
-        onMoved={refresh}
-      />
-      <FileViewer
-        entry={shown}
-        path={shown ? join(folder, shown.name) : ''}
-        canMention={Boolean(workspace)}
-        onClose={() => setPreview(undefined)}
-      />
     </div>
   );
 }
@@ -529,249 +695,15 @@ function PathBar({ path, onGo }: { path: string; onGo: (path: string) => void })
   );
 }
 
-/**
- * The folder above, first in the list: it opens as a folder does, with a double click, Enter, or a
- * tap, and is never selected, so a click on it lets go of what is.
- */
-function ParentRow({ onOpen, onClear }: { onOpen: () => void; onClear: () => void }) {
-  const pointer = useRef('mouse');
-  return (
-    <div className="file-entry file-parent" role="listitem">
-      <button
-        type="button"
-        className="file-entry-open"
-        aria-label="Parent folder"
-        title="Parent folder"
-        onPointerDown={(event) => {
-          pointer.current = event.pointerType;
-        }}
-        onClick={(event) => {
-          if (event.detail > 0 && pointer.current === 'touch') onOpen();
-          else if (event.detail > 0 && !event.ctrlKey && !event.metaKey && !event.shiftKey)
-            onClear();
-        }}
-        onDoubleClick={() => {
-          if (pointer.current !== 'touch') onOpen();
-        }}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter') {
-            event.preventDefault();
-            onOpen();
-          }
-        }}
-      >
-        <FolderUp size={16} aria-hidden="true" />
-        <span className="file-entry-name">..</span>
-      </button>
-    </div>
-  );
+/** Those of `paths` not within another of them. */
+function outermost(paths: readonly string[]): string[] {
+  return paths.filter((path) => !paths.some((other) => other !== path && within(path, other)));
 }
 
-/** How long a press on a touch screen is held to select. */
-const LONG_PRESS_MS = 500;
-
-/**
- * An entry: with a mouse or keyboard, a click or Space selects it, Ctrl or ⌘ adds to what is
- * selected and Shift selects a range, and a double click or Enter opens it. On a touch screen a tap
- * opens it and a long press selects it, after which taps select.
- */
-function EntryRow({
-  path,
-  entry,
-  selected,
-  selecting,
-  group,
-  onChoose,
-  onOpen,
-  onMove,
-  onChanged,
-}: {
-  path: string;
-  entry: Entry;
-  selected: boolean;
-  /** Whether a long press began selecting, so that a tap selects rather than opens. */
-  selecting: boolean;
-  /** The selection's menu, when this is one of several selected, for a right click on it. */
-  group: ((parts: MenuParts) => ReactNode) | undefined;
-  onChoose: (how: { toggle?: boolean; range?: boolean; touch?: boolean }) => void;
-  onOpen: () => void;
-  onMove: () => void;
-  onChanged: () => void;
-}) {
-  const runtime = useRuntime();
-  const workspace = useWorkspace();
-  const collisionPadding = useOverlayPadding();
-  const coarse = useMediaQuery('(pointer: coarse)');
-  const action = useAction();
-  const [deleting, setDeleting] = useState(false);
-  const folder = isFolder(entry);
-  const Icon = entry.kind === 'symlink' ? FileSymlink : folder ? Folder : FileIcon;
-  /** Its menu's items, for its menu button and a right click on it. */
-  const items = ({ Item, Separator }: MenuParts) => (
-    <>
-      {workspace && (
-        <Item className="menu-item" onSelect={() => workspace.mention(mentionPath(path))}>
-          <AtSign size={14} />
-          Mention in message
-        </Item>
-      )}
-      <Item className="menu-item" asChild>
-        <a href={folder ? zipUrl(path) : rawUrl(path, true)} download>
-          <Download size={14} />
-          {folder ? 'Download as zip' : 'Download'}
-        </a>
-      </Item>
-      <Item className="menu-item" onSelect={onMove}>
-        <Pencil size={14} />
-        Rename or move
-      </Item>
-      <Item className="menu-item" onSelect={() => void copyText(path)}>
-        <Copy size={14} />
-        Copy path
-      </Item>
-      <Separator className="menu-separator" />
-      <Item className="menu-item danger" onSelect={() => setDeleting(true)}>
-        <Trash2 size={14} />
-        Delete
-      </Item>
-    </>
-  );
-  // What the last press was made with, and the long press under way or just done.
-  const pointer = useRef('mouse');
-  const press = useRef<{ timer: number; x: number; y: number }>(undefined);
-  const longPressed = useRef(false);
-  function release() {
-    if (press.current) window.clearTimeout(press.current.timer);
-    press.current = undefined;
-  }
-  return (
-    <ContextMenu.Root modal={false}>
-      <ContextMenu.Trigger
-        asChild
-        // A long press on a touch screen selects instead.
-        disabled={coarse}
-        onContextMenu={(event) => {
-          // Clicked with the right button, one not selected is chosen alone, as its menu acts on it.
-          if (!event.defaultPrevented && !selected) onChoose({});
-        }}
-      >
-        <div
-          className="file-entry"
-          role="listitem"
-          data-hidden={entry.hidden || undefined}
-          data-selected={selected || undefined}
-        >
-          <button
-            type="button"
-            className="file-entry-open"
-            aria-pressed={selected}
-            onPointerDown={(event) => {
-              pointer.current = event.pointerType;
-              longPressed.current = false;
-              release();
-              if (event.pointerType !== 'touch') return;
-              press.current = {
-                x: event.clientX,
-                y: event.clientY,
-                timer: window.setTimeout(() => {
-                  press.current = undefined;
-                  longPressed.current = true;
-                  onChoose({ toggle: true, touch: true });
-                }, LONG_PRESS_MS),
-              };
-            }}
-            onPointerMove={(event) => {
-              // A press that moves is a scroll.
-              const start = press.current;
-              if (start && Math.hypot(event.clientX - start.x, event.clientY - start.y) > 10)
-                release();
-            }}
-            onPointerUp={release}
-            onPointerCancel={release}
-            onContextMenu={(event) => {
-              if (pointer.current === 'touch') event.preventDefault();
-            }}
-            onClick={(event) => {
-              // The long press it ends has selected it already.
-              if (longPressed.current) longPressed.current = false;
-              else if (event.detail > 0 && pointer.current === 'touch')
-                if (selecting) onChoose({ toggle: true, touch: true });
-                else onOpen();
-              else onChoose({ toggle: event.ctrlKey || event.metaKey, range: event.shiftKey });
-            }}
-            onDoubleClick={() => {
-              if (pointer.current !== 'touch') onOpen();
-            }}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
-                event.preventDefault();
-                onOpen();
-              }
-            }}
-            title={[
-              entry.target ? `${entry.name} → ${entry.target}` : entry.name,
-              entry.modified ? new Date(entry.modified).toLocaleString() : '',
-            ]
-              .filter(Boolean)
-              .join('\n')}
-          >
-            <Icon size={16} aria-hidden="true" />
-            <span className="file-entry-name">{entry.name}</span>
-            {!folder && <span className="file-entry-size muted">{formatSize(entry.size)}</span>}
-          </button>
-          <DropdownMenu.Root modal={false}>
-            <DropdownMenu.Trigger asChild>
-              <Button variant="ghost" size="icon" aria-label={`Actions for ${entry.name}`}>
-                <MoreHorizontal size={16} />
-              </Button>
-            </DropdownMenu.Trigger>
-            <DropdownMenu.Portal>
-              <DropdownMenu.Content
-                className="menu-panel"
-                align="end"
-                sideOffset={4}
-                collisionPadding={collisionPadding}
-              >
-                {items(DropdownMenu)}
-              </DropdownMenu.Content>
-            </DropdownMenu.Portal>
-          </DropdownMenu.Root>
-          <Dialog
-            open={deleting}
-            onOpenChange={setDeleting}
-            title="Delete"
-            description={`Delete ${entry.name}${folder ? ' and everything in it' : ''}? This cannot be undone.`}
-          >
-            <ErrorNotice error={action.error} />
-            <div className="actions">
-              <Button variant="secondary" onClick={() => setDeleting(false)}>
-                Cancel
-              </Button>
-              <Button
-                variant="destructive"
-                disabled={action.busy}
-                onClick={() =>
-                  void action.run(async () => {
-                    await runtime.gateway.send('POST', '/api/files/delete', { path });
-                    setDeleting(false);
-                    onChanged();
-                  })
-                }
-              >
-                Delete
-              </Button>
-            </div>
-          </Dialog>
-          {action.error && !deleting ? <ErrorNotice error={action.error} /> : null}
-        </div>
-      </ContextMenu.Trigger>
-      <ContextMenu.Portal>
-        <ContextMenu.Content className="menu-panel" collisionPadding={collisionPadding}>
-          {group ? group(ContextMenu) : items(ContextMenu)}
-        </ContextMenu.Content>
-      </ContextMenu.Portal>
-    </ContextMenu.Root>
-  );
+/** `open`, with what was open within `from` open under `to`, where it moved. */
+function movedOpen(open: ReadonlySet<string>, from: string, to: string): ReadonlySet<string> {
+  if (![...open].some((each) => within(each, from))) return open;
+  return new Set([...open].map((each) => movedTo(each, from, to)));
 }
 
 /** Starts downloading `url`, as following a link to it would. */
@@ -784,47 +716,51 @@ function startDownload(url: string) {
   link.remove();
 }
 
-/** The parts menu items are made of, a dropdown menu's or a context menu's. */
-type MenuParts = Pick<typeof DropdownMenu, 'Item' | 'Separator'>;
-
 type SelectionActions = ReturnType<typeof useSelectionActions>;
 
 /**
- * What can be done with the entries selected, to all of them at once, from the selection bar or a
- * right click on one of them. Those an action fails on stay selected, and it says why.
+ * What can be done with the entries chosen, to all of them at once, from the selection bar, their
+ * menu, or the keyboard. Those an action fails on stay chosen, and it says why.
  */
 function useSelectionActions({
-  folder,
+  shown,
   selected,
   onDone,
   onChanged,
+  onRename,
 }: {
-  folder: string;
-  selected: readonly Entry[];
-  /** Called once an action changing them is done, with the names it failed on. */
+  /** Every entry the tree shows, which menus and keys may act on before it is chosen. */
+  shown: readonly { path: string; entry: Entry }[];
+  selected: readonly { path: string; entry: Entry }[];
+  /** Called once an action changing them is done, with the paths it failed on. */
   onDone: (left: string[]) => void;
   onChanged: () => void;
+  onRename: (path: string) => void;
 }) {
   const runtime = useRuntime();
   const workspace = useWorkspace();
   const action = useAction();
-  const [moving, setMoving] = useState(false);
-  const [target, setTarget] = useState(folder);
-  const [deleting, setDeleting] = useState(false);
-  const paths = selected.map((entry) => join(folder, entry.name));
-  const one = selected.length === 1 ? selected[0] : undefined;
-  const count = selected.length.toLocaleString();
-  const folders = selected.some(isFolder);
-  /** Does `act` to each entry in turn; whether it did to all. */
-  async function each(act: (path: string, name: string) => Promise<unknown>, failure: string) {
+  const [moving, setMoving] = useState<readonly { path: string; entry: Entry }[]>();
+  const [target, setTarget] = useState('');
+  const [deleting, setDeleting] = useState<readonly { path: string; entry: Entry }[]>();
+  const count = (items: readonly unknown[]) => items.length.toLocaleString();
+  /** The entries `paths` name, as the tree shows them. */
+  const of = (paths: readonly string[]) =>
+    paths.flatMap((path) => shown.filter((item) => item.path === path));
+  /** Does `act` to each of `items` in turn; whether it did to all. */
+  async function each(
+    items: readonly { path: string }[],
+    act: (path: string) => Promise<unknown>,
+    failure: string,
+  ) {
     const done = await action.run(async () => {
       const left: string[] = [];
       let reason: unknown;
-      for (const entry of selected) {
+      for (const { path } of items) {
         try {
-          await act(join(folder, entry.name), entry.name);
+          await act(path);
         } catch (error) {
-          left.push(entry.name);
+          left.push(path);
           reason ??= error;
         }
       }
@@ -832,91 +768,123 @@ function useSelectionActions({
       onDone(left);
       if (left.length)
         throw new Error(
-          `${left.length === 1 ? left[0] : `${left.length.toLocaleString()} items`} could not ${failure}: ${errorMessage(reason)}`,
+          `${left.length === 1 ? basename(left[0]!) : `${left.length.toLocaleString()} items`} could not ${failure}: ${errorMessage(reason)}`,
         );
       return true;
     });
     return done === true;
   }
-  const mention = workspace ? () => workspace.mention(paths.map(mentionPath).join(' ')) : undefined;
-  const download = {
-    label: one && !isFolder(one) ? 'Download' : 'Download as zip',
-    start: () => {
-      if (one) startDownload(isFolder(one) ? zipUrl(paths[0]!) : rawUrl(paths[0]!, true));
-      // Their names would make too long an address: mekaweb keeps them, for a short one.
-      else
-        void action.run(async () => {
-          const { id } = await runtime.gateway.send<Gateway['SelectionMade']>(
-            'POST',
-            '/api/files/zip/selection',
-            { path: folder, names: selected.map((entry) => entry.name) },
-          );
-          startDownload(selectionZipUrl(id));
-        });
-    },
+  const mention = (paths: readonly string[]) =>
+    workspace?.mention(paths.map(mentionPath).join(' '));
+  function download(items: readonly { path: string; entry: Entry }[]) {
+    const one = items.length === 1 ? items[0] : undefined;
+    if (one) startDownload(isFolder(one.entry) ? zipUrl(one.path) : rawUrl(one.path, true));
+    // Their paths would make too long an address: mekaweb keeps them, for a short one.
+    else
+      void action.run(async () => {
+        const { id } = await runtime.gateway.send<Gateway['SelectionMade']>(
+          'POST',
+          '/api/files/zip/selection',
+          { paths: items.map((item) => item.path) },
+        );
+        startDownload(selectionZipUrl(id));
+      });
+  }
+  const downloadLabel = (items: readonly { entry: Entry }[]) =>
+    items.length === 1 && !isFolder(items[0]!.entry) ? 'Download' : 'Download as zip';
+  /** Those of `items` not within another of them, which goes with it. */
+  const outer = (items: readonly { path: string; entry: Entry }[]) => {
+    const paths = outermost(items.map((item) => item.path));
+    return items.filter((item) => paths.includes(item.path));
   };
-  const move = () => {
-    setTarget(folder);
+  function move(items: readonly { path: string; entry: Entry }[]) {
+    setTarget(parent(items[0]?.path ?? ''));
     action.reset();
-    setMoving(true);
-  };
-  const copyPaths = () => void copyText(paths.join('\n'));
-  const remove = () => {
+    setMoving(outer(items));
+  }
+  function remove(items: readonly { path: string; entry: Entry }[]) {
+    if (!items.length) return;
     action.reset();
-    setDeleting(true);
-  };
+    setDeleting(outer(items));
+  }
+  const copyPaths = (paths: readonly string[]) => void copyText(paths.join('\n'));
+  const all = selected.map((item) => item.path);
+  const one = deleting?.length === 1 ? deleting[0] : undefined;
+  const folders = deleting?.some((item) => isFolder(item.entry)) ?? false;
   return {
-    count,
+    count: count(selected),
     busy: action.busy,
-    mention,
-    download,
-    move,
-    copyPaths,
-    remove,
-    /** The selection's menu, as a right click on one of them shows it. */
-    items: ({ Item, Separator }: MenuParts) => (
-      <>
-        {mention && (
-          <Item className="menu-item" onSelect={mention}>
-            <AtSign size={14} />
-            Mention in message
+    mention: workspace ? () => mention(all) : undefined,
+    download: { label: downloadLabel(selected), start: () => download(selected) },
+    move: () => move(selected),
+    copyPaths: () => copyPaths(all),
+    remove: (paths: readonly string[] = all) => remove(of(paths)),
+    /** The menu for the entries `paths`, as their "…" button or a right click on them shows it. */
+    items: (paths: readonly string[], { Item, Separator }: MenuParts) => {
+      const items = of(paths);
+      if (!items.length) return null;
+      const single = items.length === 1 ? items[0] : undefined;
+      return (
+        <>
+          {workspace && (
+            <Item className="menu-item" onSelect={() => mention(paths)}>
+              <AtSign size={14} />
+              Mention in message
+            </Item>
+          )}
+          {single && workspace?.openTerminal && (
+            <Item
+              className="menu-item"
+              onSelect={() =>
+                workspace.openTerminal?.(isFolder(single.entry) ? single.path : parent(single.path))
+              }
+            >
+              <SquareTerminal size={14} />
+              Open terminal here
+            </Item>
+          )}
+          <Item className="menu-item" onSelect={() => download(items)}>
+            <Download size={14} />
+            {downloadLabel(items)}
           </Item>
-        )}
-        <Item className="menu-item" onSelect={download.start}>
-          <Download size={14} />
-          {download.label}
-        </Item>
-        <Item className="menu-item" onSelect={move}>
-          <FolderInput size={14} />
-          Move to…
-        </Item>
-        <Item className="menu-item" onSelect={copyPaths}>
-          <Copy size={14} />
-          Copy paths
-        </Item>
-        <Separator className="menu-separator" />
-        <Item className="menu-item danger" onSelect={remove}>
-          <Trash2 size={14} />
-          Delete
-        </Item>
-      </>
-    ),
+          {single && (
+            <Item className="menu-item" onSelect={() => onRename(single.path)}>
+              <Pencil size={14} />
+              Rename
+            </Item>
+          )}
+          <Item className="menu-item" onSelect={() => move(items)}>
+            <FolderInput size={14} />
+            Move to…
+          </Item>
+          <Item className="menu-item" onSelect={() => copyPaths(paths)}>
+            <Copy size={14} />
+            {single ? 'Copy path' : 'Copy paths'}
+          </Item>
+          <Separator className="menu-separator" />
+          <Item className="menu-item danger" onSelect={() => remove(items)}>
+            <Trash2 size={14} />
+            Delete
+          </Item>
+        </>
+      );
+    },
     error: action.error && !moving && !deleting ? <ErrorNotice error={action.error} /> : null,
     dialogs: (
       <>
         <Dialog
-          open={deleting}
-          onOpenChange={setDeleting}
+          open={Boolean(deleting)}
+          onOpenChange={(open) => !open && setDeleting(undefined)}
           title="Delete"
           description={
             one
-              ? `Delete ${one.name}${folders ? ' and everything in it' : ''}? This cannot be undone.`
-              : `Delete ${count} items${folders ? ' and everything in their folders' : ''}? This cannot be undone.`
+              ? `Delete ${one.entry.name}${folders ? ' and everything in it' : ''}? This cannot be undone.`
+              : `Delete ${count(deleting ?? [])} items${folders ? ' and everything in their folders' : ''}? This cannot be undone.`
           }
         >
           <ErrorNotice error={action.error} />
           <div className="actions">
-            <Button variant="secondary" onClick={() => setDeleting(false)}>
+            <Button variant="secondary" onClick={() => setDeleting(undefined)}>
               Cancel
             </Button>
             <Button
@@ -924,9 +892,10 @@ function useSelectionActions({
               disabled={action.busy}
               onClick={() =>
                 void each(
+                  deleting ?? [],
                   (path) => runtime.gateway.send('POST', '/api/files/delete', { path }),
                   'be deleted',
-                ).then((done) => done && setDeleting(false))
+                ).then((done) => done && setDeleting(undefined))
               }
             >
               Delete
@@ -934,23 +903,34 @@ function useSelectionActions({
           </div>
         </Dialog>
         <Dialog
-          open={moving}
-          onOpenChange={setMoving}
-          title={one ? `Move ${one.name}` : `Move ${count} items`}
+          open={Boolean(moving)}
+          onOpenChange={(open) => !open && setMoving(undefined)}
+          title={
+            moving?.length === 1
+              ? `Move ${moving[0]!.entry.name}`
+              : `Move ${count(moving ?? [])} items`
+          }
           description="Enter the folder to move into. Nothing there is replaced."
         >
           <form
             className="form-stack"
             onSubmit={(event) => {
               event.preventDefault();
+              // The folder as Files shows it, from `~`, `.` and `..`, for open files to follow.
+              const into = runtime.gateway
+                .get<Gateway['Listing']>(LIST, { path: target.trim() })
+                .then((listing) => listing.path);
+              // Each move waits on it, and says why where it fails.
+              into.catch(() => undefined);
               void each(
-                (path, name) =>
-                  runtime.gateway.send('POST', '/api/files/move', {
-                    from: path,
-                    to: join(target.trim(), name),
-                  }),
+                moving ?? [],
+                async (path) => {
+                  const to = join(await into, basename(path));
+                  await runtime.gateway.send('POST', '/api/files/move', { from: path, to });
+                  editorStore(runtime).moved(path, to);
+                },
                 'be moved',
-              ).then((done) => done && setMoving(false));
+              ).then((done) => done && setMoving(undefined));
             }}
           >
             <Field label="Folder">
@@ -976,7 +956,7 @@ function useSelectionActions({
   };
 }
 
-/** The bar that stands in for the toolbar while entries are selected. */
+/** The bar that stands in for the toolbar while entries are chosen. */
 function SelectionBar({
   actions,
   all,
@@ -1028,7 +1008,7 @@ function SelectionBar({
         aria-label="Delete"
         title="Delete"
         disabled={actions.busy}
-        onClick={actions.remove}
+        onClick={() => actions.remove()}
       >
         <Trash2 size={16} />
       </Button>
@@ -1069,20 +1049,73 @@ function SelectionBar({
   );
 }
 
-/**
- * The folder's menu: mention it, start a session in it, upload a folder into it, zip it, or copy
- * its path.
- */
-function FolderMenu({
+/** What can be done with the folder shown: mention it, start a session in it, and so on. */
+function FolderItems({
+  Item,
   path,
   onUploadFolder,
 }: {
+  Item: MenuParts['Item'];
   path: string;
   /** Where folders can be picked, which phones mostly cannot. */
   onUploadFolder: (() => void) | undefined;
 }) {
   const navigation = useSessionNavigation();
   const workspace = useWorkspace();
+  return (
+    <>
+      {workspace && (
+        <Item className="menu-item" onSelect={() => workspace.mention(mentionPath(path))}>
+          <AtSign size={14} />
+          Mention in message
+        </Item>
+      )}
+      <Item className="menu-item" onSelect={() => navigation.newSession(path)}>
+        <MessageSquarePlus size={14} />
+        New session here
+      </Item>
+      {workspace?.openTerminal && (
+        <Item className="menu-item" onSelect={() => workspace.openTerminal?.(path)}>
+          <SquareTerminal size={14} />
+          Open terminal here
+        </Item>
+      )}
+      {onUploadFolder && (
+        <Item className="menu-item" onSelect={onUploadFolder}>
+          <Upload size={14} />
+          Upload folder
+        </Item>
+      )}
+      <Item className="menu-item" asChild>
+        <a href={zipUrl(path)} download>
+          <Download size={14} />
+          Download as zip
+        </a>
+      </Item>
+      <Item className="menu-item" onSelect={() => void copyText(path)}>
+        <Copy size={14} />
+        Copy path
+      </Item>
+    </>
+  );
+}
+
+/** The folder's menu: go home or to the working directory, and what {@link FolderItems} does. */
+function FolderMenu({
+  path,
+  home,
+  start,
+  startFolder,
+  onGo,
+  onUploadFolder,
+}: {
+  path: string;
+  home: string | undefined;
+  start: string;
+  startFolder: string;
+  onGo: (path: string) => void;
+  onUploadFolder: (() => void) | undefined;
+}) {
   const collisionPadding = useOverlayPadding();
   return (
     <DropdownMenu.Root modal={false}>
@@ -1094,39 +1127,30 @@ function FolderMenu({
       <DropdownMenu.Portal>
         <DropdownMenu.Content
           className="menu-panel"
-          align="start"
+          align="end"
           sideOffset={4}
           collisionPadding={collisionPadding}
         >
-          {workspace && (
-            <DropdownMenu.Item
-              className="menu-item"
-              onSelect={() => workspace.mention(mentionPath(path))}
-            >
-              <AtSign size={14} />
-              Mention in message
-            </DropdownMenu.Item>
-          )}
-          <DropdownMenu.Item className="menu-item" onSelect={() => navigation.newSession(path)}>
-            <MessageSquarePlus size={14} />
-            New session here
+          <DropdownMenu.Item
+            className="menu-item"
+            disabled={path === home}
+            title={home ? `Go to the home folder, ${home}` : undefined}
+            onSelect={() => onGo('~')}
+          >
+            <House size={14} />
+            Home folder
           </DropdownMenu.Item>
-          {onUploadFolder && (
-            <DropdownMenu.Item className="menu-item" onSelect={onUploadFolder}>
-              <Upload size={14} />
-              Upload folder
-            </DropdownMenu.Item>
-          )}
-          <DropdownMenu.Item className="menu-item" asChild>
-            <a href={zipUrl(path)} download>
-              <Download size={14} />
-              Download as zip
-            </a>
+          <DropdownMenu.Item
+            className="menu-item"
+            disabled={path === startFolder}
+            title={`Go to the working directory, ${startFolder}`}
+            onSelect={() => onGo(start)}
+          >
+            <LocateFixed size={14} />
+            Working directory
           </DropdownMenu.Item>
-          <DropdownMenu.Item className="menu-item" onSelect={() => void copyText(path)}>
-            <Copy size={14} />
-            Copy path
-          </DropdownMenu.Item>
+          <DropdownMenu.Separator className="menu-separator" />
+          <FolderItems Item={DropdownMenu.Item} path={path} onUploadFolder={onUploadFolder} />
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
     </DropdownMenu.Root>
@@ -1319,113 +1343,5 @@ function FolderUpload({
         </p>
       )}
     </div>
-  );
-}
-
-function NewFolderDialog({
-  open,
-  onOpenChange,
-  folder,
-  onMade,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  folder: string;
-  onMade: () => void;
-}) {
-  const runtime = useRuntime();
-  const [name, setName] = useState('');
-  const action = useAction();
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange} title="New folder">
-      <form
-        className="form-stack"
-        onSubmit={(event) => {
-          event.preventDefault();
-          void action.run(async () => {
-            await runtime.gateway.send('POST', '/api/files/folders', {
-              path: join(folder, name.trim()),
-            });
-            setName('');
-            onOpenChange(false);
-            onMade();
-          });
-        }}
-      >
-        <Field label="Name">
-          <input value={name} onChange={(event) => setName(event.target.value)} required />
-        </Field>
-        <ErrorNotice error={action.error} />
-        <div className="actions">
-          <Button type="submit" disabled={action.busy || !name.trim()}>
-            Create folder
-          </Button>
-        </div>
-      </form>
-    </Dialog>
-  );
-}
-
-function MoveDialog({
-  entry,
-  path,
-  onClose,
-  onMoved,
-}: {
-  entry: Entry | undefined;
-  path: string;
-  onClose: () => void;
-  onMoved: () => void;
-}) {
-  const runtime = useRuntime();
-  const [target, setTarget] = useState<string>();
-  const action = useAction();
-  const value = target ?? path;
-  return (
-    <Dialog
-      open={Boolean(entry)}
-      onOpenChange={(open) => {
-        if (!open) {
-          setTarget(undefined);
-          action.reset();
-          onClose();
-        }
-      }}
-      title="Rename or move"
-      description="Enter the new path. Nothing there is replaced."
-    >
-      <form
-        className="form-stack"
-        onSubmit={(event) => {
-          event.preventDefault();
-          void action.run(async () => {
-            await runtime.gateway.send('POST', '/api/files/move', {
-              from: path,
-              to: value.trim(),
-            });
-            setTarget(undefined);
-            onClose();
-            onMoved();
-          });
-        }}
-      >
-        <Field label="Path">
-          <input
-            value={value}
-            onChange={(event) => setTarget(event.target.value)}
-            autoCapitalize="off"
-            autoCorrect="off"
-            spellCheck={false}
-            required
-          />
-        </Field>
-        <ErrorNotice error={action.error} />
-        <div className="actions">
-          <Button type="submit" disabled={action.busy || !value.trim()}>
-            Move
-          </Button>
-        </div>
-      </form>
-    </Dialog>
   );
 }

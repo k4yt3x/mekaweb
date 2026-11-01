@@ -35,9 +35,12 @@ import {
 } from '../connections/context';
 import type { Gateway } from '../api/gateway';
 import { FileBrowser, type FilesTarget } from './file-browser';
-import { TerminalDock } from './terminal-dock';
-import { WorkspaceProvider, type Workspace } from '../components/workspace';
-import { useMeasured, useSessionMetadata, useSessionStates } from '../session/hooks';
+import { EditorPane } from './editor-pane';
+import { useEditorStore } from '../editor/use-editor';
+import { terminalOf } from '../editor/store';
+import { basename, join, parent } from '../files/paths';
+import { focusMessage, WorkspaceProvider, type Workspace } from '../components/workspace';
+import { useSessionContext, useSessionMetadata, useSessionStates } from '../session/hooks';
 import { isSessionRunning } from '../session/controller';
 import { useParams } from '@tanstack/react-router';
 import { Button } from '../components/ui/button';
@@ -53,21 +56,29 @@ import { SchedulesPage } from './schedules';
 import { NavigationToggle } from '../components/layout';
 import { DESKTOP_LAYOUT_QUERY, useMediaQuery } from '../components/media-query';
 import { PanelResizeHandle } from '../components/panel-resize-handle';
-import { FILES_WIDTH, type LayoutPreferences } from '../connections/storage';
+import { CONVERSATION_COLUMN, PANEL_WIDTH, PANELS, type Panel } from '../connections/storage';
+import {
+  LIST_WIDTH,
+  MAIN_MIN,
+  PANEL_TITLES,
+  RAIL_WIDTH,
+  WIDE_WIDTH,
+  panelMakesWay,
+  workspaceLayout,
+  type WorkspaceSide,
+} from './workspace-layout';
+import { SessionRail } from './session-rail';
 import { ReadingOptionsControl, SessionContent } from '../components/reading-options';
 import { useOverlayPadding } from '../components/visual-viewport';
 import { useSessionNavigation } from './session-navigation';
 import { useShortcut } from '../components/use-shortcut';
 import { shortcutAttribute, shortcutHint } from '../components/shortcut-keys';
-/** The narrowest the conversation gets beside the panels. */
-const MAIN_MIN = 340;
-const DETAILS_MIN = 280;
-const LIST_MIN = 180;
 
 export function SessionsPage({ id }: { id?: string | undefined }) {
   const state = useConnection();
   const runtime = useRuntime();
   const canRead = useCan('sessions:r');
+  const canSchedule = useCan('schedule:r');
   const {
     newSession,
     newConversation,
@@ -84,7 +95,7 @@ export function SessionsPage({ id }: { id?: string | undefined }) {
   const desktop = useMediaQuery(DESKTOP_LAYOUT_QUERY);
   const workspace = useRef<HTMLDivElement>(null);
   const [workspaceWidth, setWorkspaceWidth] = useState(window.innerWidth);
-  const [resizing, setResizing] = useState<{ side: PanelSide; width: number }>();
+  const [resizing, setResizing] = useState<{ side: WorkspaceSide; width: number }>();
   // Measured before the first paint, so the panels are not laid out for the window's width first.
   useLayoutEffect(() => {
     const element = workspace.current;
@@ -96,152 +107,223 @@ export function SessionsPage({ id }: { id?: string | undefined }) {
   }, [canRead]);
   const sessions = useSessionStates();
   const selected = sessions.find((s) => s.id === id);
-  // Files is there for a session, and for a new conversation's folder; the details, for a session.
-  const filesAvailable = Boolean(selected?.session) || !id;
-  const detailsAvailable = Boolean(selected?.session);
-  // When both panels are wanted and there is no room for both, the one opened last stays.
-  const [lastPanel, setLastPanel] = useState<'files' | 'details'>('files');
-  const preferredList = layout.sessionsWidth ?? 236;
-  const preferredFiles = layout.filesWidth ?? FILES_WIDTH.default;
-  const preferredDetails = layout.detailsWidth ?? 360;
-  const panelsFit = workspaceWidth >= FILES_WIDTH.min + DETAILS_MIN + MAIN_MIN;
-  const filesWanted = desktop && layout.filesOpen && filesAvailable;
-  const detailsWanted = desktop && layout.detailsOpen && detailsAvailable;
-  const filesShown = filesWanted && (!detailsWanted || panelsFit || lastPanel === 'files');
-  const detailsShown = detailsWanted && (!filesWanted || panelsFit || lastPanel === 'details');
-  /** Whether the list fits beside the conversation and the panels given, at their widths. */
-  const fits = (width: number, files: boolean, details: boolean) =>
-    width >=
-    preferredList + (files ? preferredFiles : 0) + (details ? preferredDetails : 0) + MAIN_MIN;
-  const listCollapsed =
-    desktop &&
-    (layout.sessionsCollapsed ||
-      ((filesShown || detailsShown) && !fits(workspaceWidth, filesShown, detailsShown)));
-  const files = desktop ? filesShown : mobileFiles && filesAvailable;
-  const details = desktop ? detailsShown : mobileDetails && detailsAvailable;
-  const listDesired = resizing?.side === 'sessions' ? resizing.width : preferredList;
-  const filesDesired = resizing?.side === 'files' ? resizing.width : preferredFiles;
-  const detailsDesired = resizing?.side === 'details' ? resizing.width : preferredDetails;
-  const listWidth = Math.min(
-    listDesired,
-    Math.max(
-      LIST_MIN,
-      workspaceWidth -
-        MAIN_MIN -
-        (filesShown ? filesDesired : 0) -
-        (detailsShown ? detailsDesired : 0),
-    ),
+  const status = useGateway<Gateway['StatusView']>('/api/status');
+  const terminalEnabled = status.data?.features.terminal ?? false;
+  // Files is there for a session, and for a new conversation's folder; the rest, for a session.
+  const panels = PANELS.filter((panel) =>
+    panel === 'files'
+      ? Boolean(selected?.session) || !id
+      : Boolean(selected?.session) && (panel !== 'schedules' || canSchedule),
   );
-  const listSpace = listCollapsed ? 0 : listWidth;
-  // Files gives way first, down to its narrowest, then the details.
-  const detailsWidth = Math.min(
-    detailsDesired,
-    Math.max(
-      DETAILS_MIN,
-      Math.min(600, workspaceWidth - MAIN_MIN - listSpace - (filesShown ? FILES_WIDTH.min : 0)),
-    ),
-  );
-  const filesMax = Math.max(
-    FILES_WIDTH.min,
-    Math.min(
-      FILES_WIDTH.max,
-      workspaceWidth - MAIN_MIN - listSpace - (detailsShown ? detailsWidth : 0),
-    ),
-  );
-  const filesWidth = Math.min(filesDesired, filesMax);
-  const detailsMax = Math.max(
-    DETAILS_MIN,
-    Math.min(600, workspaceWidth - MAIN_MIN - listSpace - (filesShown ? filesWidth : 0)),
-  );
-  const listMax = Math.max(
-    LIST_MIN,
-    Math.min(
-      480,
-      workspaceWidth - MAIN_MIN - (filesShown ? filesWidth : 0) - (detailsShown ? detailsWidth : 0),
-    ),
-  );
-  const columns = [
-    listCollapsed ? undefined : 'var(--sessions-width)',
-    'minmax(0, 1fr)',
-    filesShown ? 'var(--files-width)' : undefined,
-    detailsShown ? 'var(--details-width)' : undefined,
-  ]
-    .filter(Boolean)
-    .join(' ');
-  function commitWidth(side: PanelSide, width: number) {
+  const terminalAvailable = Boolean(selected?.session) && terminalEnabled;
+  const filesStart =
+    (id ? selected?.session?.working_directory : newConversation.settings.workingDirectory) || '~';
+  // Each session's Files and open files are its own; a new conversation's follow its folder.
+  const filesPlace = selected?.id ?? `new:${filesStart}`;
+  const editor = useEditorStore();
+  // Read when a file opens: the page's one store, and where the files open now.
+  const opening = useRef({ store: editor, place: filesPlace });
+  useEffect(() => {
+    opening.current = { store: editor, place: filesPlace };
+  });
+  const editorTabs = editor.tabs(filesPlace);
+  const terminalActive =
+    editorTabs.active !== undefined && terminalOf(editorTabs.active) !== undefined;
+  const [mobileEditor, setMobileEditor] = useState(false);
+  // When the editor and the panel do not both fit beside the conversation, the one opened last
+  // shows.
+  const [lastOpened, setLastOpened] = useState<'panel' | 'editor'>('panel');
+  // The list shown by hand where it does not fit stays, what is beside it narrowed, until
+  // something is opened beside it.
+  const [listByHand, setListByHand] = useState(false);
+  // The panel asked for, where there is one.
+  const panel = layout.panel && panels.includes(layout.panel) ? layout.panel : undefined;
+  const editorWanted = desktop && editorTabs.keys.length > 0;
+  const panelWanted = desktop && Boolean(panel);
+  const bothFit = workspaceWidth >= RAIL_WIDTH + MAIN_MIN + WIDE_WIDTH.min + PANEL_WIDTH.min;
+  const editorShown = editorWanted && (bothFit || !panelWanted || lastOpened === 'editor');
+  const shown = {
+    panel: panelWanted && (bothFit || !editorWanted || lastOpened === 'panel'),
+    wide: editorShown,
+  };
+  const shownPanel = shown.panel ? panel : undefined;
+  const preferred = {
+    list: layout.sessionsWidth ?? LIST_WIDTH.default,
+    panel: layout.panelWidth ?? PANEL_WIDTH.default,
+    conversation: layout.conversationWidth ?? CONVERSATION_COLUMN.default,
+  };
+  const desired = {
+    list: resizing?.side === 'sessions' ? resizing.width : preferred.list,
+    panel: resizing?.side === 'panel' ? resizing.width : preferred.panel,
+    conversation: resizing?.side === 'conversation' ? resizing.width : preferred.conversation,
+  };
+  const columns = workspaceLayout({
+    width: workspaceWidth,
+    collapsed: layout.sessionsCollapsed,
+    shownByHand: listByHand,
+    preferred,
+    desired,
+    shown,
+  });
+  const listCollapsed = desktop && columns.listCollapsed;
+  function commitWidth(side: WorkspaceSide, width: number) {
     runtime.storage.layout(
       side === 'sessions'
         ? { sessionsWidth: width }
-        : side === 'files'
-          ? { filesWidth: width }
-          : { detailsWidth: width },
+        : side === 'panel'
+          ? { panelWidth: width }
+          : { conversationWidth: width },
     );
     setResizing(undefined);
   }
-  /** What to close for the list to fit beside the conversation, at `width`. */
-  function roomForList(width: number): Partial<LayoutPreferences> {
-    if (fits(width, filesShown, detailsShown)) return {};
-    // A panel hidden for want of room would show in place of one closed, so it closes too.
-    const hidden: Partial<LayoutPreferences> = {
-      ...(filesWanted && !filesShown ? { filesOpen: false } : {}),
-      ...(detailsWanted && !detailsShown ? { detailsOpen: false } : {}),
-    };
-    if (detailsShown && fits(width, filesShown, false)) return { ...hidden, detailsOpen: false };
-    if (filesShown && fits(width, false, detailsShown)) return { ...hidden, filesOpen: false };
-    return {
-      ...hidden,
-      ...(detailsShown ? { detailsOpen: false } : {}),
-      ...(filesShown ? { filesOpen: false } : {}),
-    };
+  /** Shows the session list at `width`, the panel making way where it leaves the list no room. */
+  function showList(width: number) {
+    runtime.storage.layout({
+      sessionsCollapsed: false,
+      ...(panelMakesWay(width, preferred, shown) ? { panel: undefined } : {}),
+    });
+    setListByHand(true);
   }
-  const detailsButton = useRef<HTMLButtonElement>(null);
+  const panelButtons = useRef(new Map<Panel, HTMLButtonElement>());
   const filesButton = useRef<HTMLButtonElement>(null);
-  function setDetails(open: boolean) {
-    if (open) setLastPanel('details');
-    if (desktop) runtime.storage.layout({ detailsOpen: open });
-    else {
-      setMobileDetails(open);
-      if (open) setMobileFiles(false);
+  const detailsButton = useRef<HTMLButtonElement>(null);
+  const [panelTab, setPanelTab] = useState<DetailsTab>('context');
+  /** Shows `next`, or no panel. */
+  function showPanel(next: Panel | undefined) {
+    if (next) {
+      setLastOpened('panel');
+      setListByHand(false);
+    }
+    if (desktop) runtime.storage.layout({ panel: next });
+    else if (next === 'files') {
+      setMobileFiles(true);
+      setMobileDetails(false);
+    } else if (next) {
+      setPanelTab(next);
+      setMobileDetails(true);
+      setMobileFiles(false);
+    } else {
+      setMobileFiles(false);
+      setMobileDetails(false);
     }
   }
-  function setFiles(open: boolean) {
-    if (open) setLastPanel('files');
-    if (desktop) runtime.storage.layout({ filesOpen: open });
-    else {
-      setMobileFiles(open);
-      if (open) setMobileDetails(false);
-    }
-  }
-  const [panelTab, setPanelTab] = useState<PanelTab>('context');
   // A request to show a place in Files, for the session it was made in.
   const [filesTarget, setFilesTarget] = useState<FilesTarget & { session: string }>();
   const target = filesTarget?.session === (id ?? '') ? filesTarget : undefined;
-  const [terminals, setTerminals] = useState<Readonly<Record<string, boolean>>>({});
-  const status = useGateway<Gateway['StatusView']>('/api/status');
-  const terminalEnabled = status.data?.features.terminal ?? false;
-  function toggleFiles() {
+  const files = desktop ? shownPanel === 'files' : mobileFiles && panels.includes('files');
+  const details = !desktop && mobileDetails && panels.includes('context');
+  function togglePanel(name: Panel) {
     // Opened by hand, Files is where it was left, not where a link last sent it.
-    setFilesTarget(undefined);
-    setFiles(!files);
+    if (name === 'files') setFilesTarget(undefined);
+    const open = desktop
+      ? shownPanel === name
+      : name === 'files'
+        ? files
+        : details && panelTab === name;
+    showPanel(open ? undefined : name);
   }
-  function toggleDetails() {
-    setDetails(!details);
+  const action = useAction();
+  /** Shows the editor, where a tab is opening or showing. */
+  function showEditor() {
+    setLastOpened('editor');
+    setListByHand(false);
+    if (!desktop) {
+      setMobileEditor(true);
+      setMobileFiles(false);
+      setMobileDetails(false);
+    }
+  }
+  const startingTerminal = useRef(false);
+  /** Starts a terminal in `cwd`, the working directory unless given, in a tab of its own. */
+  function startTerminal(cwd?: string) {
+    const session = selected?.session;
+    if (!session || startingTerminal.current) return;
+    const place = filesPlace;
+    const folder = cwd ?? session.working_directory;
+    startingTerminal.current = true;
+    showEditor();
+    void action.run(async () => {
+      try {
+        const view = await runtime.gateway.send<Gateway['TerminalView']>('POST', '/api/terminals', {
+          session: session.id,
+          ...(folder ? { cwd: folder } : {}),
+          cols: 80,
+          rows: 24,
+        });
+        editor.openTerminal(place, view);
+        void runtime.queries.invalidateQueries({ queryKey: ['gateway'] });
+      } finally {
+        startingTerminal.current = false;
+      }
+    });
+  }
+  const terminalStarter = useRef(startTerminal);
+  useEffect(() => {
+    terminalStarter.current = startTerminal;
+  });
+  /**
+   * As in an editor: shows the terminal last shown, or starts one; shown, it goes back to the file
+   * last shown, or, with none, hands the keyboard to the message. On a phone it hides instead.
+   */
+  function toggleTerminal() {
+    if (terminalActive && (desktop ? editorShown : mobileEditor)) {
+      const back = editor.lastFile(filesPlace);
+      if (!desktop) setMobileEditor(false);
+      else if (back) editor.show(filesPlace, back);
+      else focusMessage();
+      return;
+    }
+    const last = editor.lastTerminal(filesPlace);
+    if (!last) return startTerminal();
+    showEditor();
+    editor.show(filesPlace, last);
   }
   const mentionTarget = useRef<((text: string) => void) | undefined>(undefined);
-  const workspaceValue = useMemo<Workspace>(
-    () => ({
+  const workspaceValue = useMemo<Workspace>(() => {
+    /** Opens `path` in the editor. */
+    const openFile = (path: string) => {
+      opening.current.store.open(opening.current.place, path);
+      setLastOpened('editor');
+      setListByHand(false);
+      if (!desktop) {
+        setMobileEditor(true);
+        setMobileFiles(false);
+        setMobileDetails(false);
+      }
+    };
+    /** Shows Files at the folder `path`, the entry `open` in it chosen. */
+    const reveal = (path: string, open: string | undefined) => {
+      setFilesTarget((previous) => ({
+        session: id ?? '',
+        path,
+        open,
+        nonce: (previous?.nonce ?? 0) + 1,
+      }));
+      setLastOpened('panel');
+      if (desktop) runtime.storage.layout({ panel: 'files' });
+      else {
+        setMobileFiles(true);
+        setMobileDetails(false);
+        setMobileEditor(false);
+      }
+    };
+    return {
+      openFile,
+      folder: filesStart,
+      openTerminal: terminalAvailable ? (cwd) => terminalStarter.current(cwd) : undefined,
+      showFile: (path) => reveal(parent(path), basename(path)),
+      // Where only one of them fits, the file shows rather than Files.
       openFiles: (path, open) => {
-        setFilesTarget((previous) => ({
-          session: id ?? '',
-          path,
-          open,
-          nonce: (previous?.nonce ?? 0) + 1,
-        }));
-        setLastPanel('files');
-        if (desktop) runtime.storage.layout({ filesOpen: true });
+        reveal(path, open);
+        if (open) openFile(join(path, open));
+      },
+      showContext: () => {
+        setLastOpened('panel');
+        if (desktop) runtime.storage.layout({ panel: 'context' });
         else {
-          setMobileFiles(true);
-          setMobileDetails(false);
+          setPanelTab('context');
+          setMobileDetails(true);
+          setMobileFiles(false);
         }
       },
       mention: (text) => {
@@ -258,17 +340,16 @@ export function SessionsPage({ id }: { id?: string | undefined }) {
           if (mentionTarget.current === insert) mentionTarget.current = undefined;
         };
       },
-    }),
-    [desktop, runtime, id],
-  );
+    };
+  }, [desktop, runtime, id, setPanelTab, setMobileEditor, terminalAvailable, filesStart]);
 
   function toggleList() {
-    runtime.storage.layout({
-      sessionsCollapsed: !listCollapsed,
-      ...(listCollapsed ? roomForList(workspaceWidth) : {}),
-    });
+    if (listCollapsed) showList(workspaceWidth);
+    else {
+      runtime.storage.layout({ sessionsCollapsed: true });
+      setListByHand(false);
+    }
   }
-  const action = useAction();
   useSessionMetadata(id, canRead && Boolean(selected?.session));
   const headingKey = `${state.connection?.id}:${state.connection?.authority}:${id}`;
   const [headingError, setHeadingError] = useState<{ key: string; error: unknown }>();
@@ -281,32 +362,43 @@ export function SessionsPage({ id }: { id?: string | undefined }) {
     [headingKey],
   );
   const selectedRunning = selected ? isSessionRunning(selected) : false;
-  const filesStart =
-    (id ? selected?.session?.working_directory : newConversation.settings.workingDirectory) || '~';
-  // Each session's Files is its own; a new conversation's follows the folder chosen for it.
-  const filesPlace = selected?.id ?? `new:${filesStart}`;
-  const terminalOpen = Boolean(id && terminals[id] && terminalEnabled);
-  const setTerminalOpen = (open: boolean) => {
-    if (id) setTerminals((value) => ({ ...value, [id]: open }));
-  };
-  // As in an editor: the first press opens the session's terminal, and later ones hide and show it.
-  useShortcut(
-    'toggleTerminal',
-    () => setTerminalOpen(!terminalOpen),
-    Boolean(selected?.session) && terminalEnabled,
+  const runningTasks = useRunningTasks(
+    selected?.session ? selected.id : undefined,
+    selectedRunning,
   );
+  const shells = useGateway<Gateway['TerminalView'][]>(
+    '/api/terminals',
+    { session: id ?? '' },
+    terminalAvailable,
+  );
+  // Each of the session's terminals has a tab, as after a reload, or one started elsewhere.
+  const sessionId = selected?.session ? selected.id : undefined;
+  useEffect(() => {
+    if (sessionId && shells.data) editor.addTerminals(sessionId, shells.data);
+  }, [editor, sessionId, shells.data]);
+  const terminalShown = terminalActive && (desktop ? editorShown : mobileEditor);
+  useShortcut('toggleTerminal', toggleTerminal, terminalAvailable);
+  useShortcut('newTerminal', () => startTerminal(), terminalAvailable);
+  useShortcut('toggleFiles', () => togglePanel('files'), panels.includes('files'));
+  useShortcut('toggleContext', () => togglePanel('context'), panels.includes('context'));
+  useShortcut('toggleTasks', () => togglePanel('tasks'), panels.includes('tasks'));
+  useShortcut('toggleSchedules', () => togglePanel('schedules'), panels.includes('schedules'));
   // The search bar is hidden until it is asked for.
   if (searchRequested && canRead && !searchOpen) setSearchOpen(true);
+  // Making room for the list takes a render or two; past that, the search goes on as things are.
+  const makingRoom = useRef(0);
   useLayoutEffect(() => {
+    if (!searchRequested) makingRoom.current = 0;
     if (!searchRequested || !canRead || !searchInput.current) return;
     if (!desktop && !mobileSessionsOpen) return;
     // Read the committed width too: the initial ResizeObserver notification may still be pending.
-    // Only displayed panels compete with the list; keep the saved preferences otherwise.
-    const room = desktop
-      ? roomForList(Math.min(workspaceWidth, workspace.current?.clientWidth ?? workspaceWidth))
-      : {};
-    if (listCollapsed || Object.keys(room).length) {
-      runtime.storage.layout({ sessionsCollapsed: false, ...room });
+    // Only what shows competes with the list; keep the saved preferences otherwise.
+    const width = Math.min(workspaceWidth, workspace.current?.clientWidth ?? workspaceWidth);
+    if (
+      (listCollapsed || (desktop && panelMakesWay(width, preferred, shown))) &&
+      makingRoom.current++ < 3
+    ) {
+      showList(width);
       return;
     }
     searchInput.current.focus();
@@ -329,10 +421,11 @@ export function SessionsPage({ id }: { id?: string | undefined }) {
         ref={workspace}
         style={
           {
-            '--sessions-width': `${listWidth}px`,
-            '--files-width': `${filesWidth}px`,
-            '--details-width': `${detailsWidth}px`,
-            ...(desktop ? { '--workspace-columns': columns } : {}),
+            '--sessions-width': `${columns.list.width}px`,
+            '--panel-width': `${columns.panel.width}px`,
+            '--conversation-width': `${columns.conversation.width}px`,
+            '--rail-width': `${RAIL_WIDTH}px`,
+            ...(desktop ? { '--workspace-columns': columns.columns } : {}),
           } as CSSProperties
         }
         className={`sessions-workspace ${desktop || !mobileSessionsOpen ? 'has-session' : ''} ${listCollapsed ? 'sessions-collapsed' : ''}`}
@@ -349,141 +442,151 @@ export function SessionsPage({ id }: { id?: string | undefined }) {
           {desktop && (
             <PanelResizeHandle
               side="sessions"
-              value={listWidth}
-              min={LIST_MIN}
-              max={listMax}
+              value={columns.list.width}
+              min={LIST_WIDTH.min}
+              max={columns.list.max}
               onResize={(width) => setResizing({ side: 'sessions', width })}
               onCommit={(width) => commitWidth('sessions', width)}
               onCancel={() => setResizing(undefined)}
             />
           )}
         </aside>
-        <SessionContent key={headingKey}>
-          <header className="session-toolbar">
-            {layout.navigationCollapsed && <NavigationToggle />}
-            <Button
-              className="desktop-control"
-              variant="ghost"
-              size="icon"
-              aria-label={listCollapsed ? 'Show session list' : 'Hide session list'}
-              title={listCollapsed ? 'Show session list' : 'Hide session list'}
-              aria-expanded={!listCollapsed}
-              aria-controls="session-list"
-              onClick={toggleList}
-            >
-              {listCollapsed ? <List size={18} /> : <ListCollapse size={18} />}
-            </Button>
-            <Button
-              variant="ghost"
-              size={id ? 'icon' : 'default'}
-              className="mobile-back"
-              onClick={() => setMobileSessionsOpen(true)}
-              aria-label={id ? 'Show session list' : undefined}
-            >
-              <ChevronLeft size={18} aria-hidden="true" />
-              {!id && <span>Sessions</span>}
-            </Button>
-            {id && (
-              <div className="session-title">
-                {selected?.session ? (
-                  <SessionHeading
-                    key={headingKey}
-                    session={selected.session}
-                    disabled={selected.deleting || selected.settingsPending}
-                    onError={reportHeadingError}
-                  />
-                ) : (
-                  <h1>New conversation</h1>
-                )}
-                <p>
-                  {selected?.session?.parent_id ? (
-                    <a
-                      className="parent-session-link"
-                      href={`#/sessions/${encodeURIComponent(selected.session.parent_id)}`}
-                      aria-label="Back to parent session"
-                      title="Back to parent session"
-                    >
-                      <CornerUpLeft size={12} aria-hidden="true" />
-                      <span>Parent session</span>
-                    </a>
+        <SessionContent
+          key={headingKey}
+          beside={shown.wide}
+          header={
+            <header className="session-toolbar">
+              {layout.navigationCollapsed && <NavigationToggle />}
+              <Button
+                className="desktop-control"
+                variant="ghost"
+                size="icon"
+                aria-label={listCollapsed ? 'Show session list' : 'Hide session list'}
+                title={listCollapsed ? 'Show session list' : 'Hide session list'}
+                aria-expanded={!listCollapsed}
+                aria-controls="session-list"
+                onClick={toggleList}
+              >
+                {listCollapsed ? <List size={18} /> : <ListCollapse size={18} />}
+              </Button>
+              <Button
+                variant="ghost"
+                size={id ? 'icon' : 'default'}
+                className="mobile-back"
+                onClick={() => setMobileSessionsOpen(true)}
+                aria-label={id ? 'Show session list' : undefined}
+              >
+                <ChevronLeft size={18} aria-hidden="true" />
+                {!id && <span>Sessions</span>}
+              </Button>
+              {id && (
+                <div className="session-title">
+                  {selected?.session ? (
+                    <SessionHeading
+                      key={headingKey}
+                      session={selected.session}
+                      disabled={selected.deleting || selected.settingsPending}
+                      onError={reportHeadingError}
+                    />
                   ) : (
+                    <h1>New conversation</h1>
+                  )}
+                  <p>
+                    {selected?.session?.parent_id ? (
+                      <a
+                        className="parent-session-link"
+                        href={`#/sessions/${encodeURIComponent(selected.session.parent_id)}`}
+                        aria-label="Back to parent session"
+                        title="Back to parent session"
+                      >
+                        <CornerUpLeft size={12} aria-hidden="true" />
+                        <span>Parent session</span>
+                      </a>
+                    ) : (
+                      <>
+                        <Folder size={12} aria-hidden="true" />
+                        <span>
+                          {selected?.session?.working_directory ?? 'Working directory not recorded'}
+                        </span>
+                      </>
+                    )}
+                  </p>
+                </div>
+              )}
+              {(!id || selected?.session) && (
+                <div className="toolbar-actions">
+                  <ReadingOptionsControl />
+                  {selected?.session &&
+                    selected.feed === 'unavailable' &&
+                    !selected.session.parent_id && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        aria-label="Reconnect session feed"
+                        onClick={() =>
+                          void action.run(async () => state.controller?.reconnect(selected.id))
+                        }
+                      >
+                        <RefreshCw size={18} />
+                      </Button>
+                    )}
+                  {/* A wide screen has these in the column at its right. */}
+                  {!desktop && terminalAvailable && (
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      aria-label="Terminal"
+                      title={`${terminalShown ? 'Hide terminal' : 'Show terminal'} (${shortcutHint('toggleTerminal')})`}
+                      aria-keyshortcuts={shortcutAttribute('toggleTerminal')}
+                      aria-pressed={terminalShown}
+                      onClick={toggleTerminal}
+                    >
+                      <SquareTerminal size={18} />
+                    </Button>
+                  )}
+                  {!desktop && (
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      aria-label="Files"
+                      ref={filesButton}
+                      title={files ? 'Hide files' : 'Show files'}
+                      aria-pressed={files}
+                      aria-controls="session-files"
+                      onClick={() => togglePanel('files')}
+                    >
+                      <FolderOpen size={18} />
+                    </Button>
+                  )}
+                  {selected?.session && (
                     <>
-                      <Folder size={12} aria-hidden="true" />
-                      <span>
-                        {selected?.session?.working_directory ?? 'Working directory not recorded'}
-                      </span>
+                      {!desktop && (
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          aria-label="Session details"
+                          ref={detailsButton}
+                          title={details ? 'Hide session details' : 'Show session details'}
+                          aria-pressed={details}
+                          aria-controls="session-details"
+                          onClick={() => showPanel(details ? undefined : panelTab)}
+                        >
+                          <Info size={18} />
+                        </Button>
+                      )}
+                      <SessionActions
+                        key={`${state.connection?.id}:${state.connection?.authority}:${selected.id}`}
+                        session={selected.session}
+                        running={selectedRunning}
+                        deleting={selected.deleting}
+                      />
                     </>
                   )}
-                </p>
-              </div>
-            )}
-            {(!id || selected?.session) && (
-              <div className="toolbar-actions">
-                <ReadingOptionsControl />
-                {selected?.session &&
-                  selected.feed === 'unavailable' &&
-                  !selected.session.parent_id && (
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      aria-label="Reconnect session feed"
-                      onClick={() =>
-                        void action.run(async () => state.controller?.reconnect(selected.id))
-                      }
-                    >
-                      <RefreshCw size={18} />
-                    </Button>
-                  )}
-                {selected?.session && terminalEnabled && (
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    aria-label="Terminal"
-                    title={`${terminalOpen ? 'Hide terminal' : 'Show terminal'} (${shortcutHint('toggleTerminal')})`}
-                    aria-keyshortcuts={shortcutAttribute('toggleTerminal')}
-                    aria-pressed={terminalOpen}
-                    onClick={() => setTerminalOpen(!terminalOpen)}
-                  >
-                    <SquareTerminal size={18} />
-                  </Button>
-                )}
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  aria-label="Files"
-                  ref={filesButton}
-                  title={files ? 'Hide files' : 'Show files'}
-                  aria-pressed={files}
-                  aria-controls="session-files"
-                  onClick={toggleFiles}
-                >
-                  <FolderOpen size={18} />
-                </Button>
-                {selected?.session && (
-                  <>
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      aria-label="Session details"
-                      ref={detailsButton}
-                      title={details ? 'Hide session details' : 'Show session details'}
-                      aria-pressed={details}
-                      aria-controls="session-details"
-                      onClick={toggleDetails}
-                    >
-                      <Info size={18} />
-                    </Button>
-                    <SessionActions
-                      key={`${state.connection?.id}:${state.connection?.authority}:${selected.id}`}
-                      session={selected.session}
-                      running={selectedRunning}
-                      deleting={selected.deleting}
-                    />
-                  </>
-                )}
-              </div>
-            )}
-          </header>
+                </div>
+              )}
+            </header>
+          }
+        >
           <ErrorNotice error={action.error} />
           <div id="session-title-error">
             <ErrorNotice
@@ -493,21 +596,10 @@ export function SessionsPage({ id }: { id?: string | undefined }) {
           {!id ? (
             <NewConversation />
           ) : selected?.session ? (
-            <>
-              <Conversation
-                key={`${state.connection?.id}:${state.connection?.authority}:${selected.id}`}
-                state={selected}
-              />
-              {terminalEnabled && (
-                <TerminalDock
-                  key={selected.id}
-                  session={selected.id}
-                  cwd={selected.session.working_directory}
-                  open={terminalOpen}
-                  onOpenChange={setTerminalOpen}
-                />
-              )}
-            </>
+            <Conversation
+              key={`${state.connection?.id}:${state.connection?.authority}:${selected.id}`}
+              state={selected}
+            />
           ) : (
             <div className="page">
               {state.connectionIssue ? null : selected?.error ? (
@@ -524,80 +616,96 @@ export function SessionsPage({ id }: { id?: string | undefined }) {
             </div>
           )}
         </SessionContent>
-        {desktop && filesShown && (
-          <aside id="session-files" className="session-details-panel" aria-label="Files">
+        {desktop && editorTabs.keys.length > 0 && (
+          // Hidden, the editor stays, with its files, and its terminals attached to their shells.
+          <div className="work-area" hidden={!shown.wide}>
             <PanelResizeHandle
-              side="files"
-              value={filesWidth}
-              min={FILES_WIDTH.min}
-              max={filesMax}
-              onResize={(width) => setResizing({ side: 'files', width })}
-              onCommit={(width) => commitWidth('files', width)}
+              side="conversation"
+              value={columns.conversation.width}
+              min={MAIN_MIN}
+              max={columns.conversation.max}
+              onResize={(width) => setResizing({ side: 'conversation', width })}
+              onCommit={(width) => commitWidth('conversation', width)}
               onCancel={() => setResizing(undefined)}
             />
-            <header className="details-panel-heading">
-              <h2>Files</h2>
-              <Button
-                variant="ghost"
-                size="icon"
-                aria-label="Close Files"
-                onClick={() => {
-                  setFiles(false);
-                  filesButton.current?.focus();
-                }}
-              >
-                <X size={18} />
-              </Button>
-            </header>
-            <div className="details-panel-body files-panel-body">
-              <FileBrowser key={filesPlace} place={filesPlace} start={filesStart} target={target} />
-            </div>
-          </aside>
+            <EditorPane place={filesPlace} full={false} onHide={() => {}} />
+          </div>
         )}
-        {desktop && detailsShown && selected?.session && (
+        {shownPanel && (
           <aside
-            id="session-details"
+            id="session-panel"
             className="session-details-panel"
-            aria-label="Session details"
+            aria-label={PANEL_TITLES[shownPanel]}
           >
             <PanelResizeHandle
-              side="details"
-              value={detailsWidth}
-              min={DETAILS_MIN}
-              max={detailsMax}
-              onResize={(width) => setResizing({ side: 'details', width })}
-              onCommit={(width) => commitWidth('details', width)}
+              side="panel"
+              value={columns.panel.width}
+              min={PANEL_WIDTH.min}
+              max={columns.panel.max}
+              onResize={(width) => setResizing({ side: 'panel', width })}
+              onCommit={(width) => commitWidth('panel', width)}
               onCancel={() => setResizing(undefined)}
             />
             <header className="details-panel-heading">
-              <h2>Session details</h2>
+              <h2>{PANEL_TITLES[shownPanel]}</h2>
               <Button
                 variant="ghost"
                 size="icon"
-                aria-label="Close session details"
+                aria-label={`Close ${PANEL_TITLES[shownPanel]}`}
                 onClick={() => {
-                  setDetails(false);
-                  detailsButton.current?.focus();
+                  showPanel(undefined);
+                  panelButtons.current.get(shownPanel)?.focus();
                 }}
               >
                 <X size={18} />
               </Button>
             </header>
-            <div className="details-panel-body">
-              <SidePanel
-                key={selected.id}
-                session={selected.session}
-                tab={panelTab}
-                onTab={setPanelTab}
-              />
-            </div>
+            {shownPanel === 'files' ? (
+              <div className="details-panel-body files-panel-body">
+                <FileBrowser
+                  key={filesPlace}
+                  place={filesPlace}
+                  start={filesStart}
+                  target={target}
+                />
+              </div>
+            ) : (
+              selected?.session && (
+                <div className="details-panel-body">
+                  <SessionDetails key={selected.id} session={selected.session} tab={shownPanel} />
+                </div>
+              )
+            )}
           </aside>
+        )}
+        {desktop && (
+          <SessionRail
+            panels={panels}
+            shown={shownPanel}
+            onPanel={togglePanel}
+            terminal={
+              terminalAvailable
+                ? {
+                    shown: terminalShown,
+                    running: editorTabs.keys.some((key) => terminalOf(key) !== undefined),
+                    onToggle: toggleTerminal,
+                  }
+                : undefined
+            }
+            running={runningTasks}
+            buttons={panelButtons}
+          />
+        )}
+        {!desktop && editorTabs.keys.length > 0 && (
+          <div className="code-sheet" hidden={!mobileEditor}>
+            <EditorPane place={filesPlace} full onHide={() => setMobileEditor(false)} />
+          </div>
         )}
         {!desktop && (
           <>
             <Dialog
               open={files}
-              onOpenChange={setFiles}
+              onOpenChange={(open) => showPanel(open ? 'files' : undefined)}
               title="Files"
               placement="right"
               className="files-sheet"
@@ -613,7 +721,7 @@ export function SessionsPage({ id }: { id?: string | undefined }) {
             </Dialog>
             <Dialog
               open={details}
-              onOpenChange={setDetails}
+              onOpenChange={(open) => showPanel(open ? panelTab : undefined)}
               title="Session details"
               placement="right"
             >
@@ -981,21 +1089,45 @@ function SessionTools({ sessionId }: { sessionId: string }) {
     </div>
   );
 }
-type PanelTab = 'context' | 'tasks' | 'schedules';
-type PanelSide = 'sessions' | 'files' | 'details';
+/** The panels that tell of a session, which a narrow screen shows together in one sheet. */
+type DetailsTab = Exclude<Panel, 'files'>;
 
-/** The details panel: a session's context, background tasks, and schedules. */
+/**
+ * How many of the session `id`'s background tasks are running: read as it opens, as its turns
+ * start and end, which is when tasks start and report, and every few seconds while some run.
+ */
+function useRunningTasks(id: string | undefined, turning: boolean) {
+  const [polling, setPolling] = useState(false);
+  const tasks = useResource<Schema['BackgroundTasksResponse']>(
+    id ? sessionPath(id) + '/tasks' : '',
+    undefined,
+    Boolean(id),
+    polling ? 5000 : 120_000,
+  );
+  const running = tasks.data?.tasks.filter((task) => task.status === 'running').length ?? 0;
+  if (polling !== running > 0) setPolling(running > 0);
+  const seen = useRef(turning);
+  const refetch = tasks.refetch;
+  useEffect(() => {
+    if (seen.current === turning) return;
+    seen.current = turning;
+    if (id) void refetch();
+  }, [turning, id, refetch]);
+  return id ? running : 0;
+}
+
+/** The session details sheet, on a narrow screen: a session's context, tasks, and schedules. */
 function SidePanel({
   session,
   tab,
   onTab,
 }: {
   session: Schema['SessionResponse'];
-  tab: PanelTab;
-  onTab: (tab: PanelTab) => void;
+  tab: DetailsTab;
+  onTab: (tab: DetailsTab) => void;
 }) {
   const canSchedule = useCan('schedule:r');
-  const tabs: PanelTab[] = ['context', 'tasks', ...(canSchedule ? (['schedules'] as const) : [])];
+  const tabs: DetailsTab[] = ['context', 'tasks', ...(canSchedule ? (['schedules'] as const) : [])];
   return (
     <div className="stack side-panel">
       <div className="detail-tabs" role="group" aria-label="Session details views">
@@ -1017,24 +1149,12 @@ function SidePanel({
   );
 }
 
-function SessionDetails({ session, tab }: { session: Schema['SessionResponse']; tab: PanelTab }) {
+function SessionDetails({ session, tab }: { session: Schema['SessionResponse']; tab: DetailsTab }) {
   const { api } = useConnection();
   const canWrite = useCan('sessions:w');
   const action = useAction();
-  const context = useResource<Schema['ContextResponse']>(
-    sessionPath(session.id) + '/context',
-    undefined,
-    tab === 'context',
-  );
-  // meka measures after every provider round; read the breakdown again when it does.
-  const measured = useMeasured(session.id);
-  const seen = useRef(measured);
-  const refetchContext = context.refetch;
-  useEffect(() => {
-    if (measured === seen.current) return;
-    seen.current = measured;
-    if (tab === 'context') void refetchContext();
-  }, [measured, tab, refetchContext]);
+  // The message box's meter reads it again whenever meka measures it.
+  const context = useSessionContext(session.id, { enabled: tab === 'context' });
   const tasks = useResource<Schema['BackgroundTasksResponse']>(
     sessionPath(session.id) + '/tasks',
     undefined,

@@ -58,7 +58,17 @@ function readingPosition(pane: HTMLElement | null): ReadingPosition | undefined 
 }
 
 /** Key this pane by connection/session; the sidebar and saved preferences keep their own lifetimes. */
-export function SessionContent({ children }: { children: ReactNode }) {
+export function SessionContent({
+  header,
+  beside = false,
+  children,
+}: {
+  /** The session's heading, above the conversation and what is beside it, with its options. */
+  header?: ReactNode;
+  /** Whether the editor or the terminal is beside the conversation, which then is centered in its area. */
+  beside?: boolean;
+  children: ReactNode;
+}) {
   const { storage } = useRuntime();
   const settings = useSettings();
   const saved = useMemo<ReadingOptions>(
@@ -78,6 +88,30 @@ export function SessionContent({ children }: { children: ReactNode }) {
   const [overrides, setOverrides] = useState<Partial<ReadingOptions>>({});
   const options = useMemo(() => ({ ...saved, ...overrides }), [saved, overrides]);
   const pane = useRef<HTMLElement>(null);
+  // Beside the editor or the terminal, the conversation is a column of its own, centered in its
+  // area. Elsewhere, centered on the page, it could be pushed against an edge of its area where a
+  // panel takes much of the window: it is centered in its area then too. The offset, set for the
+  // page, as for a browser's tab sidebar, is left out then.
+  const [offPage, setOffPage] = useState(false);
+  useLayoutEffect(() => {
+    const node = pane.current;
+    if (!node || options.anchor !== 'page') {
+      setOffPage(false);
+      return;
+    }
+    const measure = () => setOffPage(leavesPage(node, options.offset));
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    for (const column of node.querySelectorAll('.conversation-width')) observer.observe(column);
+    window.addEventListener('resize', measure);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', measure);
+    };
+  }, [options.anchor, options.offset, options.maxWidth]);
+  const anchor = beside || offPage ? 'area' : options.anchor;
+  const offset = anchor === options.anchor ? options.offset : 0;
   const position = useRef<ReadingPosition | undefined>(undefined);
   // The center guide shows while the slider is held and briefly after the position changes.
   const [holding, setHolding] = useState(false);
@@ -134,19 +168,21 @@ export function SessionContent({ children }: { children: ReactNode }) {
     [storage],
   );
   const value = useMemo(
-    () => ({ options, adjusted, change, saveDefaults, pane, holdGuide }),
-    [options, adjusted, change, saveDefaults, holdGuide],
+    () => ({ options, anchor, adjusted, change, saveDefaults, pane, holdGuide }),
+    [options, anchor, adjusted, change, saveDefaults, holdGuide],
   );
   return (
     <ReadingContext.Provider value={value}>
+      {header}
       <section
         ref={pane}
+        id="session-main"
         className="session-main"
-        data-anchor={options.anchor}
+        data-anchor={anchor}
         style={
           {
             '--reading-width': options.maxWidth === 'full' ? '100%' : `${options.maxWidth}px`,
-            '--reading-offset': `${options.offset}px`,
+            '--reading-offset': `${offset}px`,
             '--conversation-font-size': `${options.fontSize}px`,
           } as CSSProperties
         }
@@ -206,6 +242,24 @@ function CenterGuide({
   return (
     <div ref={line} className="center-guide" data-visible={visible || undefined} aria-hidden />
   );
+}
+
+/**
+ * Whether the reading column, centered on the page and moved by `offset`, would reach past an edge
+ * of the conversation area, which would leave it against that edge with room on the other side.
+ */
+function leavesPage(pane: HTMLElement, offset: number) {
+  const column = readingColumn(pane);
+  const area = column?.parentElement;
+  const page = pane.closest('.app-shell')?.getBoundingClientRect();
+  if (!column || !area || !page) return false;
+  const style = getComputedStyle(area);
+  const paddingLeft = parseFloat(style.paddingLeft) || 0;
+  const width = area.clientWidth - paddingLeft - (parseFloat(style.paddingRight) || 0);
+  const left = area.getBoundingClientRect().left + area.clientLeft + paddingLeft;
+  const center = page.left + page.width / 2 - left + offset;
+  const half = column.getBoundingClientRect().width / 2;
+  return center - half < -1 || center + half > width + 1;
 }
 
 type OffsetRange = { min: number; max: number };
@@ -303,10 +357,16 @@ function ReadingOptionsForm({ value }: { value: ReadingState }) {
   const id = useId();
   const [edited, setEdited] = useState(false);
   const [generation, setGeneration] = useState(0);
-  const { options, adjusted, change, saveDefaults, pane, holdGuide } = value;
-  const range = useOffsetRange(pane, options.anchor, options.maxWidth);
-  const movable = range !== undefined && range.max > range.min;
-  const shown = range ? Math.max(range.min, Math.min(range.max, options.offset)) : options.offset;
+  const { options, anchor, adjusted, change, saveDefaults, pane, holdGuide } = value;
+  const range = useOffsetRange(pane, anchor, options.maxWidth);
+  // Centered in its area in place of the page, the conversation takes no offset.
+  const unmoved = anchor !== options.anchor;
+  const movable = !unmoved && range !== undefined && range.max > range.min;
+  const shown = unmoved
+    ? 0
+    : range
+      ? Math.max(range.min, Math.min(range.max, options.offset))
+      : options.offset;
   // Dragging near center settles on it, so returning to 0 needs no precision. Keys step exactly,
   // since a snap would pull a single step from 0 straight back.
   const snap = range ? Math.max(3, (range.max - range.min) * 0.02) : 0;
@@ -437,7 +497,9 @@ function ReadingOptionsForm({ value }: { value: ReadingState }) {
               }}
             />
           </div>
-          {!movable ? (
+          {unmoved ? (
+            <p>Centered in its area here, so the offset does not apply.</p>
+          ) : !movable ? (
             <p>No room to move the conversation at this width.</p>
           ) : (
             options.offset !== 0 &&

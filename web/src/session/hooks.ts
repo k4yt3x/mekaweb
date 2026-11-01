@@ -1,7 +1,7 @@
-import { useSyncExternalStore } from 'react';
+import { useEffect, useRef, useSyncExternalStore } from 'react';
 import { queryOptions, useQuery } from '@tanstack/react-query';
-import type { ApiClient, Schema } from '../api/client';
-import { useConnection } from '../connections/context';
+import { sessionPath, type ApiClient, type Schema } from '../api/client';
+import { useConnection, useResource } from '../connections/context';
 import type { Connection } from '../connections/storage';
 import type { SessionState } from './controller';
 const emptyStates: SessionState[] = [];
@@ -60,4 +60,26 @@ export function useMeasured(id: string) {
     controller?.subscribe ?? noopSubscribe,
     () => controller?.getSnapshot().find((state) => state.id === id)?.measured,
   );
+}
+
+/**
+ * A session's context: what fills it and what the session has used. With `follow`, it is read
+ * again each time meka measures it, after every provider round; the message box's meter follows
+ * it, so whatever else shows it is kept up to date too.
+ */
+export function useSessionContext(session: string, { follow = false, enabled = true } = {}) {
+  const context = useResource<Schema['ContextResponse']>(
+    sessionPath(session) + '/context',
+    undefined,
+    enabled,
+  );
+  const measured = useMeasured(session);
+  const seen = useRef(measured);
+  const refetch = context.refetch;
+  useEffect(() => {
+    if (measured === seen.current) return;
+    seen.current = measured;
+    if (follow && enabled) void refetch();
+  }, [measured, follow, enabled, refetch]);
+  return context;
 }

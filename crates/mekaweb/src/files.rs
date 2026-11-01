@@ -45,6 +45,9 @@ pub(crate) const MAX_CHUNK_BYTES: usize = 8 * 1024 * 1024;
 /// The most text a preview reads.
 const MAX_TEXT_BYTES: u64 = 2 * 1024 * 1024;
 
+/// The most text read to edit, and saved: a longer file opens to read only.
+pub(crate) const MAX_EDIT_BYTES: u64 = 10 * 1024 * 1024;
+
 /// The most bytes looked at to tell text from binary.
 const SNIFF_BYTES: usize = 8 * 1024;
 
@@ -73,6 +76,9 @@ pub(crate) enum FilesError {
     Refused(String),
     #[error("{0}")]
     Conflict(String),
+    /// A file changed since it was read, which a save is not to overwrite.
+    #[error("{0} changed since it was opened")]
+    Changed(String),
     #[error(transparent)]
     Io(std::io::Error),
     #[error(transparent)]
@@ -131,6 +137,12 @@ impl From<FilesError> for ApiError {
             FilesError::NotFound(_) => Self::not_found(error.to_string()),
             FilesError::BadPath(_) => Self::bad_request(error.to_string()),
             FilesError::Exists(_) | FilesError::Conflict(_) => Self::conflict(error.to_string()),
+            FilesError::Changed(_) => Self::new(
+                StatusCode::CONFLICT,
+                "changed",
+                "Changed",
+                error.to_string(),
+            ),
             FilesError::Refused(_) => Self::new(
                 StatusCode::FORBIDDEN,
                 "refused",
@@ -317,7 +329,7 @@ pub(crate) struct Listing {
     pub(crate) home: Option<String>,
 }
 
-/// A text file's contents, for a preview.
+/// A text file's contents, for a preview or to edit.
 #[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct Text {
     pub(crate) text: String,
@@ -327,6 +339,18 @@ pub(crate) struct Text {
     pub(crate) truncated: bool,
     /// Whether the file looks binary, in which case `text` is empty.
     pub(crate) binary: bool,
+    /// What the file held, to save over it only as it was: none for one cut short or binary.
+    pub(crate) version: Option<String>,
+    pub(crate) modified: Option<DateTime<Utc>>,
+}
+
+/// A text file as saved.
+#[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct Saved {
+    /// What it holds now, to save over it next.
+    pub(crate) version: String,
+    pub(crate) size: u64,
+    pub(crate) modified: Option<DateTime<Utc>>,
 }
 
 /// A file opened for download.
@@ -358,11 +382,12 @@ pub(crate) struct Files {
     watcher: watch::Watcher,
 }
 
-/// Entries chosen in a folder, to download as one zip.
+/// Entries chosen, to download as one zip: the folder they are all in, and each one's names below
+/// it.
 #[derive(Debug, Clone)]
 pub(crate) struct Selection {
     pub(crate) folder: PathBuf,
-    pub(crate) names: Vec<String>,
+    pub(crate) chosen: Vec<Vec<String>>,
     made: Instant,
 }
 
@@ -383,11 +408,10 @@ impl Files {
         }
     }
 
-    /// Keeps `names` in the folder `folder` for a zip of them; the id to download it by.
-    pub(crate) fn select(&self, folder: PathBuf, names: Vec<String>) -> Result<String, FilesError> {
-        for name in &names {
-            check_name(OsStr::new(name))?;
-        }
+    /// Keeps the entries `paths` for a zip of them, under the folder they are all in; the id to
+    /// download it by.
+    pub(crate) fn select(&self, paths: &[PathBuf]) -> Result<String, FilesError> {
+        let (folder, chosen) = common_folder(paths)?;
         let id = Uuid::new_v4().to_string();
         let mut selections = self
             .selections
@@ -404,7 +428,7 @@ impl Files {
         }
         selections.insert(id.clone(), Selection {
             folder,
-            names,
+            chosen,
             made: Instant::now(),
         });
         drop(selections);
@@ -457,19 +481,24 @@ impl Files {
         .await
     }
 
-    /// Reads a text file for a preview.
-    pub(crate) async fn text(&self, path: PathBuf) -> Result<Text, FilesError> {
+    /// Reads a text file for a preview, or with `edit` to edit, which reads more of it.
+    pub(crate) async fn text(&self, path: PathBuf, edit: bool) -> Result<Text, FilesError> {
         blocking(move || {
             let (mut file, metadata) = open_regular(&path)?;
             let size = metadata.len();
             let mut bytes = Vec::new();
+            // One byte past the limit tells a file cut short from one exactly as long.
+            let limit = if edit { MAX_EDIT_BYTES } else { MAX_TEXT_BYTES };
             Read::by_ref(&mut file)
-                .take(MAX_TEXT_BYTES)
+                .take(limit + 1)
                 .read_to_end(&mut bytes)
                 .map_err(|error| FilesError::io(error, &shown(&path)))?;
-            let truncated = size > bytes.len() as u64;
+            let truncated = bytes.len() as u64 > limit;
+            bytes.truncate(usize::try_from(limit).unwrap_or(usize::MAX));
             let sniffed = bytes.get(..SNIFF_BYTES).unwrap_or(&bytes);
             let binary = sniffed.contains(&0);
+            let version = (!truncated && !binary).then(|| version_of(&bytes));
+            let modified = modified(&metadata);
             let text = if binary {
                 String::new()
             } else {
@@ -488,6 +517,8 @@ impl Files {
                                 size,
                                 truncated,
                                 binary: true,
+                                version: None,
+                                modified,
                             });
                         }
                     }
@@ -498,6 +529,93 @@ impl Files {
                 size,
                 truncated,
                 binary,
+                version,
+                modified,
+            })
+        })
+        .await
+    }
+
+    /// Saves `text` as the file `path`: over the file only if it still holds what `version` says
+    /// it did when it was read, and with no `version` as a new file, never over anything. A
+    /// symlink's target is saved, not the link. It lands whole or not at all, written aside and
+    /// renamed into place with the file's mode, unless that would part it from other names it has
+    /// or change its owner: then it is written in place.
+    pub(crate) async fn save_text(
+        &self,
+        path: PathBuf,
+        text: String,
+        version: Option<String>,
+    ) -> Result<Saved, FilesError> {
+        if text.len() as u64 > MAX_EDIT_BYTES {
+            return Err(FilesError::BadPath(format!(
+                "a file saved here is at most {} MiB",
+                MAX_EDIT_BYTES / 1024 / 1024
+            )));
+        }
+        blocking(move || {
+            let path = match std::fs::symlink_metadata(&path) {
+                Ok(metadata) if metadata.file_type().is_symlink() => {
+                    std::fs::canonicalize(&path)
+                        .map_err(|error| FilesError::io(error, &shown(&path)))?
+                }
+                _ => path,
+            };
+            let (parent, name) = split(&path)?;
+            let name = check_name(name)?;
+            let folder = open_folder(parent)?;
+            let bytes = text.as_bytes();
+            match (folder.stat(name), version) {
+                (Err(error), version) if error.kind() == std::io::ErrorKind::NotFound => {
+                    if version.is_some() {
+                        return Err(FilesError::NotFound(shown(&path)));
+                    }
+                    if !write_aside(&folder, name, bytes, None, &shown(&path))? {
+                        return Err(FilesError::Refused(format!(
+                            "mekaweb is not allowed to make a file in {}",
+                            shown(parent)
+                        )));
+                    }
+                }
+                (Err(error), _) => return Err(FilesError::io(error, &shown(&path))),
+                (Ok(_), None) => return Err(FilesError::Exists(shown(&path))),
+                (Ok(stat), Some(version)) => {
+                    if stat.kind != Kind::File {
+                        return Err(FilesError::BadPath(format!(
+                            "{} is not a file",
+                            shown(&path)
+                        )));
+                    }
+                    let file = folder
+                        .open_file(name, false)
+                        .map_err(|error| FilesError::io(error, &shown(&path)))?;
+                    let read = file
+                        .metadata()
+                        .map_err(|error| FilesError::io(error, &shown(&path)))?;
+                    // One grown past what is read to edit has no version to match, so it is not
+                    // read through to tell.
+                    if !read.is_file()
+                        || read.len() > MAX_EDIT_BYTES
+                        || version_of_file(&file)? != version
+                    {
+                        return Err(FilesError::Changed(shown(&path)));
+                    }
+                    drop(file);
+                    // Where no new file can be made beside it, it is written over as it is.
+                    if folder.writes_in_place(&read)
+                        || !write_aside(&folder, name, bytes, Some(&read), &shown(&path))?
+                    {
+                        write_in_place(&folder, name, bytes, &read, &shown(&path))?;
+                    }
+                }
+            }
+            let stat = folder
+                .stat(name)
+                .map_err(|error| FilesError::io(error, &shown(&path)))?;
+            Ok(Saved {
+                version: version_of(bytes),
+                size: stat.size,
+                modified: stat.modified,
             })
         })
         .await
@@ -828,6 +946,143 @@ impl Files {
         }
         Ok(())
     }
+}
+
+/// What a file holds, as its version: SHA-256 of `bytes`.
+fn version_of(bytes: &[u8]) -> String {
+    crate::auth::sha256_hex(bytes)
+}
+
+/// What the open `file` holds, as its version, read from where it stands.
+fn version_of_file(mut file: &File) -> Result<String, FilesError> {
+    use sha2::Digest;
+    let mut hasher = sha2::Sha256::new();
+    let mut buffer = vec![0_u8; 64 * 1024];
+    loop {
+        let read = file
+            .read(&mut buffer)
+            .map_err(|error| FilesError::io(error, "the file"))?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(buffer.get(..read).unwrap_or_default());
+    }
+    Ok(hasher
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect())
+}
+
+/// Writes `bytes` to a hidden file in `folder`, then renames it to `name`: over the file `over`
+/// describes, if given, taking its mode, as long as it is still that file as it was; else, never
+/// over anything, with the mode new files get. What fails leaves nothing; false where the folder
+/// takes no new file. `shown` names the file in errors.
+fn write_aside(
+    folder: &Folder,
+    name: &OsStr,
+    bytes: &[u8],
+    over: Option<&Metadata>,
+    shown: &str,
+) -> Result<bool, FilesError> {
+    let temp = OsString::from(format!("{UPLOAD_PREFIX}{}", Uuid::new_v4()));
+    let file = match folder.create_new(&temp) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => return Ok(false),
+        Err(error) => return Err(FilesError::io(error, shown)),
+    };
+    let replace = over.is_some();
+    let written = folder::write_all_at(&file, bytes, 0)
+        .and_then(|()| file.sync_all())
+        .and_then(|()| folder.give_mode(&file, name, replace))
+        .map_err(|error| FilesError::io(error, shown));
+    // Closed first: Windows renames no file held open.
+    drop(file);
+    // Changed since it was read, it is not written over.
+    let unchanged = || {
+        let Some(read) = over else {
+            return Ok(());
+        };
+        let now = folder
+            .open_file(name, false)
+            .and_then(|file| file.metadata())
+            .map_err(|error| FilesError::io(error, shown))?;
+        if folder::same_file(read, &now) {
+            Ok(())
+        } else {
+            Err(FilesError::Changed(shown.to_owned()))
+        }
+    };
+    let moved = written.and_then(|()| unchanged()).and_then(|()| {
+        folder
+            .rename(&temp, folder, name, replace)
+            .map_err(|error| match error.kind() {
+                std::io::ErrorKind::AlreadyExists => FilesError::Exists(shown.to_owned()),
+                _ => FilesError::io(error, shown),
+            })
+    });
+    if let Err(error) = moved {
+        if let Err(error) = folder.remove_file(&temp) {
+            tracing::warn!("could not remove a file left from saving {shown}: {error}");
+        }
+        return Err(error);
+    }
+    Ok(true)
+}
+
+/// Writes `bytes` over the file `name` in `folder`, as it is, if it is still the file `read`
+/// describes as it was. `shown` names it in errors.
+fn write_in_place(
+    folder: &Folder,
+    name: &OsStr,
+    bytes: &[u8],
+    read: &Metadata,
+    shown: &str,
+) -> Result<(), FilesError> {
+    let io = |error| FilesError::io(error, shown);
+    let file = folder.open_file(name, true).map_err(io)?;
+    if !folder::same_file(read, &file.metadata().map_err(io)?) {
+        return Err(FilesError::Changed(shown.to_owned()));
+    }
+    folder::write_all_at(&file, bytes, 0).map_err(io)?;
+    file.set_len(bytes.len() as u64).map_err(io)?;
+    file.sync_all().map_err(io)
+}
+
+/// The folder all of `paths` are in, and each one's names below it, as text.
+fn common_folder(paths: &[PathBuf]) -> Result<(PathBuf, Vec<Vec<String>>), FilesError> {
+    let Some(first) = paths.first() else {
+        return Err(FilesError::BadPath(
+            "choose something to download".to_owned(),
+        ));
+    };
+    let mut folder = split(first)?.0.to_path_buf();
+    for path in paths {
+        let (parent, _) = split(path)?;
+        while !parent.starts_with(&folder) {
+            if !folder.pop() {
+                return Err(FilesError::BadPath(
+                    "what is chosen has no folder in common".to_owned(),
+                ));
+            }
+        }
+    }
+    let chosen = paths
+        .iter()
+        .map(|path| {
+            path.strip_prefix(&folder)
+                .unwrap_or(path)
+                .components()
+                .map(|part| {
+                    part.as_os_str()
+                        .to_str()
+                        .map(str::to_owned)
+                        .ok_or_else(|| FilesError::BadPath("a name must be valid text".to_owned()))
+                })
+                .collect::<Result<Vec<_>, _>>()
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok((folder, chosen))
 }
 
 /// Runs blocking file system work off the async runtime.
@@ -1186,14 +1441,127 @@ mod tests {
         std::fs::write(dir.path().join("a.txt"), "hello").unwrap();
         std::fs::write(dir.path().join("b.bin"), [0_u8, 1, 2]).unwrap();
         let files = files();
-        let text = files.text(dir.path().join("a.txt")).await.unwrap();
+        let text = files.text(dir.path().join("a.txt"), false).await.unwrap();
         assert_eq!(text.text, "hello");
         assert!(!text.binary);
-        assert!(files.text(dir.path().join("b.bin")).await.unwrap().binary);
+        assert_eq!(text.version.as_deref(), Some(version_of(b"hello").as_str()));
+        let binary = files.text(dir.path().join("b.bin"), false).await.unwrap();
+        assert!(binary.binary);
+        assert_eq!(binary.version, None);
         assert!(matches!(
-            files.text(dir.path().to_path_buf()).await,
+            files.text(dir.path().to_path_buf(), false).await,
             Err(FilesError::BadPath(_))
         ));
+        let long = "x".repeat(usize::try_from(MAX_TEXT_BYTES).unwrap() + 1);
+        std::fs::write(dir.path().join("long.txt"), &long).unwrap();
+        let preview = files
+            .text(dir.path().join("long.txt"), false)
+            .await
+            .unwrap();
+        assert!(preview.truncated);
+        assert_eq!(
+            preview.version, None,
+            "a file cut short is not to be saved over"
+        );
+        let edited = files.text(dir.path().join("long.txt"), true).await.unwrap();
+        assert!(!edited.truncated, "more is read to edit");
+        assert_eq!(edited.text, long);
+        assert!(edited.version.is_some());
+    }
+
+    #[tokio::test]
+    async fn text_is_saved_over_only_what_was_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("notes.md");
+        std::fs::write(&path, "one").unwrap();
+        let files = files();
+        let read = files.text(path.clone(), true).await.unwrap();
+        let saved = files
+            .save_text(path.clone(), "two".to_owned(), read.version.clone())
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "two");
+        assert_eq!(saved.version, version_of(b"two"));
+        assert_eq!(saved.size, 3);
+        assert!(
+            matches!(
+                files
+                    .save_text(path.clone(), "three".to_owned(), read.version)
+                    .await,
+                Err(FilesError::Changed(_))
+            ),
+            "a save from before the last one is refused"
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "two");
+        assert!(matches!(
+            files.save_text(path.clone(), "new".to_owned(), None).await,
+            Err(FilesError::Exists(_))
+        ));
+        files
+            .save_text(dir.path().join("made.txt"), "made".to_owned(), None)
+            .await
+            .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("made.txt")).unwrap(),
+            "made"
+        );
+        std::fs::remove_file(&path).unwrap();
+        assert!(matches!(
+            files
+                .save_text(path.clone(), "back".to_owned(), Some(saved.version))
+                .await,
+            Err(FilesError::NotFound(_))
+        ));
+        let names: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        assert_eq!(names, ["made.txt"], "nothing is left from saving");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_save_keeps_the_mode_and_writes_through_links() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("run.sh");
+        std::fs::write(&path, "echo one").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o750)).unwrap();
+        let files = files();
+        let version = |text: &str| Some(version_of(text.as_bytes()));
+        files
+            .save_text(path.clone(), "echo two".to_owned(), version("echo one"))
+            .await
+            .unwrap();
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o750
+        );
+        let link = dir.path().join("link.sh");
+        std::os::unix::fs::symlink(&path, &link).unwrap();
+        files
+            .save_text(link.clone(), "echo three".to_owned(), version("echo two"))
+            .await
+            .unwrap();
+        assert!(
+            std::fs::symlink_metadata(&link)
+                .unwrap()
+                .file_type()
+                .is_symlink(),
+            "the link stays a link"
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "echo three");
+        let other = dir.path().join("other.sh");
+        std::fs::hard_link(&path, &other).unwrap();
+        files
+            .save_text(path.clone(), "echo".to_owned(), version("echo three"))
+            .await
+            .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&other).unwrap(),
+            "echo",
+            "a file with other names is written in place, keeping them"
+        );
     }
 
     #[tokio::test]
@@ -1375,7 +1743,7 @@ mod tests {
         make_pipe(&pipe);
         let files = files();
         let wait = Duration::from_secs(5);
-        let text = tokio::time::timeout(wait, files.text(pipe.clone())).await;
+        let text = tokio::time::timeout(wait, files.text(pipe.clone(), false)).await;
         assert!(matches!(text, Ok(Err(FilesError::BadPath(_)))), "{text:?}");
         let raw = tokio::time::timeout(wait, files.open_file(pipe)).await;
         assert!(matches!(raw, Ok(Err(FilesError::BadPath(_)))));

@@ -1,12 +1,20 @@
 import { useRef, useState } from 'react';
-import { FILES_WIDTH } from '../connections/storage';
+import { CONVERSATION_COLUMN, PANEL_WIDTH } from '../connections/storage';
+import { LIST_WIDTH, type WorkspaceSide } from '../features/workspace-layout';
 
-const LABELS = {
-  sessions: 'Resize session list',
-  files: 'Resize Files',
-  details: 'Resize session details',
+const SIDES = {
+  sessions: { label: 'Resize session list', controls: 'session-list', initial: LIST_WIDTH.default },
+  panel: {
+    label: 'Resize the side panel',
+    controls: 'session-panel',
+    initial: PANEL_WIDTH.default,
+  },
+  conversation: {
+    label: 'Resize the conversation',
+    controls: 'session-main',
+    initial: CONVERSATION_COLUMN.default,
+  },
 } as const;
-const DEFAULTS = { sessions: 236, files: FILES_WIDTH.default, details: 360 } as const;
 
 export function PanelResizeHandle({
   side,
@@ -17,7 +25,7 @@ export function PanelResizeHandle({
   onCommit,
   onCancel,
 }: {
-  side: 'sessions' | 'files' | 'details';
+  side: WorkspaceSide;
   value: number;
   min: number;
   max: number;
@@ -27,16 +35,17 @@ export function PanelResizeHandle({
 }) {
   const drag = useRef<{ x: number; width: number; current: number } | null>(null);
   const [dragging, setDragging] = useState(false);
-  const direction = side === 'sessions' ? 1 : -1;
+  // The list and the conversation grow to the right, from their left edge; the panel to the left.
+  const direction = side === 'panel' ? -1 : 1;
   const clamp = (width: number) => Math.round(Math.min(max, Math.max(min, width)));
   return (
     <div
       className={`panel-resize-handle resize-${side}`}
       role="separator"
       tabIndex={0}
-      aria-label={LABELS[side]}
+      aria-label={SIDES[side].label}
       aria-orientation="vertical"
-      aria-controls={`session-${side === 'sessions' ? 'list' : side}`}
+      aria-controls={SIDES[side].controls}
       aria-valuemin={min}
       aria-valuemax={max}
       aria-valuenow={value}
@@ -96,7 +105,7 @@ export function PanelResizeHandle({
           onCommit(clamp(width));
         }
       }}
-      onDoubleClick={() => onCommit(clamp(DEFAULTS[side]))}
+      onDoubleClick={() => onCommit(clamp(SIDES[side].initial))}
     />
   );
 }

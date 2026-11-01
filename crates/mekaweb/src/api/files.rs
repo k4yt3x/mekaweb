@@ -2,9 +2,9 @@
 //! running any of it: everything is sandboxed and unsniffed, and only types a browser shows
 //! without running anything (pictures, sound, video, PDFs, plain text) are shown in place rather
 //! than downloaded. HTML and SVG in particular never run on mekaweb's address, where a script
-//! would reach the terminal. `/api/files/watch` tells of changes to a folder as they happen.
+//! would reach the terminal. `/api/files/watch` tells of changes to folders as they happen.
 
-use std::{convert::Infallible, time::Duration};
+use std::{collections::HashSet, convert::Infallible, time::Duration};
 
 use axum::{
     Json,
@@ -27,8 +27,8 @@ use crate::{
     auth::Signed,
     error::{ApiError, ApiResult},
     files::{
-        Entry, FilesError, Listing, Range, Text, UploadView, parse_range, range_reader, resolve,
-        watch::Watching,
+        Entry, FilesError, Listing, Range, Saved, Text, UploadView, parse_range, range_reader,
+        resolve, watch::Watching,
     },
 };
 
@@ -42,6 +42,9 @@ const SPACING: Duration = Duration::from_secs(1);
 
 /// How often an idle change stream sends a comment, so proxies keep it open.
 const KEEP_ALIVE: Duration = Duration::from_secs(25);
+
+/// The most folders one change stream follows.
+const MAX_WATCHED: usize = 64;
 
 /// What a raw file is sent with when it is shown in place: content types a browser displays
 /// without running anything.
@@ -72,13 +75,36 @@ pub(crate) struct ZipQuery {
     pub(crate) selection: Option<String>,
 }
 
-/// Entries chosen in a folder, to download as one zip.
+/// Entries chosen, to download as one zip under the folder they are all in.
 #[derive(Debug, Deserialize, ToSchema)]
 pub(crate) struct NewSelection {
-    /// The folder they are in.
+    pub(crate) paths: Vec<String>,
+}
+
+/// Folders to follow for changes.
+#[derive(Debug, Deserialize, ToSchema)]
+pub(crate) struct Watch {
+    /// Each folder, at most 64, as the events name it.
+    pub(crate) paths: Vec<String>,
+}
+
+/// A text file to read, to preview or to edit.
+#[derive(Debug, Deserialize, IntoParams)]
+pub(crate) struct TextQuery {
     pub(crate) path: String,
-    /// Their names in it.
-    pub(crate) names: Vec<String>,
+    /// Read up to 10 MiB, to edit, rather than 2 MiB.
+    #[serde(default)]
+    pub(crate) edit: bool,
+}
+
+/// Text to save as a file.
+#[derive(Debug, Deserialize, ToSchema)]
+pub(crate) struct SaveText {
+    pub(crate) path: String,
+    pub(crate) text: String,
+    /// The version the file was read at, which it must still be at; none to make a new file,
+    /// never over anything there.
+    pub(crate) version: Option<String>,
 }
 
 /// The id a selection's zip downloads by.
@@ -174,27 +200,71 @@ pub(crate) async fn list(
     Ok(Json(app.files.list(path(&query.path)?).await?))
 }
 
-/// Changes to a folder, as an event stream: a `change` event whenever what it holds may have
-/// changed, at most about once a second, after which it is to be listed again. Events missed while
-/// the stream was not open are not told, so a folder is listed again on reconnecting.
+/// Changes to folders, as an event stream: a `change` event, its data the folder as asked for,
+/// whenever what that holds may have changed, at most about once a second for each, after which it
+/// is to be listed again. A folder that is not there, or goes away, is told of by a `gone` event,
+/// and one that cannot be watched, or is no path, by an `unwatched` event; the others are followed
+/// on. Events missed while the stream was not open are not told, so the folders are listed again on
+/// reconnecting. One stream follows many folders: a browser holds few connections to a server.
 #[utoipa::path(
-    get,
+    post,
     path = "/api/files/watch",
     tag = "files",
-    params(Location),
-    responses((status = 200, description = "`change` events", content_type = "text/event-stream"), (status = 404, body = crate::error::Problem), (status = 400, body = crate::error::Problem), (status = 403, body = crate::error::Problem))
+    request_body = Watch,
+    responses((status = 200, description = "`change`, `gone` and `unwatched` events", content_type = "text/event-stream"), (status = 400, body = crate::error::Problem), (status = 403, body = crate::error::Problem))
 )]
 pub(crate) async fn watch(
     State(app): State<App>,
     signed: Signed,
-    Query(query): Query<Location>,
+    Json(body): Json<Watch>,
 ) -> ApiResult<Response> {
-    let mut watching = app.files.watch(path(&query.path)?).await?;
-    let (sender, receiver) = mpsc::channel::<Result<Event, Infallible>>(4);
+    if body.paths.len() > MAX_WATCHED {
+        return Err(
+            FilesError::BadPath(format!("follow at most {MAX_WATCHED} folders at once")).into(),
+        );
+    }
+    let mut seen = HashSet::new();
+    let mut followed = Vec::new();
+    let mut told = Vec::new();
+    for asked in body.paths {
+        if !seen.insert(asked.clone()) {
+            continue;
+        }
+        // One that is no path the others are followed beside, as one that cannot be watched.
+        let watching = match resolve(&asked) {
+            Ok(resolved) => app.files.watch(resolved).await,
+            Err(error) => Err(error),
+        };
+        match watching {
+            Ok(watching) => followed.push((asked, watching)),
+            Err(FilesError::NotFound(_)) => told.push(Event::default().event("gone").data(asked)),
+            Err(error) => {
+                tracing::debug!("could not watch {asked}: {error}");
+                told.push(Event::default().event("unwatched").data(asked));
+            }
+        }
+    }
+    let (sender, receiver) = mpsc::channel::<Result<Event, Infallible>>(16);
     let device = signed.session.id;
     tokio::spawn(async move {
+        for event in told {
+            if sender.send(Ok(event)).await.is_err() {
+                return;
+            }
+        }
+        let mut streams = tokio::task::JoinSet::new();
+        for (asked, mut watching) in followed {
+            let sender = sender.clone();
+            streams.spawn(async move { tell_changes(&asked, &mut watching, &sender).await });
+        }
+        // Each folder's stream is stopped with the rest, however quiet it is. With none left to
+        // follow, the stream stays open until it is let go of, as its folders are tried again
+        // by opening another.
         tokio::select! {
-            () = tell_changes(&mut watching, &sender) => {}
+            () = async {
+                while streams.join_next().await.is_some() {}
+                std::future::pending::<()>().await;
+            } => {}
             () = app.auth.until_ended(&device) => {}
             () = sender.closed() => {}
         }
@@ -205,15 +275,26 @@ pub(crate) async fn watch(
     Ok(([("x-accel-buffering", "no")], stream).into_response())
 }
 
-/// Sends a `change` event for each burst of changes to the folder `watching` follows.
-async fn tell_changes(watching: &mut Watching, sender: &mpsc::Sender<Result<Event, Infallible>>) {
+/// Sends a `change` event for each burst of changes to the folder `watching` follows, named
+/// `asked`, and a `gone` event when it goes away.
+async fn tell_changes(
+    asked: &str,
+    watching: &mut Watching,
+    sender: &mpsc::Sender<Result<Event, Infallible>>,
+) {
     loop {
         if watching.changes.changed().await.is_err() {
+            if let Err(error) = sender
+                .send(Ok(Event::default().event("gone").data(asked)))
+                .await
+            {
+                tracing::debug!("a change stream was gone already: {error}");
+            }
             return;
         }
         tokio::time::sleep(GATHER).await;
         watching.changes.mark_unchanged();
-        let change = Event::default().event("change").data("");
+        let change = Event::default().event("change").data(asked);
         if sender.send(Ok(change)).await.is_err() {
             return;
         }
@@ -225,15 +306,37 @@ async fn tell_changes(watching: &mut Watching, sender: &mpsc::Sender<Result<Even
     get,
     path = "/api/files/text",
     tag = "files",
-    params(Location),
+    params(TextQuery),
     responses((status = 200, body = Text), (status = 404, body = crate::error::Problem), (status = 400, body = crate::error::Problem), (status = 403, body = crate::error::Problem))
 )]
 pub(crate) async fn text(
     State(app): State<App>,
     _signed: Signed,
-    Query(query): Query<Location>,
+    Query(query): Query<TextQuery>,
 ) -> ApiResult<Json<Text>> {
-    Ok(Json(app.files.text(path(&query.path)?).await?))
+    Ok(Json(app.files.text(path(&query.path)?, query.edit).await?))
+}
+
+/// Saves text as a file: over it only if it is still at the `version` it was read at, or as a new
+/// file. One changed since is refused with 409 and the problem type `changed`; one deleted since,
+/// with 404.
+#[utoipa::path(
+    put,
+    path = "/api/files/text",
+    tag = "files",
+    request_body = SaveText,
+    responses((status = 200, body = Saved), (status = 409, body = crate::error::Problem), (status = 404, body = crate::error::Problem), (status = 400, body = crate::error::Problem), (status = 403, body = crate::error::Problem))
+)]
+pub(crate) async fn save_text(
+    State(app): State<App>,
+    _signed: Signed,
+    Json(body): Json<SaveText>,
+) -> ApiResult<Json<Saved>> {
+    Ok(Json(
+        app.files
+            .save_text(path(&body.path)?, body.text, body.version)
+            .await?,
+    ))
 }
 
 #[utoipa::path(
@@ -441,7 +544,7 @@ pub(crate) async fn zip(
     let (folder, only) = match (query.selection, query.path) {
         (Some(id), _) => {
             let selection = app.files.selection(&id)?;
-            (selection.folder, Some(selection.names))
+            (selection.folder, Some(selection.chosen))
         }
         (None, Some(folder)) => (path(&folder)?, None),
         (None, None) => {
@@ -472,8 +575,9 @@ pub(crate) async fn zip(
     Ok(response)
 }
 
-/// Keeps entries chosen in a folder for a zip of them, which `GET /api/files/zip` then downloads
-/// by the id given: their names would make too long an address.
+/// Keeps entries chosen for a zip of them, under the folder they are all in, which
+/// `GET /api/files/zip` then downloads by the id given: their names would make too long an
+/// address.
 #[utoipa::path(
     post,
     path = "/api/files/zip/selection",
@@ -486,8 +590,12 @@ pub(crate) async fn select_for_zip(
     _signed: Signed,
     Json(body): Json<NewSelection>,
 ) -> ApiResult<Json<SelectionMade>> {
-    let folder = path(&body.path)?;
-    let id = app.files.select(folder, body.names)?;
+    let paths = body
+        .paths
+        .iter()
+        .map(|asked| path(asked))
+        .collect::<Result<Vec<_>, _>>()?;
+    let id = app.files.select(&paths)?;
     Ok(Json(SelectionMade { id }))
 }
 

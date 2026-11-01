@@ -1,22 +1,15 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { CopyButton, WrapButton } from './common';
 import { Maximize2 } from 'lucide-react';
 import { scrollRegion } from './scrolling';
 import { MediaDialog } from './media-viewer';
 import type { Size } from './media-viewport';
-
-function subscribeTheme(listener: () => void) {
-  const observer = new MutationObserver(listener);
-  observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
-  return () => observer.disconnect();
-}
+import { useDarkTheme } from './theme';
 export function Diagram({ source }: { source: string }) {
   const preview = useRef<HTMLButtonElement>(null);
   const [expanded, setExpanded] = useState(false);
   const [wrap, setWrap] = useState(false);
-  const dark = useSyncExternalStore(subscribeTheme, () =>
-    document.documentElement.classList.contains('dark'),
-  );
+  const dark = useDarkTheme();
   const [result, setResult] = useState<{
     source: string;
     dark: boolean;

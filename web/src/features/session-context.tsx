@@ -1,5 +1,45 @@
 import type { Schema } from '../api/client';
-import { contextMetrics } from '../session/usage';
+import { useSessionContext } from '../session/hooks';
+import { contextMetrics, contextNear } from '../session/usage';
+import { Button } from '../components/ui/button';
+import { useWorkspace } from '../components/workspace';
+
+/** How full the session's context is, in the message box; it opens the context's details. */
+export function ContextMeter({ session }: { session: string }) {
+  const workspace = useWorkspace();
+  const context = useSessionContext(session, { follow: true });
+  const used = context.data ? contextMetrics(context.data).usedPercent : null;
+  if (!context.data || used == null) return null;
+  const compactAt = context.data.compact_at_percent;
+  const title = `${used}% of context used · ${compactAt != null ? `compacts at ${compactAt}%` : 'auto-compact off'}`;
+  // The ring's length is its circumference, so a dash of `filled` out of it fills that share.
+  const filled = (Math.min(100, Math.max(0, used)) / 100) * RING;
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      className="context-meter"
+      data-near={contextNear(used, compactAt) || undefined}
+      aria-label={title}
+      title={title}
+      onClick={() => workspace?.showContext()}
+    >
+      <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true">
+        <circle className="context-meter-track" cx="10" cy="10" r="8" />
+        <circle
+          className="context-meter-fill"
+          cx="10"
+          cy="10"
+          r="8"
+          strokeDasharray={`${filled} ${RING}`}
+        />
+      </svg>
+      <span>{used}%</span>
+    </Button>
+  );
+}
+
+const RING = 2 * Math.PI * 8;
 
 export function SessionContext({ context }: { context: Schema['ContextResponse'] }) {
   const metrics = contextMetrics(context);

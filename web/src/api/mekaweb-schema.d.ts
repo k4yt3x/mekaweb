@@ -332,7 +332,12 @@ export interface paths {
       cookie?: never;
     };
     get: operations['text'];
-    put?: never;
+    /**
+     * Saves text as a file: over it only if it is still at the `version` it was read at, or as a new
+     *     file. One changed since is refused with 409 and the problem type `changed`; one deleted since,
+     *     with 404.
+     */
+    put: operations['save_text'];
     post?: never;
     delete?: never;
     options?: never;
@@ -395,14 +400,17 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /**
-     * Changes to a folder, as an event stream: a `change` event whenever what it holds may have
-     *     changed, at most about once a second, after which it is to be listed again. Events missed while
-     *     the stream was not open are not told, so a folder is listed again on reconnecting.
-     */
-    get: operations['watch'];
+    get?: never;
     put?: never;
-    post?: never;
+    /**
+     * Changes to folders, as an event stream: a `change` event, its data the folder as asked for,
+     *     whenever what that holds may have changed, at most about once a second for each, after which it
+     *     is to be listed again. A folder that is not there, or goes away, is told of by a `gone` event,
+     *     and one that cannot be watched, or is no path, by an `unwatched` event; the others are followed
+     *     on. Events missed while the stream was not open are not told, so the folders are listed again on
+     *     reconnecting. One stream follows many folders: a browser holds few connections to a server.
+     */
+    post: operations['watch'];
     delete?: never;
     options?: never;
     head?: never;
@@ -435,8 +443,9 @@ export interface paths {
     get?: never;
     put?: never;
     /**
-     * Keeps entries chosen in a folder for a zip of them, which `GET /api/files/zip` then downloads
-     *     by the id given: their names would make too long an address.
+     * Keeps entries chosen for a zip of them, under the folder they are all in, which
+     *     `GET /api/files/zip` then downloads by the id given: their names would make too long an
+     *     address.
      */
     post: operations['select_for_zip'];
     delete?: never;
@@ -699,12 +708,9 @@ export interface components {
       current: string;
       password: string;
     };
-    /** @description Entries chosen in a folder, to download as one zip. */
+    /** @description Entries chosen, to download as one zip under the folder they are all in. */
     NewSelection: {
-      /** @description Their names in it. */
-      names: string[];
-      /** @description The folder they are in. */
-      path: string;
+      paths: string[];
     };
     /** @description A terminal to open. */
     NewTerminal: {
@@ -714,10 +720,7 @@ export interface components {
       cwd?: string | null;
       /** Format: int32 */
       rows?: number;
-      /**
-       * @description The meka session it belongs to, if any: it is found by it, and closes with it. A session
-       *     whose terminal is open gets that one.
-       */
+      /** @description The meka session it belongs to, if any: it is found by it, and closes with it. */
       session?: string | null;
     };
     /** @description An upload to start. */
@@ -794,6 +797,25 @@ export interface components {
     Rename: {
       /** @description The name; empty goes back to the default. */
       name: string;
+    };
+    /** @description Text to save as a file. */
+    SaveText: {
+      path: string;
+      text: string;
+      /**
+       * @description The version the file was read at, which it must still be at; none to make a new file,
+       *     never over anything there.
+       */
+      version?: string | null;
+    };
+    /** @description A text file as saved. */
+    Saved: {
+      /** Format: date-time */
+      modified?: string | null;
+      /** Format: int64 */
+      size: number;
+      /** @description What it holds now, to save over it next. */
+      version: string;
     };
     /** @description The id a selection's zip downloads by. */
     SelectionMade: {
@@ -872,10 +894,12 @@ export interface components {
       /** @description The meka session it belongs to, if any. */
       session?: string | null;
     };
-    /** @description A text file's contents, for a preview. */
+    /** @description A text file's contents, for a preview or to edit. */
     Text: {
       /** @description Whether the file looks binary, in which case `text` is empty. */
       binary: boolean;
+      /** Format: date-time */
+      modified?: string | null;
       /**
        * Format: int64
        * @description The file's size.
@@ -884,6 +908,8 @@ export interface components {
       text: string;
       /** @description Whether the file is longer than what was read. */
       truncated: boolean;
+      /** @description What the file held, to save over it only as it was: none for one cut short or binary. */
+      version?: string | null;
     };
     /** @description An upload's state. */
     UploadView: {
@@ -910,6 +936,11 @@ export interface components {
       minimum: string;
       /** @description The versions it was checked against. */
       verified: string[];
+    };
+    /** @description Folders to follow for changes. */
+    Watch: {
+      /** @description Each folder, at most 64, as the events name it. */
+      paths: string[];
     };
   };
   responses: never;
@@ -1721,6 +1752,8 @@ export interface operations {
     parameters: {
       query: {
         path: string;
+        /** @description Read up to 10 MiB, to edit, rather than 2 MiB. */
+        edit?: boolean;
       };
       header?: never;
       path?: never;
@@ -1753,6 +1786,61 @@ export interface operations {
         };
       };
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  save_text: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['SaveText'];
+      };
+    };
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Saved'];
+        };
+      };
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Problem'];
+        };
+      };
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Problem'];
+        };
+      };
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Problem'];
+        };
+      };
+      409: {
         headers: {
           [name: string]: unknown;
         };
@@ -1917,16 +2005,18 @@ export interface operations {
   };
   watch: {
     parameters: {
-      query: {
-        path: string;
-      };
+      query?: never;
       header?: never;
       path?: never;
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['Watch'];
+      };
+    };
     responses: {
-      /** @description `change` events */
+      /** @description `change`, `gone` and `unwatched` events */
       200: {
         headers: {
           [name: string]: unknown;
@@ -1944,14 +2034,6 @@ export interface operations {
         };
       };
       403: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['Problem'];
-        };
-      };
-      404: {
         headers: {
           [name: string]: unknown;
         };

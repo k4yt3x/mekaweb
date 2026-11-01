@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.33.0] - 2026-11-01
+
+### Added
+
+- Buttons down a session's right edge open Files, Context, Tasks or Schedules, one at a time.
+- A ring beside Send shows how full the session's context is, and opens Context.
+- An editor opens files from Files beside the conversation: Monaco, or CodeMirror on touch screens.
+- The editor follows changes on disk, and never saves over a newer file without asking.
+
+### Changed
+
+- Files shows a tree with Material icons: folders open in place, drag to move, rename in place.
+- Terminals open as tabs in the editor, several per session; Files can open one in any folder.
+- A session's heading is thinner, and runs above the editor, the side panel and their buttons.
+
 ## [0.32.0] - 2026-10-31
 
 ### Added
@@ -600,7 +615,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Light and dark themes, narrow layouts, and collapsible, resizable session panels.
 - Hosting at the root or a subpath, with GitHub Pages deployment on version tags.
 
-[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.32.0...HEAD
+[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.33.0...HEAD
+[0.33.0]: https://github.com/k4yt3x/mekaweb/compare/0.32.0...0.33.0
 [0.32.0]: https://github.com/k4yt3x/mekaweb/compare/0.31.0...0.32.0
 [0.31.0]: https://github.com/k4yt3x/mekaweb/compare/0.30.0...0.31.0
 [0.30.0]: https://github.com/k4yt3x/mekaweb/compare/0.29.0...0.30.0

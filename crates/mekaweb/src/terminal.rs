@@ -131,15 +131,6 @@ impl Terminal {
             .unwrap_or_else(std::sync::PoisonError::into_inner) = (Instant::now(), Utc::now());
     }
 
-    /// Whether the shell has ended.
-    fn has_ended(&self) -> bool {
-        self.screen
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .exited
-            .is_some()
-    }
-
     fn view(&self) -> TerminalView {
         let (cols, rows) = *self
             .size
@@ -275,8 +266,8 @@ impl Terminals {
         views
     }
 
-    /// Opens a shell in `cwd`, `cols` by `rows`, for the meka session `session` if any. A session
-    /// has one terminal: while its shell runs, opening another gives that one.
+    /// Opens a shell in `cwd`, `cols` by `rows`, for the meka session `session` if any, which may
+    /// have several.
     pub(crate) fn open(
         self: &Arc<Self>,
         cwd: &Path,
@@ -287,15 +278,8 @@ impl Terminals {
         if !self.config.enabled {
             anyhow::bail!("terminals are turned off in the config");
         }
-        // Held until the terminal is in, so two opening a session's terminal at once get one.
+        // Held until the terminal is in, so two opening at once cannot pass the limit.
         let mut open = self.open_map();
-        if let Some(existing) = session.as_deref().and_then(|session| {
-            open.values().find(|terminal| {
-                terminal.session.as_deref() == Some(session) && !terminal.has_ended()
-            })
-        }) {
-            return Ok(existing.view());
-        }
         if open.len() >= MAX_TERMINALS {
             anyhow::bail!("{MAX_TERMINALS} terminals are open already; close one first");
         }
@@ -596,14 +580,14 @@ mod tests {
             .open(dir.path(), 80, 24, Some("s1".to_owned()))
             .unwrap();
         terminals.open(dir.path(), 80, 24, None).unwrap();
-        let again = terminals
+        let another = terminals
             .open(dir.path(), 80, 24, Some("s1".to_owned()))
             .unwrap();
-        assert_eq!(again.id, mine.id, "a session has one terminal");
+        assert_ne!(another.id, mine.id, "a session may have several terminals");
         let listed = terminals.list(Some("s1"));
-        assert_eq!(listed.len(), 1);
+        assert_eq!(listed.len(), 2);
         assert_eq!(listed[0].id, mine.id);
-        assert_eq!(terminals.list(None).len(), 2);
+        assert_eq!(terminals.list(None).len(), 3);
         terminals.close_session("s1").await;
         assert!(terminals.list(Some("s1")).is_empty());
         assert_eq!(terminals.list(None).len(), 1);

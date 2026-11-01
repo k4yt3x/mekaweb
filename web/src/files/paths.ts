@@ -60,6 +60,23 @@ export function parent(path: string): string {
   return index < 0 ? top : rest.slice(0, index);
 }
 
+/** Whether `path` is `folder`, or within it, both absolute as the server writes them. */
+export function within(path: string, folder: string): boolean {
+  if (path === folder) return true;
+  const top = root(folder);
+  const base = trimmed(folder, top);
+  return (
+    path.length > base.length &&
+    path.startsWith(base) &&
+    (base.length === top.length || separates(path, path[base.length]))
+  );
+}
+
+/** Where `path` is once `from`, it or a folder holding it, moved to `to`; else `path` itself. */
+export function movedTo(path: string, from: string, to: string): string {
+  return within(path, from) ? to + path.slice(from.length) : path;
+}
+
 /** Whether `path` is a root folder, with no folder above it. */
 export function isRoot(path: string): boolean {
   return parent(path) === path;

@@ -167,6 +167,12 @@ impl Folder {
         Ok(())
     }
 
+    /// Whether a file in it is saved over in place rather than replaced by a new one: never on
+    /// Windows, where uploads replace files the same way.
+    pub(crate) const fn writes_in_place(&self, _metadata: &Metadata) -> bool {
+        false
+    }
+
     /// Gives the finished upload `file` its mode, which Windows does not have.
     pub(crate) const fn give_mode(
         &self,
@@ -277,4 +283,12 @@ pub(crate) fn open_regular(path: &Path) -> io::Result<Option<File>> {
     }
     let file = File::open(path)?;
     Ok(file.metadata()?.is_file().then_some(file))
+}
+
+/// Whether `a` and `b` describe the same file as it was: as long, and written and made at the same
+/// times, as one put in its place would not be.
+pub(crate) fn same_file(a: &Metadata, b: &Metadata) -> bool {
+    a.len() == b.len()
+        && a.modified().ok() == b.modified().ok()
+        && a.created().ok() == b.created().ok()
 }
