@@ -6,6 +6,7 @@ import { useAction } from '../components/actions';
 import { ErrorNotice } from '../components/common';
 import { Button } from '../components/ui/button';
 import { SessionDeleteDialog, SessionRenameDialog } from './session-metadata';
+import { editorStore, saveFirst } from '../editor/use-editor';
 import type { SessionStatus } from '../session/unread';
 
 const statusLabels: Record<SessionStatus, string | undefined> = {
@@ -64,6 +65,11 @@ export function SessionListItem({
   const pinAction = useAction();
   const busy = action.busy || pinAction.busy;
   const title = session.title || 'New conversation';
+  // What the row leaves out, its pointer shows, with its state, as pointing swaps that out.
+  const about = [session.profile, session.project, session.parent_id ? 'sub-agent' : undefined]
+    .filter(Boolean)
+    .join(' · ');
+  const tooltip = [title, statusLabels[status], about].filter(Boolean).join('\n');
   const editable = canWrite && !session.parent_id;
   useLayoutEffect(() => {
     if (
@@ -91,8 +97,15 @@ export function SessionListItem({
       row?.closest('.session-list')?.querySelector<HTMLButtonElement>('[aria-label="New session"]');
     void action.run(async () => {
       if (!controller || !canWrite || running) return;
+      // Its files' changes would have nowhere to be saved from.
+      const unsaved = saveFirst(
+        editorStore(runtime).dirtyIn(session.id).length,
+        ' in this session',
+      );
+      if (unsaved) throw new Error(unsaved);
       const deleted = await controller.deleteSession(session.id);
       if (!deleted.length || runtime.getSnapshot().controller !== controller) return;
+      editorStore(runtime).forget(deleted);
       setConfirm(false);
       setRemoved(true);
       if (deleted.some((id) => location.hash === `#/sessions/${encodeURIComponent(id)}`))
@@ -134,7 +147,7 @@ export function SessionListItem({
           className="session-item-link"
           href={`#/sessions/${encodeURIComponent(session.id)}`}
           aria-current={selected ? 'page' : undefined}
-          title={title}
+          title={tooltip}
           onClick={(event) => {
             if (!event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) onOpen();
           }}
@@ -158,27 +171,17 @@ export function SessionListItem({
             >
               {title}
             </strong>
-          </div>
-          {excerpt && <p className="session-excerpt">{excerpt}</p>}
-          <div className="session-item-meta">
-            <span>
-              {session.pinned_at && <Pin size={11} aria-label="Pinned" />}
-              <span
-                className="session-item-profile"
-                title={[session.profile, session.project].filter(Boolean).join(' · ')}
-              >
-                {session.profile}
-                {session.project ? ` · ${session.project}` : ''}
-                {session.parent_id ? ' · sub-agent' : ''}
-              </span>
-            </span>
-            <time dateTime={session.updated_at}>
+            {session.pinned_at && (
+              <Pin className="session-item-pin" size={11} aria-label="Pinned" />
+            )}
+            <time className="session-item-date" dateTime={session.updated_at}>
               {new Date(session.updated_at).toLocaleDateString([], {
                 month: 'short',
                 day: 'numeric',
               })}
             </time>
           </div>
+          {excerpt && <p className="session-excerpt">{excerpt}</p>}
         </a>
         {subagents && (
           <button

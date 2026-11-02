@@ -89,6 +89,13 @@ const models = new Map<
 /** Where each file was scrolled to and its cursor, while another is shown. */
 const views = new Map<string, monaco.editor.ICodeEditorViewState | null>();
 
+/** Notes where the file `path` is in `editor`, which the browser keeps too, for a reload. */
+function noteView(store: EditorStore, path: string, editor: monaco.editor.ICodeEditor) {
+  const view = editor.saveViewState();
+  views.set(path, view);
+  if (view) store.keepView(path, view);
+}
+
 /** Registers the models as the store's documents. */
 function registerDocuments(store: EditorStore) {
   if (store.documents) return;
@@ -288,14 +295,20 @@ export function Surface({
     );
     // Web fonts that load late are measured again, so the cursor sits where the letters are.
     void document.fonts.ready.then(() => monaco.editor.remeasureFonts());
+    // A reload leaves the page without this unmounting.
+    const leave = () => {
+      if (shown.current) noteView(store, shown.current, made);
+    };
+    window.addEventListener('pagehide', leave);
     return () => {
       sized.disconnect();
-      if (shown.current) views.set(shown.current, made.saveViewState());
+      window.removeEventListener('pagehide', leave);
+      leave();
       shown.current = undefined;
       made.dispose();
       editor.current = undefined;
     };
-  }, []);
+  }, [store]);
   // The file shown, its model kept up with what is on disk.
   useLayoutEffect(() => {
     const model = modelFor(store, file);
@@ -304,10 +317,14 @@ export function Surface({
     if (shown.current !== file.path) {
       // Renamed, the file keeps its model, and where it was scrolled to.
       if (made.getModel() !== model) {
-        if (shown.current) views.set(shown.current, made.saveViewState());
+        if (shown.current) noteView(store, shown.current, made);
         made.setModel(model);
-        const view = views.get(file.path);
-        if (view) made.restoreViewState(view);
+        const view = views.get(file.path) ?? store.keptView(file.path);
+        try {
+          if (view) made.restoreViewState(view as monaco.editor.ICodeEditorViewState);
+        } catch {
+          // What the browser kept may be of another Monaco: the file opens at its start.
+        }
       }
       shown.current = file.path;
     }

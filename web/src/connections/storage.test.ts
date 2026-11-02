@@ -166,16 +166,14 @@ it('opens the panel that was open before one showed at a time, at its width', ()
     return new BrowserStorage(local).getSnapshot().layout;
   };
   expect(saved({ filesOpen: true, detailsOpen: true, filesWidth: 520, detailsWidth: 300 })).toEqual(
-    { navigationCollapsed: false, sessionsCollapsed: false, panel: 'files', panelWidth: 520 },
+    { sessionsCollapsed: false, panel: 'files', panelWidth: 520 },
   );
   expect(saved({ detailsOpen: true, detailsWidth: 300, terminalHeight: 400 })).toEqual({
-    navigationCollapsed: false,
     sessionsCollapsed: false,
     panel: 'context',
     panelWidth: 300,
   });
   expect(saved({ panel: 'nowhere' })).toEqual({
-    navigationCollapsed: false,
     sessionsCollapsed: false,
   });
   const adapter = new BrowserStorage(storage());
@@ -230,13 +228,54 @@ it('forgets the account’s drafts and seen sessions, keeping this device’s se
   store.dataSaver(true);
   store.saveDraft('mekaweb', 's1', 'draft');
   store.markSeen('mekaweb', 's1', '2026-10-21T00:00:00Z');
+  store.saveWorkspace('s1', { tabs: ['/a.ts'] });
+  store.saveEditorView('/a.ts', { line: 3 });
   store.forgetAccount();
   const kept = [...Array(local.length).keys()].map((index) => local.key(index));
   expect(kept).toEqual(['mekaweb:v1:settings']);
   expect(new BrowserStorage(local).getSnapshot().dataSaver).toBe(true);
   store.saveDraft('mekaweb', 's1', 'late');
+  store.saveWorkspace('s1', { tabs: ['/late.ts'] });
   expect(local.length).toBe(1);
   store.keepAccount();
   store.saveDraft('mekaweb', 's1', 'kept again');
   expect(store.draft('mekaweb', 's1')?.text).toBe('kept again');
+});
+
+it('keeps what each place has open, checked, the most recent places only', () => {
+  const local = storage();
+  const store = new BrowserStorage(local);
+  store.saveWorkspace('s1', { tabs: ['/a.ts', 'terminal:t1'], active: 'terminal:t1' });
+  store.saveWorkspace('s1', { folder: '/work', open: ['/work/src'] });
+  expect(store.workspace('s1')).toEqual({
+    tabs: ['/a.ts', 'terminal:t1'],
+    active: 'terminal:t1',
+    folder: '/work',
+    open: ['/work/src'],
+  });
+  // The tab shown goes once it is closed, and a place with nothing open is not kept.
+  store.saveWorkspace('s1', { tabs: ['/a.ts'], active: undefined });
+  expect(store.workspace('s1')?.active).toBeUndefined();
+  store.saveWorkspace('s2', { tabs: [] });
+  expect(store.workspace('s2')).toBeUndefined();
+  local.setItem(
+    'mekaweb:v1:workspaces',
+    JSON.stringify({ odd: { tabs: ['/b.ts', 4], active: '/elsewhere', open: 'no', at: 1 } }),
+  );
+  expect(store.workspace('odd')).toEqual({ tabs: ['/b.ts'], open: [] });
+  for (let index = 0; index < 60; index++) store.saveWorkspace(`p${index}`, { tabs: ['/c.ts'] });
+  expect(store.workspace('p59')).toBeDefined();
+  expect(store.workspace('p9')).toBeUndefined();
+  expect(store.workspace('p10')).toBeDefined();
+  store.forgetWorkspaces(['p10', 'p11']);
+  expect(store.workspace('p10')).toBeUndefined();
+  expect(store.workspace('p12')).toBeDefined();
+});
+
+it('keeps where the editor was in the most recent files', () => {
+  const store = new BrowserStorage(storage());
+  for (let index = 0; index < 210; index++) store.saveEditorView(`/f${index}`, { line: index });
+  expect(store.editorView('/f209')).toEqual({ line: 209 });
+  expect(store.editorView('/f9')).toBeUndefined();
+  expect(store.editorView('/f10')).toEqual({ line: 10 });
 });

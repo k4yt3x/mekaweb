@@ -5,9 +5,6 @@ export const SessionRoute = lazy(() =>
 export const ResourcesPage = lazy(() =>
   import('./resources').then((module) => ({ default: module.ResourcesPage })),
 );
-export const SchedulesPage = lazy(() =>
-  import('./schedules').then((module) => ({ default: module.SchedulesPage })),
-);
 export const ProjectsPage = lazy(() =>
   import('./projects').then((module) => ({ default: module.ProjectsPage })),
 );

@@ -12,6 +12,7 @@ export function Dialog({
   placement = 'center',
   onCloseAutoFocus,
   onOpenAutoFocus,
+  onEscapeKeyDown,
   className = '',
   headerActions,
 }: {
@@ -21,9 +22,10 @@ export function Dialog({
   description?: string;
   children: ReactNode;
   wide?: boolean;
-  placement?: 'center' | 'left' | 'right';
+  placement?: 'center' | 'right';
   onCloseAutoFocus?: Primitive.DialogContentProps['onCloseAutoFocus'];
   onOpenAutoFocus?: Primitive.DialogContentProps['onOpenAutoFocus'];
+  onEscapeKeyDown?: Primitive.DialogContentProps['onEscapeKeyDown'];
   className?: string;
   headerActions?: ReactNode;
 }) {
@@ -40,10 +42,12 @@ export function Dialog({
           className={`dialog-content ${wide ? 'dialog-wide' : ''} dialog-${placement} ${className}`}
           onCloseAutoFocus={onCloseAutoFocus}
           onOpenAutoFocus={onOpenAutoFocus}
+          {...(onEscapeKeyDown ? { onEscapeKeyDown } : {})}
           onInteractOutside={(event) => {
             const target = event.detail.originalEvent.target;
-            // Recovery controls sit above modals; using them must not discard an editor.
-            if (target instanceof Element && target.closest('.connection-banner'))
+            // Recovery controls, and approvals over Settings, sit above modals; using them must not
+            // discard an editor.
+            if (target instanceof Element && target.closest('.connection-banner, .approval-tray'))
               event.preventDefault();
           }}
         >

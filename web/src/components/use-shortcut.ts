@@ -35,7 +35,13 @@ export function useShortcut(action: Shortcut, run: () => void, enabled = true) {
         repeated: event.repeat,
         overlay,
         editing,
-        helpOpen: Boolean(document.querySelector('.keyboard-shortcuts-dialog[data-state="open"]')),
+        // Settings holds the shortcuts, which their keys hide again; another section is left alone,
+        // with what may be typed in it.
+        helpOpen: Boolean(
+          document.querySelector(
+            '.settings-dialog[data-state="open"] .settings-section[data-section="shortcuts"]',
+          ),
+        ),
       })
     )
       return;

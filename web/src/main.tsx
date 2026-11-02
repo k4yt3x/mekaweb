@@ -9,17 +9,12 @@ import {
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './app';
-import {
-  SessionRoute,
-  ResourcesPage,
-  SchedulesPage,
-  McpPage,
-  ProvidersPage,
-  ProjectsPage,
-} from './features/pages';
+import { SessionRoute } from './features/pages';
+import { SettingsRoute } from './features/settings-dialog';
+import { SIDEBAR_PAGES } from './features/sidebar-pages';
+import type { SettingsSection } from './components/settings-control';
 import { ConnectionRuntime } from './connections/runtime';
 import { browserStorage } from './connections/storage';
-import { SettingsPage } from './features/settings';
 import 'katex/contrib/copy-tex';
 import './styles.css';
 const queryClient = new QueryClient({
@@ -56,25 +51,24 @@ const routes = [
   indexRoute,
   sessionsRoute,
   sessionRoute,
-  createRoute({ getParentRoute: () => rootRoute, path: '/projects', component: ProjectsPage }),
-  createRoute({
-    getParentRoute: () => rootRoute,
-    path: '/memory',
-    component: () => <ResourcesPage kind="memory" />,
-  }),
-  createRoute({
-    getParentRoute: () => rootRoute,
-    path: '/skills',
-    component: () => <ResourcesPage kind="skills" />,
-  }),
-  createRoute({
-    getParentRoute: () => rootRoute,
-    path: '/schedules',
-    component: () => <SchedulesPage />,
-  }),
-  createRoute({ getParentRoute: () => rootRoute, path: '/mcp', component: McpPage }),
-  createRoute({ getParentRoute: () => rootRoute, path: '/providers', component: ProvidersPage }),
-  createRoute({ getParentRoute: () => rootRoute, path: '/settings', component: SettingsPage }),
+  // The sidebar's pages share the sessions' component too, so the sidebar stays as they change.
+  ...SIDEBAR_PAGES.map(({ path }) =>
+    createRoute({ getParentRoute: () => rootRoute, path, component: SessionRoute }),
+  ),
+  // These pages are sections of Settings now; their addresses open them.
+  ...(
+    [
+      ['/mcp', 'mcp'],
+      ['/providers', 'providers'],
+      ['/settings', 'general'],
+    ] as const satisfies readonly (readonly [string, SettingsSection])[]
+  ).map(([path, section]) =>
+    createRoute({
+      getParentRoute: () => rootRoute,
+      path,
+      component: () => <SettingsRoute section={section} />,
+    }),
+  ),
 ];
 const router = createRouter({
   history: createHashHistory(),

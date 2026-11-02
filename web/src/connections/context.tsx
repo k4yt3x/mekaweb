@@ -40,12 +40,16 @@ export function useResource<T>(
     retry: false,
   });
 }
+/** How often a read is made again, or by how it last went. */
+type Interval = number | false | ((query: { state: { status: string } }) => number | false);
+/** Reads again every 10 seconds while the read fails, and not otherwise. */
+export const whileFailing: Interval = (query) => (query.state.status === 'error' ? 10_000 : false);
 /** A resource of mekaweb's own API. */
 export function useGateway<T>(
   path: string,
   query?: Query,
   enabled = true,
-  refetchInterval: number | false = false,
+  refetchInterval: Interval = false,
 ) {
   const runtime = useRuntime();
   const { account } = useConnection();

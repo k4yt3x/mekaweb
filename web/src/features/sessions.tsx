@@ -1,6 +1,7 @@
 import { useAction } from '../components/actions';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import {
+  Suspense,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -17,9 +18,9 @@ import {
   Folder,
   FolderOpen,
   Info,
+  LogOut,
+  Settings,
   SquareTerminal,
-  List,
-  ListCollapse,
   X,
   RefreshCw,
   Share as Export,
@@ -32,17 +33,18 @@ import {
   useResource,
   useRuntime,
   useSettings,
+  whileFailing,
 } from '../connections/context';
 import type { Gateway } from '../api/gateway';
 import { FileBrowser, type FilesTarget } from './file-browser';
 import { EditorPane } from './editor-pane';
-import { useEditorStore } from '../editor/use-editor';
+import { editorStore, saveFirst, useEditorStore } from '../editor/use-editor';
 import { terminalOf } from '../editor/store';
 import { basename, join, parent } from '../files/paths';
 import { focusMessage, WorkspaceProvider, type Workspace } from '../components/workspace';
 import { useSessionContext, useSessionMetadata, useSessionStates } from '../session/hooks';
 import { isSessionRunning } from '../session/controller';
-import { useParams } from '@tanstack/react-router';
+import { useLocation, useParams } from '@tanstack/react-router';
 import { Button } from '../components/ui/button';
 import { Dialog } from '../components/ui/dialog';
 import { Empty, ErrorNotice, Field, Json, Loading } from '../components/common';
@@ -53,7 +55,6 @@ import { SessionList } from './session-list';
 import { SessionDeleteDialog, SessionMetadataItems, SessionRenameDialog } from './session-metadata';
 import { SessionHeading } from './session-heading';
 import { SchedulesPage } from './schedules';
-import { NavigationToggle } from '../components/layout';
 import { DESKTOP_LAYOUT_QUERY, useMediaQuery } from '../components/media-query';
 import { PanelResizeHandle } from '../components/panel-resize-handle';
 import { CONVERSATION_COLUMN, PANEL_WIDTH, PANELS, type Panel } from '../connections/storage';
@@ -62,22 +63,50 @@ import {
   MAIN_MIN,
   PANEL_TITLES,
   RAIL_WIDTH,
+  SIDEBAR_RAIL_WIDTH,
   WIDE_WIDTH,
   panelMakesWay,
   workspaceLayout,
   type WorkspaceSide,
 } from './workspace-layout';
 import { SessionRail } from './session-rail';
+import { SidebarRail } from './sidebar-rail';
+import { SIDEBAR_PAGES, sidebarPage, type SidebarPage } from './sidebar-pages';
+import { ProjectsPage, ResourcesPage } from './pages';
 import { ReadingOptionsControl, SessionContent } from '../components/reading-options';
 import { useOverlayPadding } from '../components/visual-viewport';
 import { useSessionNavigation } from './session-navigation';
 import { useShortcut } from '../components/use-shortcut';
 import { shortcutAttribute, shortcutHint } from '../components/shortcut-keys';
+import { useOpenSettings } from '../components/settings-control';
 
-export function SessionsPage({ id }: { id?: string | undefined }) {
+const NO_TERMINALS: readonly Gateway['TerminalView'][] = [];
+
+/** Gives the keyboard to the first of `selector` that shows, once the change before is drawn. */
+function focusShown(selector: string) {
+  requestAnimationFrame(() =>
+    Array.from(document.querySelectorAll<HTMLElement>(selector))
+      .find((each) => each.getClientRects().length > 0)
+      ?.focus(),
+  );
+}
+
+/**
+ * The sessions, with the sidebar beside them, and in the conversation's place the pages the sidebar
+ * leads to, `page`.
+ */
+export function SessionsPage({
+  id,
+  page,
+}: {
+  id?: string | undefined;
+  page?: SidebarPage | undefined;
+}) {
   const state = useConnection();
   const runtime = useRuntime();
+  const openSettings = useOpenSettings();
   const canRead = useCan('sessions:r');
+  const canCreate = useCan('sessions:w');
   const canSchedule = useCan('schedule:r');
   const {
     newSession,
@@ -107,14 +136,18 @@ export function SessionsPage({ id }: { id?: string | undefined }) {
   }, [canRead]);
   const sessions = useSessionStates();
   const selected = sessions.find((s) => s.id === id);
-  const status = useGateway<Gateway['StatusView']>('/api/status');
+  // Both read again while failing, as what was open before a reload waits for them.
+  const status = useGateway<Gateway['StatusView']>('/api/status', undefined, true, whileFailing);
   const terminalEnabled = status.data?.features.terminal ?? false;
   // Files is there for a session, and for a new conversation's folder; the rest, for a session.
-  const panels = PANELS.filter((panel) =>
-    panel === 'files'
-      ? Boolean(selected?.session) || !id
-      : Boolean(selected?.session) && (panel !== 'schedules' || canSchedule),
-  );
+  // A page has none.
+  const panels = page
+    ? []
+    : PANELS.filter((panel) =>
+        panel === 'files'
+          ? Boolean(selected?.session) || !id
+          : Boolean(selected?.session) && (panel !== 'schedules' || canSchedule),
+      );
   const terminalAvailable = Boolean(selected?.session) && terminalEnabled;
   const filesStart =
     (id ? selected?.session?.working_directory : newConversation.settings.workingDirectory) || '~';
@@ -138,9 +171,11 @@ export function SessionsPage({ id }: { id?: string | undefined }) {
   const [listByHand, setListByHand] = useState(false);
   // The panel asked for, where there is one.
   const panel = layout.panel && panels.includes(layout.panel) ? layout.panel : undefined;
-  const editorWanted = desktop && editorTabs.keys.length > 0;
+  const editorWanted = desktop && !page && editorTabs.keys.length > 0;
   const panelWanted = desktop && Boolean(panel);
-  const bothFit = workspaceWidth >= RAIL_WIDTH + MAIN_MIN + WIDE_WIDTH.min + PANEL_WIDTH.min;
+  // The list folds to its rail to make room for both.
+  const bothFit =
+    workspaceWidth >= SIDEBAR_RAIL_WIDTH + RAIL_WIDTH + MAIN_MIN + WIDE_WIDTH.min + PANEL_WIDTH.min;
   const editorShown = editorWanted && (bothFit || !panelWanted || lastOpened === 'editor');
   const shown = {
     panel: panelWanted && (bothFit || !editorWanted || lastOpened === 'panel'),
@@ -343,12 +378,10 @@ export function SessionsPage({ id }: { id?: string | undefined }) {
     };
   }, [desktop, runtime, id, setPanelTab, setMobileEditor, terminalAvailable, filesStart]);
 
-  function toggleList() {
-    if (listCollapsed) showList(workspaceWidth);
-    else {
-      runtime.storage.layout({ sessionsCollapsed: true });
-      setListByHand(false);
-    }
+  function collapseList() {
+    runtime.storage.layout({ sessionsCollapsed: true });
+    setListByHand(false);
+    focusShown('.sidebar-rail-logo');
   }
   useSessionMetadata(id, canRead && Boolean(selected?.session));
   const headingKey = `${state.connection?.id}:${state.connection?.authority}:${id}`;
@@ -370,12 +403,21 @@ export function SessionsPage({ id }: { id?: string | undefined }) {
     '/api/terminals',
     { session: id ?? '' },
     terminalAvailable,
+    whileFailing,
   );
-  // Each of the session's terminals has a tab, as after a reload, or one started elsewhere.
   const sessionId = selected?.session ? selected.id : undefined;
+  // The session's terminals still running, once known: none where mekaweb runs none. Not known
+  // while either list fails, which a later read may settle.
+  const live =
+    !sessionId || !status.data ? undefined : !terminalEnabled ? NO_TERMINALS : shells.data;
+  // What the session had open before a reload comes back once they are known, and each of them
+  // has a tab, as one started elsewhere. A new conversation's are not kept: they stay behind as it
+  // becomes a session.
   useEffect(() => {
-    if (sessionId && shells.data) editor.addTerminals(sessionId, shells.data);
-  }, [editor, sessionId, shells.data]);
+    if (!sessionId || !live) return;
+    editor.restore(sessionId, live);
+    editor.addTerminals(sessionId, live);
+  }, [editor, sessionId, live]);
   const terminalShown = terminalActive && (desktop ? editorShown : mobileEditor);
   useShortcut('toggleTerminal', toggleTerminal, terminalAvailable);
   useShortcut('newTerminal', () => startTerminal(), terminalAvailable);
@@ -409,10 +451,26 @@ export function SessionsPage({ id }: { id?: string | undefined }) {
     if (canRead) state.controller?.select(id);
     return () => state.controller?.select(undefined);
   }, [state.controller, id, canRead]);
+  // Without the sidebar, Settings and signing out are offered here.
   if (!canRead)
     return (
       <Empty title="Session access is unavailable">
         This token needs sessions:r to view sessions.
+        <div className="actions">
+          <Button variant="secondary" onClick={() => openSettings()}>
+            <Settings size={16} />
+            Settings
+          </Button>
+          <Button
+            variant="secondary"
+            disabled={action.busy}
+            onClick={() => void action.run(() => runtime.signOut())}
+          >
+            <LogOut size={16} />
+            Sign out
+          </Button>
+        </div>
+        <ErrorNotice error={action.error} />
       </Empty>
     );
   return (
@@ -425,21 +483,52 @@ export function SessionsPage({ id }: { id?: string | undefined }) {
             '--panel-width': `${columns.panel.width}px`,
             '--conversation-width': `${columns.conversation.width}px`,
             '--rail-width': `${RAIL_WIDTH}px`,
-            ...(desktop ? { '--workspace-columns': columns.columns } : {}),
+            '--sidebar-rail-width': `${SIDEBAR_RAIL_WIDTH}px`,
+            ...(desktop
+              ? {
+                  // A page takes the rest beside the sidebar, with no panels to open.
+                  '--workspace-columns': page
+                    ? `${listCollapsed ? 'var(--sidebar-rail-width)' : 'var(--sessions-width)'} minmax(0, 1fr)`
+                    : columns.columns,
+                }
+              : {}),
           } as CSSProperties
         }
         className={`sessions-workspace ${desktop || !mobileSessionsOpen ? 'has-session' : ''} ${listCollapsed ? 'sessions-collapsed' : ''}`}
       >
-        <aside id="session-list" className="session-list" aria-label="Session list">
+        <aside id="session-list" className="session-list" aria-label="Sidebar">
+          {listCollapsed && (
+            <SidebarRail
+              page={page}
+              canCreate={canCreate}
+              onExpand={() => {
+                showList(workspaceWidth);
+                focusShown('[aria-label="Collapse sidebar"]');
+              }}
+              onCreate={() => newSession()}
+              onSearch={() => {
+                showList(workspaceWidth);
+                setSearchOpen(true);
+                // Open already, the search keeps what was typed, which the keyboard takes again.
+                requestAnimationFrame(() => {
+                  searchInput.current?.focus();
+                  searchInput.current?.select();
+                });
+              }}
+            />
+          )}
+          {/* Folded, the list stays, hidden, with its search, its sub-agents shown and its keys. */}
           <SessionList
             selectedId={id}
+            page={page}
             onCreate={() => newSession()}
             searchInput={searchInput}
             searchOpen={searchOpen}
             onSearchOpen={setSearchOpen}
             onOpen={() => setMobileSessionsOpen(false)}
+            onCollapse={desktop ? collapseList : undefined}
           />
-          {desktop && (
+          {desktop && !listCollapsed && (
             <PanelResizeHandle
               side="sessions"
               value={columns.list.width}
@@ -451,291 +540,291 @@ export function SessionsPage({ id }: { id?: string | undefined }) {
             />
           )}
         </aside>
-        <SessionContent
-          key={headingKey}
-          beside={shown.wide}
-          header={
-            <header className="session-toolbar">
-              {layout.navigationCollapsed && <NavigationToggle />}
-              <Button
-                className="desktop-control"
-                variant="ghost"
-                size="icon"
-                aria-label={listCollapsed ? 'Show session list' : 'Hide session list'}
-                title={listCollapsed ? 'Show session list' : 'Hide session list'}
-                aria-expanded={!listCollapsed}
-                aria-controls="session-list"
-                onClick={toggleList}
-              >
-                {listCollapsed ? <List size={18} /> : <ListCollapse size={18} />}
-              </Button>
-              <Button
-                variant="ghost"
-                size={id ? 'icon' : 'default'}
-                className="mobile-back"
-                onClick={() => setMobileSessionsOpen(true)}
-                aria-label={id ? 'Show session list' : undefined}
-              >
-                <ChevronLeft size={18} aria-hidden="true" />
-                {!id && <span>Sessions</span>}
-              </Button>
-              {id && (
-                <div className="session-title">
-                  {selected?.session ? (
-                    <SessionHeading
-                      key={headingKey}
-                      session={selected.session}
-                      disabled={selected.deleting || selected.settingsPending}
-                      onError={reportHeadingError}
-                    />
-                  ) : (
-                    <h1>New conversation</h1>
+        {page ? (
+          <WorkspacePage page={page} />
+        ) : (
+          <>
+            <SessionContent
+              key={headingKey}
+              beside={shown.wide}
+              header={
+                <header className="session-toolbar">
+                  <Button
+                    variant="ghost"
+                    size={id ? 'icon' : 'default'}
+                    className="mobile-back"
+                    onClick={() => setMobileSessionsOpen(true)}
+                    aria-label={id ? 'Show session list' : undefined}
+                  >
+                    <ChevronLeft size={18} aria-hidden="true" />
+                    {!id && <span>Sessions</span>}
+                  </Button>
+                  {id && (
+                    <div className="session-title">
+                      {selected?.session ? (
+                        <SessionHeading
+                          key={headingKey}
+                          session={selected.session}
+                          disabled={selected.deleting || selected.settingsPending}
+                          onError={reportHeadingError}
+                        />
+                      ) : (
+                        <h1>New conversation</h1>
+                      )}
+                      <p>
+                        {selected?.session?.parent_id ? (
+                          <a
+                            className="parent-session-link"
+                            href={`#/sessions/${encodeURIComponent(selected.session.parent_id)}`}
+                            aria-label="Back to parent session"
+                            title="Back to parent session"
+                          >
+                            <CornerUpLeft size={12} aria-hidden="true" />
+                            <span>Parent session</span>
+                          </a>
+                        ) : (
+                          <>
+                            <Folder size={12} aria-hidden="true" />
+                            <span>
+                              {selected?.session?.working_directory ??
+                                'Working directory not recorded'}
+                            </span>
+                          </>
+                        )}
+                      </p>
+                    </div>
                   )}
-                  <p>
-                    {selected?.session?.parent_id ? (
-                      <a
-                        className="parent-session-link"
-                        href={`#/sessions/${encodeURIComponent(selected.session.parent_id)}`}
-                        aria-label="Back to parent session"
-                        title="Back to parent session"
-                      >
-                        <CornerUpLeft size={12} aria-hidden="true" />
-                        <span>Parent session</span>
-                      </a>
-                    ) : (
-                      <>
-                        <Folder size={12} aria-hidden="true" />
-                        <span>
-                          {selected?.session?.working_directory ?? 'Working directory not recorded'}
-                        </span>
-                      </>
-                    )}
-                  </p>
-                </div>
-              )}
-              {(!id || selected?.session) && (
-                <div className="toolbar-actions">
-                  <ReadingOptionsControl />
-                  {selected?.session &&
-                    selected.feed === 'unavailable' &&
-                    !selected.session.parent_id && (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        aria-label="Reconnect session feed"
-                        onClick={() =>
-                          void action.run(async () => state.controller?.reconnect(selected.id))
-                        }
-                      >
-                        <RefreshCw size={18} />
-                      </Button>
-                    )}
-                  {/* A wide screen has these in the column at its right. */}
-                  {!desktop && terminalAvailable && (
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      aria-label="Terminal"
-                      title={`${terminalShown ? 'Hide terminal' : 'Show terminal'} (${shortcutHint('toggleTerminal')})`}
-                      aria-keyshortcuts={shortcutAttribute('toggleTerminal')}
-                      aria-pressed={terminalShown}
-                      onClick={toggleTerminal}
-                    >
-                      <SquareTerminal size={18} />
-                    </Button>
-                  )}
-                  {!desktop && (
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      aria-label="Files"
-                      ref={filesButton}
-                      title={files ? 'Hide files' : 'Show files'}
-                      aria-pressed={files}
-                      aria-controls="session-files"
-                      onClick={() => togglePanel('files')}
-                    >
-                      <FolderOpen size={18} />
-                    </Button>
-                  )}
-                  {selected?.session && (
-                    <>
+                  {(!id || selected?.session) && (
+                    <div className="toolbar-actions">
+                      <ReadingOptionsControl />
+                      {selected?.session &&
+                        selected.feed === 'unavailable' &&
+                        !selected.session.parent_id && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            aria-label="Reconnect session feed"
+                            onClick={() =>
+                              void action.run(async () => state.controller?.reconnect(selected.id))
+                            }
+                          >
+                            <RefreshCw size={18} />
+                          </Button>
+                        )}
+                      {/* A wide screen has these in the column at its right. */}
+                      {!desktop && terminalAvailable && (
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          aria-label="Terminal"
+                          title={`${terminalShown ? 'Hide terminal' : 'Show terminal'} (${shortcutHint('toggleTerminal')})`}
+                          aria-keyshortcuts={shortcutAttribute('toggleTerminal')}
+                          aria-pressed={terminalShown}
+                          onClick={toggleTerminal}
+                        >
+                          <SquareTerminal size={18} />
+                        </Button>
+                      )}
                       {!desktop && (
                         <Button
                           size="icon"
                           variant="ghost"
-                          aria-label="Session details"
-                          ref={detailsButton}
-                          title={details ? 'Hide session details' : 'Show session details'}
-                          aria-pressed={details}
-                          aria-controls="session-details"
-                          onClick={() => showPanel(details ? undefined : panelTab)}
+                          aria-label="Files"
+                          ref={filesButton}
+                          title={files ? 'Hide files' : 'Show files'}
+                          aria-pressed={files}
+                          aria-controls="session-files"
+                          onClick={() => togglePanel('files')}
                         >
-                          <Info size={18} />
+                          <FolderOpen size={18} />
                         </Button>
                       )}
-                      <SessionActions
-                        key={`${state.connection?.id}:${state.connection?.authority}:${selected.id}`}
-                        session={selected.session}
-                        running={selectedRunning}
-                        deleting={selected.deleting}
-                      />
-                    </>
+                      {selected?.session && (
+                        <>
+                          {!desktop && (
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              aria-label="Session details"
+                              ref={detailsButton}
+                              title={details ? 'Hide session details' : 'Show session details'}
+                              aria-pressed={details}
+                              aria-controls="session-details"
+                              onClick={() => showPanel(details ? undefined : panelTab)}
+                            >
+                              <Info size={18} />
+                            </Button>
+                          )}
+                          <SessionActions
+                            key={`${state.connection?.id}:${state.connection?.authority}:${selected.id}`}
+                            session={selected.session}
+                            running={selectedRunning}
+                            deleting={selected.deleting}
+                          />
+                        </>
+                      )}
+                    </div>
                   )}
-                </div>
-              )}
-            </header>
-          }
-        >
-          <ErrorNotice error={action.error} />
-          <div id="session-title-error">
-            <ErrorNotice
-              error={headingError?.key === headingKey ? headingError.error : undefined}
-            />
-          </div>
-          {!id ? (
-            <NewConversation />
-          ) : selected?.session ? (
-            <Conversation
-              key={`${state.connection?.id}:${state.connection?.authority}:${selected.id}`}
-              state={selected}
-            />
-          ) : (
-            <div className="page">
-              {state.connectionIssue ? null : selected?.error ? (
-                <Button
-                  variant="secondary"
-                  onClick={() => void action.run(async () => state.controller?.reconnect(id))}
-                >
-                  Retry opening session
-                </Button>
+                </header>
+              }
+            >
+              <ErrorNotice error={action.error} />
+              <div id="session-title-error">
+                <ErrorNotice
+                  error={headingError?.key === headingKey ? headingError.error : undefined}
+                />
+              </div>
+              {!id ? (
+                <NewConversation />
+              ) : selected?.session ? (
+                <Conversation
+                  key={`${state.connection?.id}:${state.connection?.authority}:${selected.id}`}
+                  state={selected}
+                />
               ) : (
-                <Loading label="Opening session…" />
-              )}
-              <ErrorNotice error={selected?.error} />
-            </div>
-          )}
-        </SessionContent>
-        {desktop && editorTabs.keys.length > 0 && (
-          // Hidden, the editor stays, with its files, and its terminals attached to their shells.
-          <div className="work-area" hidden={!shown.wide}>
-            <PanelResizeHandle
-              side="conversation"
-              value={columns.conversation.width}
-              min={MAIN_MIN}
-              max={columns.conversation.max}
-              onResize={(width) => setResizing({ side: 'conversation', width })}
-              onCommit={(width) => commitWidth('conversation', width)}
-              onCancel={() => setResizing(undefined)}
-            />
-            <EditorPane place={filesPlace} full={false} onHide={() => {}} />
-          </div>
-        )}
-        {shownPanel && (
-          <aside
-            id="session-panel"
-            className="session-details-panel"
-            aria-label={PANEL_TITLES[shownPanel]}
-          >
-            <PanelResizeHandle
-              side="panel"
-              value={columns.panel.width}
-              min={PANEL_WIDTH.min}
-              max={columns.panel.max}
-              onResize={(width) => setResizing({ side: 'panel', width })}
-              onCommit={(width) => commitWidth('panel', width)}
-              onCancel={() => setResizing(undefined)}
-            />
-            <header className="details-panel-heading">
-              <h2>{PANEL_TITLES[shownPanel]}</h2>
-              <Button
-                variant="ghost"
-                size="icon"
-                aria-label={`Close ${PANEL_TITLES[shownPanel]}`}
-                onClick={() => {
-                  showPanel(undefined);
-                  panelButtons.current.get(shownPanel)?.focus();
-                }}
-              >
-                <X size={18} />
-              </Button>
-            </header>
-            {shownPanel === 'files' ? (
-              <div className="details-panel-body files-panel-body">
-                <FileBrowser
-                  key={filesPlace}
-                  place={filesPlace}
-                  start={filesStart}
-                  target={target}
-                />
-              </div>
-            ) : (
-              selected?.session && (
-                <div className="details-panel-body">
-                  <SessionDetails key={selected.id} session={selected.session} tab={shownPanel} />
+                <div className="page">
+                  {state.connectionIssue ? null : selected?.error ? (
+                    <Button
+                      variant="secondary"
+                      onClick={() => void action.run(async () => state.controller?.reconnect(id))}
+                    >
+                      Retry opening session
+                    </Button>
+                  ) : (
+                    <Loading label="Opening session…" />
+                  )}
+                  <ErrorNotice error={selected?.error} />
                 </div>
-              )
-            )}
-          </aside>
-        )}
-        {desktop && (
-          <SessionRail
-            panels={panels}
-            shown={shownPanel}
-            onPanel={togglePanel}
-            terminal={
-              terminalAvailable
-                ? {
-                    shown: terminalShown,
-                    running: editorTabs.keys.some((key) => terminalOf(key) !== undefined),
-                    onToggle: toggleTerminal,
-                  }
-                : undefined
-            }
-            running={runningTasks}
-            buttons={panelButtons}
-          />
-        )}
-        {!desktop && editorTabs.keys.length > 0 && (
-          <div className="code-sheet" hidden={!mobileEditor}>
-            <EditorPane place={filesPlace} full onHide={() => setMobileEditor(false)} />
-          </div>
-        )}
-        {!desktop && (
-          <>
-            <Dialog
-              open={files}
-              onOpenChange={(open) => showPanel(open ? 'files' : undefined)}
-              title="Files"
-              placement="right"
-              className="files-sheet"
-            >
-              <div id="session-files" className="files-sheet-body">
-                <FileBrowser
-                  key={filesPlace}
-                  place={filesPlace}
-                  start={filesStart}
-                  target={target}
+              )}
+            </SessionContent>
+            {desktop && editorTabs.keys.length > 0 && (
+              // Hidden, the editor stays, with its files, and its terminals attached to their shells.
+              <div className="work-area" hidden={!shown.wide}>
+                <PanelResizeHandle
+                  side="conversation"
+                  value={columns.conversation.width}
+                  min={MAIN_MIN}
+                  max={columns.conversation.max}
+                  onResize={(width) => setResizing({ side: 'conversation', width })}
+                  onCommit={(width) => commitWidth('conversation', width)}
+                  onCancel={() => setResizing(undefined)}
                 />
+                <EditorPane place={filesPlace} full={false} onHide={() => {}} />
               </div>
-            </Dialog>
-            <Dialog
-              open={details}
-              onOpenChange={(open) => showPanel(open ? panelTab : undefined)}
-              title="Session details"
-              placement="right"
-            >
-              <div id="session-details">
-                {selected?.session && (
-                  <SidePanel
-                    key={selected.id}
-                    session={selected.session}
-                    tab={panelTab}
-                    onTab={setPanelTab}
-                  />
+            )}
+            {shownPanel && (
+              <aside
+                id="session-panel"
+                className="session-details-panel"
+                aria-label={PANEL_TITLES[shownPanel]}
+              >
+                <PanelResizeHandle
+                  side="panel"
+                  value={columns.panel.width}
+                  min={PANEL_WIDTH.min}
+                  max={columns.panel.max}
+                  onResize={(width) => setResizing({ side: 'panel', width })}
+                  onCommit={(width) => commitWidth('panel', width)}
+                  onCancel={() => setResizing(undefined)}
+                />
+                <header className="details-panel-heading">
+                  <h2>{PANEL_TITLES[shownPanel]}</h2>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    aria-label={`Close ${PANEL_TITLES[shownPanel]}`}
+                    onClick={() => {
+                      showPanel(undefined);
+                      panelButtons.current.get(shownPanel)?.focus();
+                    }}
+                  >
+                    <X size={18} />
+                  </Button>
+                </header>
+                {shownPanel === 'files' ? (
+                  <div className="details-panel-body files-panel-body">
+                    <FileBrowser
+                      key={filesPlace}
+                      place={filesPlace}
+                      start={filesStart}
+                      keep={Boolean(sessionId)}
+                      target={target}
+                    />
+                  </div>
+                ) : (
+                  selected?.session && (
+                    <div className="details-panel-body">
+                      <SessionDetails
+                        key={selected.id}
+                        session={selected.session}
+                        tab={shownPanel}
+                      />
+                    </div>
+                  )
                 )}
+              </aside>
+            )}
+            {desktop && (
+              <SessionRail
+                panels={panels}
+                shown={shownPanel}
+                onPanel={togglePanel}
+                terminal={
+                  terminalAvailable
+                    ? {
+                        shown: terminalShown,
+                        running: editorTabs.keys.some((key) => terminalOf(key) !== undefined),
+                        onToggle: toggleTerminal,
+                      }
+                    : undefined
+                }
+                running={runningTasks}
+                buttons={panelButtons}
+              />
+            )}
+            {!desktop && editorTabs.keys.length > 0 && (
+              <div className="code-sheet" hidden={!mobileEditor}>
+                <EditorPane place={filesPlace} full onHide={() => setMobileEditor(false)} />
               </div>
-            </Dialog>
+            )}
+            {!desktop && (
+              <>
+                <Dialog
+                  open={files}
+                  onOpenChange={(open) => showPanel(open ? 'files' : undefined)}
+                  title="Files"
+                  placement="right"
+                  className="files-sheet"
+                >
+                  <div id="session-files" className="files-sheet-body">
+                    <FileBrowser
+                      key={filesPlace}
+                      place={filesPlace}
+                      start={filesStart}
+                      keep={Boolean(sessionId)}
+                      target={target}
+                    />
+                  </div>
+                </Dialog>
+                <Dialog
+                  open={details}
+                  onOpenChange={(open) => showPanel(open ? panelTab : undefined)}
+                  title="Session details"
+                  placement="right"
+                >
+                  <div id="session-details">
+                    {selected?.session && (
+                      <SidePanel
+                        key={selected.id}
+                        session={selected.session}
+                        tab={panelTab}
+                        onTab={setPanelTab}
+                      />
+                    )}
+                  </div>
+                </Dialog>
+              </>
+            )}
           </>
         )}
       </div>
@@ -803,8 +892,15 @@ function SessionActions({
   async function remove() {
     await action.run(async () => {
       if (!controller || !canWrite || running || deleting) return;
+      // Its files' changes would have nowhere to be saved from.
+      const unsaved = saveFirst(
+        editorStore(runtime).dirtyIn(session.id).length,
+        ' in this session',
+      );
+      if (unsaved) throw new Error(unsaved);
       const deleted = await controller.deleteSession(session.id);
       if (!deleted.length || runtime.getSnapshot().controller !== controller) return;
+      editorStore(runtime).forget(deleted);
       closeAction();
       if (deleted.some((id) => location.hash === `#/sessions/${encodeURIComponent(id)}`))
         location.hash = '/sessions';
@@ -1214,8 +1310,42 @@ function SessionDetails({ session, tab }: { session: Schema['SessionResponse']; 
   );
 }
 
+/** A page the sidebar leads to, beside it; on a phone, with the way back to the list. */
+function WorkspacePage({ page }: { page: SidebarPage }) {
+  const { setMobileSessionsOpen } = useSessionNavigation();
+  return (
+    <section
+      className="workspace-page"
+      aria-label={SIDEBAR_PAGES.find((each) => each.id === page)?.name}
+    >
+      <header className="session-toolbar page-toolbar">
+        <Button variant="ghost" className="mobile-back" onClick={() => setMobileSessionsOpen(true)}>
+          <ChevronLeft size={18} aria-hidden="true" />
+          <span>Sessions</span>
+        </Button>
+      </header>
+      <Suspense
+        fallback={
+          <div className="page">
+            <Loading />
+          </div>
+        }
+      >
+        {page === 'projects' ? (
+          <ProjectsPage />
+        ) : page === 'schedules' ? (
+          <SchedulesPage />
+        ) : (
+          <ResourcesPage kind={page === 'memory' ? 'memory' : 'skills'} />
+        )}
+      </Suspense>
+    </section>
+  );
+}
+
 export function SessionRoute() {
   const { sessionId } = useParams({ strict: false });
+  const page = sidebarPage(useLocation().pathname);
   // Switching servers leaves the address's session before the router follows. Mounted for the
   // new connection, never open a session the address no longer names; it belongs elsewhere.
   const [left, setLeft] = useState(() =>
@@ -1225,5 +1355,5 @@ export function SessionRoute() {
       : undefined,
   );
   if (left && sessionId !== left) setLeft(undefined);
-  return <SessionsPage id={sessionId === left ? undefined : sessionId} />;
+  return <SessionsPage id={sessionId === left ? undefined : sessionId} page={page} />;
 }

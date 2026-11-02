@@ -37,8 +37,7 @@ function AccountPanel() {
   const { account } = useConnection();
   const action = useAction();
   return (
-    <section className="panel account-panel" id="account" tabIndex={-1}>
-      <h2>Account</h2>
+    <section className="panel">
       <dl className="facts">
         <dt>Signed in as</dt>
         <dd>{account?.username}</dd>

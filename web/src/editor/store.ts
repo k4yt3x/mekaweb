@@ -73,6 +73,19 @@ export interface Tabs {
 
 const noTabs: Tabs = { keys: [], active: undefined, used: [] };
 
+/**
+ * Where the page keeps, for a reload to put them back, each place's tabs and the one shown, and
+ * where in each file the editor was.
+ */
+export interface Kept {
+  read(place: string): { tabs: readonly string[]; active?: string | undefined } | undefined;
+  write(place: string, tabs: readonly string[], active: string | undefined): void;
+  /** Lets go of what `places`, as sessions deleted, had open. */
+  forget(places: readonly string[]): void;
+  view(path: string): unknown;
+  writeView(path: string, view: unknown): void;
+}
+
 const TERMINAL = 'terminal:';
 
 /** The tab of the terminal `id`; no file's path, which starts at a root, is like it. */
@@ -120,9 +133,16 @@ export class EditorStore {
   private again = new Set<string>();
   private listeners = new Set<() => void>();
   private version = 0;
+  /** The places asked to put their tabs back, kept from then on, with what each was kept as. */
+  private keeping = new Map<string, string>();
+  /** Files put back after a reload, read only once they show. */
+  private unread = new Set<string>();
   documents: Documents | undefined;
 
-  constructor(private gateway: GatewayClient) {}
+  constructor(
+    private gateway: GatewayClient,
+    private kept?: Kept,
+  ) {}
 
   subscribe = (listener: () => void) => {
     this.listeners.add(listener);
@@ -135,7 +155,91 @@ export class EditorStore {
 
   private emit() {
     this.version++;
+    this.keepTabs();
     for (const listener of this.listeners) listener();
+  }
+
+  /** Keeps the tabs of each place put back, where they changed. */
+  private keepTabs() {
+    if (!this.kept) return;
+    for (const [place, kept] of this.keeping) {
+      const { keys, active } = this.tabs(place);
+      const now = JSON.stringify([keys, active ?? null]);
+      if (now === kept) continue;
+      this.keeping.set(place, now);
+      this.kept.write(place, keys, active);
+    }
+  }
+
+  /**
+   * Puts back the tabs kept for `place`, once a page, ahead of any it has by then, showing the one
+   * shown before unless one shows already: its files are read as they show, and of its terminals
+   * only those still running, in `live`, come back. Its tabs are kept from then on.
+   */
+  restore(place: string, live: readonly Gateway['TerminalView'][]) {
+    if (this.keeping.has(place)) return;
+    // '' matches no tabs, so the next change writes the place's tabs as they are then.
+    this.keeping.set(place, '');
+    const saved = this.kept?.read(place);
+    if (!saved?.tabs.length) return;
+    const tabs = this.tabs(place);
+    const running = new Map(
+      live.filter((view) => !this.ended.has(view.id)).map((view) => [terminalTab(view.id), view]),
+    );
+    const back = [...new Set(saved.tabs)].filter(
+      (key) => terminalOf(key) === undefined || running.has(key),
+    );
+    for (const key of back) {
+      const view = running.get(key);
+      if (view) this.shells.set(view.id, view);
+      else if (this.add(key) && this.files.get(key)?.state === 'loading') this.unread.add(key);
+    }
+    const keys = [...back, ...tabs.keys.filter((key) => !back.includes(key))];
+    const active =
+      tabs.active ?? (saved.active && keys.includes(saved.active) ? saved.active : keys[0]);
+    if (keys.length)
+      this.places.set(place, {
+        keys,
+        active,
+        used: active ? [active, ...keys.filter((key) => key !== active)] : keys,
+      });
+    this.emit();
+  }
+
+  /** Where in the file `path` the editor was before a reload, as the editor noted it. */
+  keptView(path: string): unknown {
+    return this.kept?.view(path);
+  }
+
+  /** Notes where in the file `path` the editor is, for a reload to put back. */
+  keepView(path: string, view: unknown) {
+    this.kept?.writeView(path, view);
+  }
+
+  /** The open files of `place` with changes not saved. */
+  dirtyIn(place: string): OpenFile[] {
+    return this.tabs(place).keys.flatMap((key) => {
+      const file = this.files.get(key);
+      return file?.dirty ? [file] : [];
+    });
+  }
+
+  /**
+   * Lets go of `places`, as sessions deleted: their tabs close, those of files with changes too,
+   * and what was kept of them goes.
+   */
+  forget(places: readonly string[]) {
+    for (const place of places) {
+      this.keeping.delete(place);
+      const keys = this.tabs(place).keys;
+      if (keys.length) this.close(place, keys);
+    }
+    this.kept?.forget(places);
+  }
+
+  /** Reads the file `path`, showing, if it was put back and not read yet. */
+  wake(path: string) {
+    if (this.unread.delete(path)) void this.load(path);
   }
 
   file(path: string): OpenFile | undefined {
@@ -214,29 +318,33 @@ export class EditorStore {
   /** Opens `path` in `place`, after the tab shown, and shows it. */
   open(place: string, path: string) {
     this.insert(place, path);
-    if (!this.files.has(path)) {
-      const kind = previewKind(basename(path));
-      this.files.set(path, {
-        serial: ++this.serial,
-        path,
-        name: basename(path),
-        kind,
-        state: kind === 'text' ? 'loading' : 'ready',
-        text: '',
-        version: null,
-        bom: false,
-        eol: '\n',
-        truncated: false,
-        size: 0,
-        modified: null,
-        dirty: false,
-        deleted: false,
-        saving: false,
-        revision: 0,
-      });
-      if (kind === 'text') void this.load(path);
-    }
+    if (this.add(path) && this.files.get(path)?.state === 'loading') void this.load(path);
     this.emit();
+  }
+
+  /** Adds the file `path`, to be read where it is text, if it is not open; whether it was not. */
+  private add(path: string): boolean {
+    if (this.files.has(path)) return false;
+    const kind = previewKind(basename(path));
+    this.files.set(path, {
+      serial: ++this.serial,
+      path,
+      name: basename(path),
+      kind,
+      state: kind === 'text' ? 'loading' : 'ready',
+      text: '',
+      version: null,
+      bom: false,
+      eol: '\n',
+      truncated: false,
+      size: 0,
+      modified: null,
+      dirty: false,
+      deleted: false,
+      saving: false,
+      revision: 0,
+    });
+    return true;
   }
 
   /** Shows the tab `key` in `place`, taking the keyboard. */
@@ -256,6 +364,8 @@ export class EditorStore {
   /** Moves the tab `key` in `place` to `index`. */
   move(place: string, key: string, index: number) {
     const tabs = this.tabs(place);
+    // Closed meanwhile, as a terminal that ended while its tab was dragged.
+    if (!tabs.keys.includes(key)) return;
     const keys = tabs.keys.filter((each) => each !== key);
     keys.splice(index, 0, key);
     this.places.set(place, { ...tabs, keys });
@@ -284,6 +394,7 @@ export class EditorStore {
       });
       this.documents?.rename(path, now);
       if (this.again.delete(path)) this.again.add(now);
+      if (this.unread.delete(path)) this.unread.add(now);
       const asked = this.asks.get(path);
       this.asks.delete(path);
       if (asked !== undefined) this.asks.set(now, asked);
@@ -367,6 +478,7 @@ export class EditorStore {
         continue;
       }
       this.files.delete(key);
+      this.unread.delete(key);
       this.documents?.drop(key);
     }
     this.emit();
@@ -576,6 +688,8 @@ export class EditorStore {
     this.places.clear();
     this.shells.clear();
     this.ended.clear();
+    this.keeping.clear();
+    this.unread.clear();
     this.emit();
   }
 }

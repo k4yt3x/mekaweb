@@ -8,7 +8,7 @@ export const CONVERSATION_OFFSET = { default: 0, step: 10, limit: 10_000 } as co
 export const TERMINAL_FONT = { default: 13, min: 8, max: 32 } as const;
 export const EDITOR_FONT = { default: 13, min: 8, max: 32 } as const;
 /** The side panel's width, in pixels. */
-export const PANEL_WIDTH = { default: 400, min: 280, max: 900 } as const;
+export const PANEL_WIDTH = { default: 300, min: 280, max: 900 } as const;
 /** The conversation's width beside the terminal, in pixels. */
 export const CONVERSATION_COLUMN = { default: 420, min: 340, max: 4000 } as const;
 /** The side panels, of which one shows at a time. */
@@ -128,7 +128,6 @@ export interface ConversationAppearance {
   offset: number;
 }
 export interface LayoutPreferences {
-  navigationCollapsed: boolean;
   sessionsCollapsed: boolean;
   /** The side panel open, if any. */
   panel?: Panel | undefined;
@@ -144,6 +143,46 @@ export interface SeenSessions {
   sessions: Readonly<Record<string, string>>;
 }
 const SEEN_LIMIT = 500;
+/** What a session had open in the editor and Files, for a reload to put back. */
+export interface SavedWorkspace {
+  /** Its tabs, in order: files by path, terminals as `src/editor/store.ts` names them. */
+  tabs: readonly string[];
+  active?: string | undefined;
+  /** The folder Files showed, and the folders open in its tree. */
+  folder?: string | undefined;
+  open: readonly string[];
+}
+const WORKSPACES = PREFIX + 'workspaces';
+const WORKSPACE_LIMIT = 50;
+/** Where each file was in the editor, its cursor and scroll, as the editor writes it. */
+const EDITOR_VIEWS = PREFIX + 'editor-views';
+const EDITOR_VIEW_LIMIT = 200;
+function strings(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((each): each is string => typeof each === 'string')
+    : [];
+}
+function normalizeWorkspace(value: unknown): SavedWorkspace | undefined {
+  if (!object(value)) return undefined;
+  const tabs = strings(value.tabs);
+  const { active, folder } = value;
+  return {
+    tabs,
+    ...(typeof active === 'string' && tabs.includes(active) ? { active } : {}),
+    ...(typeof folder === 'string' && folder ? { folder } : {}),
+    open: strings(value.open),
+  };
+}
+/** The entries of `value`, a map, each with when it was last kept, most recent first. */
+function recent(value: unknown): [string, Record<string, unknown> & { at: number }][] {
+  if (!object(value)) return [];
+  return Object.entries(value)
+    .filter((entry): entry is [string, Record<string, unknown> & { at: number }] => {
+      const each = entry[1];
+      return object(each) && typeof each.at === 'number';
+    })
+    .sort(([, a], [, b]) => b.at - a.at);
+}
 const noneSeen: SeenSessions = { sessions: {} };
 function timestamp(value: unknown): value is string {
   return typeof value === 'string' && Number.isFinite(Date.parse(value));
@@ -174,7 +213,6 @@ const defaults = (): Settings => ({
   providerOrder: { accounts: [], profiles: [] },
   dataSaver: false,
   layout: {
-    navigationCollapsed: false,
     sessionsCollapsed: false,
   },
 });
@@ -208,7 +246,6 @@ function normalizeLayout(layout: Record<string, unknown>): LayoutPreferences {
   );
   const conversationWidth = width(layout.conversationWidth, CONVERSATION_COLUMN);
   return {
-    navigationCollapsed: layout.navigationCollapsed === true,
     sessionsCollapsed: layout.sessionsCollapsed === true,
     ...(panel ? { panel } : {}),
     ...(sessionsWidth !== undefined ? { sessionsWidth } : {}),
@@ -242,7 +279,7 @@ export class BrowserStorage {
   private listeners = new Set<() => void>();
   private seenCache = new Map<string, { raw: string | null; value: SeenSessions }>();
   private state: Settings = defaults();
-  /** Whether drafts and which sessions were seen are kept: not once the account signed out. */
+  /** Whether what is kept of the account is: not once it signed out. */
   private keeping = true;
   warning = '';
   constructor(private local: Storage | undefined) {
@@ -300,16 +337,21 @@ export class BrowserStorage {
   };
   /** Follows changes other tabs make; returns how to stop. */
   attach() {
+    // What is open, kept for a reload, changes as often as a tab shows: no other tab reads it.
     const listener = (event: StorageEvent) => {
-      if (!event.key || event.key.startsWith(PREFIX)) this.refresh();
+      if (
+        !event.key ||
+        (event.key.startsWith(PREFIX) && event.key !== WORKSPACES && event.key !== EDITOR_VIEWS)
+      )
+        this.refresh();
     };
     window.addEventListener('storage', listener);
     return () => window.removeEventListener('storage', listener);
   }
   /**
-   * Forgets what this browser kept of the account, its drafts and which sessions were seen, and
-   * keeps nothing more of it until {@link keepAccount}: a draft saved as the page leaves the
-   * account is not written back.
+   * Forgets what this browser kept of the account, its drafts, which sessions were seen and the
+   * files and folders open, and keeps nothing more of it until {@link keepAccount}: a draft saved
+   * as the page leaves the account is not written back.
    */
   forgetAccount() {
     this.keeping = false;
@@ -323,11 +365,16 @@ export class BrowserStorage {
       /* What cannot be listed cannot be read back either. */
     }
     for (const key of keys)
-      if (key.startsWith(PREFIX + 'draft') || key.startsWith(PREFIX + 'seen:'))
+      if (
+        key.startsWith(PREFIX + 'draft') ||
+        key.startsWith(PREFIX + 'seen:') ||
+        key === WORKSPACES ||
+        key === EDITOR_VIEWS
+      )
         this.write(key, null);
     this.seenCache.clear();
   }
-  /** Keeps drafts and which sessions were seen again, as someone signs in. */
+  /** Keeps what is kept of the account again, as someone signs in. */
   keepAccount() {
     this.keeping = true;
   }
@@ -526,6 +573,42 @@ export class BrowserStorage {
     if (!this.keeping) return;
     this.write(PREFIX + 'seen:' + connectionId, JSON.stringify(seen));
     this.emit();
+  }
+  /** What `place` had open in the editor and Files, as last kept. */
+  workspace(place: string): SavedWorkspace | undefined {
+    const value = parse(this.read(WORKSPACES));
+    return object(value) ? normalizeWorkspace(value[place]) : undefined;
+  }
+  /**
+   * Keeps `change` to what `place` has open, the most recent places only; a place with nothing
+   * open is not kept.
+   */
+  saveWorkspace(place: string, change: Partial<SavedWorkspace>) {
+    if (!this.keeping) return;
+    const next = { tabs: [], open: [], ...this.workspace(place), ...change };
+    const empty = !next.tabs.length && !next.open.length && !next.folder;
+    const others = recent(parse(this.read(WORKSPACES))).filter(([key]) => key !== place);
+    const kept = empty ? others : [[place, { ...next, at: Date.now() }] as const, ...others];
+    this.write(WORKSPACES, JSON.stringify(Object.fromEntries(kept.slice(0, WORKSPACE_LIMIT))));
+  }
+  /** Forgets what `places`, as sessions deleted, had open. */
+  forgetWorkspaces(places: readonly string[]) {
+    const kept = recent(parse(this.read(WORKSPACES)));
+    const left = kept.filter(([key]) => !places.includes(key));
+    if (left.length !== kept.length)
+      this.write(WORKSPACES, JSON.stringify(Object.fromEntries(left)));
+  }
+  /** Where the file `path` was in the editor, as the editor last wrote it. */
+  editorView(path: string): unknown {
+    const value = parse(this.read(EDITOR_VIEWS));
+    return object(value) && object(value[path]) ? value[path].view : undefined;
+  }
+  /** Keeps where the file `path` is in the editor, for the most recent files only. */
+  saveEditorView(path: string, view: unknown) {
+    if (!this.keeping) return;
+    const others = recent(parse(this.read(EDITOR_VIEWS))).filter(([key]) => key !== path);
+    const kept = [[path, { view, at: Date.now() }] as const, ...others];
+    this.write(EDITOR_VIEWS, JSON.stringify(Object.fromEntries(kept.slice(0, EDITOR_VIEW_LIMIT))));
   }
   clearSubmittedDraft(connectionId: string, sessionId: string, submitted: string) {
     const current = this.draft(connectionId, sessionId);

@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.35.0] - 2026-11-02
+
+### Added
+
+- Drag the editor's tabs to put them in another order.
+- A reload keeps each session's tabs, Files' open folders, and where each file's cursor was.
+
+### Changed
+
+- One sidebar holds the pages, sessions, your account and Settings; it folds to a column of icons.
+- Settings opens over the session, in sections such as Account, Appearance, Providers and MCP.
+- MCP servers are listed one to a row, so long names and commands fit.
+- The side panel opens 300px wide, from 400px.
+- The editor's word wrap sits beside save, out of the … menu; both are icons.
+
+### Fixed
+
+- On a touch screen, the editor beside the conversation has a save button.
+- A session is not deleted while its editor holds changes not saved, which would be stranded.
+
 ## [0.34.0] - 2026-11-01
 
 ### Added
@@ -621,7 +641,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Light and dark themes, narrow layouts, and collapsible, resizable session panels.
 - Hosting at the root or a subpath, with GitHub Pages deployment on version tags.
 
-[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.34.0...HEAD
+[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.35.0...HEAD
+[0.35.0]: https://github.com/k4yt3x/mekaweb/compare/0.34.0...0.35.0
 [0.34.0]: https://github.com/k4yt3x/mekaweb/compare/0.33.0...0.34.0
 [0.33.0]: https://github.com/k4yt3x/mekaweb/compare/0.32.0...0.33.0
 [0.32.0]: https://github.com/k4yt3x/mekaweb/compare/0.31.0...0.32.0

@@ -12,6 +12,8 @@ export const MAIN_MIN = CONVERSATION_COLUMN.min;
 export const LIST_WIDTH = { default: 236, min: 180, max: 480 } as const;
 /** The column of the panels' buttons, at the right. */
 export const RAIL_WIDTH = 44;
+/** The sidebar collapsed: its column of icons, at the left, as wide as the panels'. */
+export const SIDEBAR_RAIL_WIDTH = RAIL_WIDTH;
 /**
  * The editor beside the conversation: the narrowest it gets, and the width it is given before the
  * session list is.
@@ -53,9 +55,10 @@ export function panelMakesWay(width: number, widths: WorkspaceWidths, shown: Wor
 }
 
 /**
- * The workspace's columns at `width`: the session list, unless collapsed, as asked or for want of
- * room; the conversation; the editor; the side panel; and the panels' buttons. The list gives way
- * first, then the panel, down to its narrowest, then the conversation beside the editor.
+ * The workspace's columns at `width`: the session list, or its column of icons where it is
+ * collapsed, as asked or for want of room; the conversation; the editor; the side panel; and the
+ * panels' buttons. The list gives way first, then the panel, down to its narrowest, then the
+ * conversation beside the editor.
  */
 export function workspaceLayout({
   width,
@@ -85,7 +88,7 @@ export function workspaceLayout({
     desired.list,
     Math.max(LIST_WIDTH.min, width - RAIL_WIDTH - main - (shown.panel ? desired.panel : 0)),
   );
-  const room = width - RAIL_WIDTH - (listCollapsed ? 0 : list);
+  const room = width - RAIL_WIDTH - (listCollapsed ? SIDEBAR_RAIL_WIDTH : list);
   const panel = Math.min(
     desired.panel,
     Math.max(PANEL_WIDTH.min, Math.min(PANEL_WIDTH.max, room - main)),
@@ -109,7 +112,7 @@ export function workspaceLayout({
     },
     conversation: { width: conversation, max: conversationMax },
     columns: [
-      listCollapsed ? undefined : 'var(--sessions-width)',
+      listCollapsed ? 'var(--sidebar-rail-width)' : 'var(--sessions-width)',
       shown.wide ? 'var(--conversation-width)' : 'minmax(0, 1fr)',
       shown.wide ? 'minmax(0, 1fr)' : undefined,
       shown.panel ? 'var(--panel-width)' : undefined,

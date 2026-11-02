@@ -203,7 +203,7 @@ export class ConnectionRuntime {
   }
   /**
    * Signs this device out, and forgets what this browser kept of the account: drafts, which
-   * sessions were seen, uploads under way. Until mekaweb says the sign-in has ended, it has not,
+   * sessions were seen, the files and folders open, uploads under way. Until mekaweb says the sign-in has ended, it has not,
    * so a failure is thrown and the device stays signed in.
    */
   async signOut() {

@@ -1,14 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../api/client';
 import type { GatewayClient } from '../api/gateway';
-import { EditorStore, lineEnding, readText, terminalTab, type Documents } from './store';
+import { EditorStore, lineEnding, readText, terminalTab, type Documents, type Kept } from './store';
 
 /** A file on a stand-in disk, as the gateway reads and saves it. */
 interface Disk {
   [path: string]: { text: string; version: string; binary?: boolean } | undefined;
 }
 
-function setup(disk: Disk) {
+function setup(disk: Disk, kept?: Kept) {
   let saves = 0;
   const get = vi.fn(async (path: string, query: Record<string, unknown>) => {
     if (path === '/api/files/list') {
@@ -44,7 +44,7 @@ function setup(disk: Disk) {
     disk[path] = { text: body.text as string, version };
     return { version, size: (body.text as string).length, modified: version };
   });
-  const store = new EditorStore({ get, send } as unknown as GatewayClient);
+  const store = new EditorStore({ get, send } as unknown as GatewayClient, kept);
   const held = new Map<string, string>();
   const documents: Documents = {
     touch: false,
@@ -61,7 +61,7 @@ function setup(disk: Disk) {
     }),
   };
   store.documents = documents;
-  return { store, held, documents, send };
+  return { store, held, documents, send, get };
 }
 
 describe('text as read', () => {
@@ -318,6 +318,134 @@ describe('editor store', () => {
       used: [terminalTab('t1'), terminalTab('t2')],
     });
     expect(store.lastFile('s')).toBeUndefined();
+  });
+
+  it('puts back the tabs kept, once, reading each file only as it shows', async () => {
+    const saved = new Map<string, { tabs: string[]; active?: string | undefined }>([
+      [
+        's',
+        { tabs: ['/w/a.ts', terminalTab('gone'), terminalTab('t1'), '/w/b.ts'], active: '/w/b.ts' },
+      ],
+    ]);
+    const kept: Kept = {
+      read: (place) => saved.get(place),
+      write: vi.fn((place, tabs, active) => saved.set(place, { tabs: [...tabs], active })),
+      forget: () => {},
+      view: () => undefined,
+      writeView: () => {},
+    };
+    const { store, get } = setup(
+      { '/w/a.ts': { text: 'a', version: 'v0' }, '/w/b.ts': { text: 'b', version: 'v0' } },
+      kept,
+    );
+    // A file opened before the session's terminals were known stays, after those kept.
+    store.open('s', '/w/c.png');
+    expect(kept.write).not.toHaveBeenCalled();
+    store.restore('s', [shell('t1')]);
+    expect(store.tabs('s')).toMatchObject({
+      keys: ['/w/a.ts', terminalTab('t1'), '/w/b.ts', '/w/c.png'],
+      active: '/w/c.png',
+    });
+    expect(store.terminal('t1')?.cwd).toBe('/w');
+    expect(saved.get('s')?.tabs).toEqual(['/w/a.ts', terminalTab('t1'), '/w/b.ts', '/w/c.png']);
+    expect(store.file('/w/a.ts')?.state).toBe('loading');
+    expect(get).not.toHaveBeenCalled();
+    store.show('s', '/w/a.ts');
+    store.wake('/w/a.ts');
+    store.wake('/w/a.ts');
+    await vi.waitFor(() => expect(store.file('/w/a.ts')?.state).toBe('ready'));
+    expect(get).toHaveBeenCalledTimes(1);
+    expect(saved.get('s')?.active).toBe('/w/a.ts');
+    // Only once a page: closing every tab is kept, and nothing comes back.
+    store.close('s', store.tabs('s').keys);
+    expect(saved.get('s')).toEqual({ tabs: [], active: undefined });
+    store.restore('s', [shell('t1')]);
+    expect(store.tabs('s').keys).toEqual([]);
+  });
+
+  it('shows the tab shown before a reload, as the place opens with none of its own', () => {
+    const kept: Kept = {
+      read: () => ({ tabs: ['/w/a.png', terminalTab('t1')], active: terminalTab('t1') }),
+      write: () => {},
+      forget: () => {},
+      view: () => undefined,
+      writeView: () => {},
+    };
+    const { store } = setup({}, kept);
+    store.restore('s', [shell('t1')]);
+    expect(store.tabs('s')).toMatchObject({
+      active: terminalTab('t1'),
+      used: [terminalTab('t1'), '/w/a.png'],
+    });
+    // A terminal no longer running is not shown: the first tab is.
+    store.restore('other', []);
+    expect(store.tabs('other')).toMatchObject({ keys: ['/w/a.png'], active: '/w/a.png' });
+  });
+
+  it('reads a file put back only once it shows, under the name it has by then', async () => {
+    const kept: Kept = {
+      read: () => ({ tabs: ['/w/a.ts', '/w/b.ts'], active: '/w/a.ts' }),
+      write: () => {},
+      forget: () => {},
+      view: () => undefined,
+      writeView: () => {},
+    };
+    const { store, get } = setup({ '/w/c.ts': { text: 'c', version: 'v0' } }, kept);
+    store.restore('s', []);
+    // Opened again from Files, it is not read until it shows.
+    store.open('s', '/w/b.ts');
+    store.moved('/w/b.ts', '/w/c.ts');
+    expect(get).not.toHaveBeenCalled();
+    store.wake('/w/c.ts');
+    await vi.waitFor(() =>
+      expect(store.file('/w/c.ts')).toMatchObject({ state: 'ready', text: 'c' }),
+    );
+    // Closed before it showed, it is never read.
+    store.close('s', ['/w/a.ts']);
+    store.wake('/w/a.ts');
+    expect(get).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps only the places put back, and none forgotten, as a session deleted', async () => {
+    const write = vi.fn();
+    const forget = vi.fn();
+    const kept: Kept = {
+      read: () => undefined,
+      write,
+      forget,
+      view: () => undefined,
+      writeView: () => {},
+    };
+    const { store } = setup({ '/w/d.ts': { text: 'd', version: 'v0' } }, kept);
+    store.open('never', '/w/a.png');
+    store.restore('s', []);
+    store.open('s', '/w/b.png');
+    expect(write.mock.calls.map(([place]) => place)).toEqual(['s']);
+    // A deleted session's tabs close; a file open elsewhere stays there.
+    store.open('s', '/w/d.ts');
+    store.open('other', '/w/d.ts');
+    await vi.waitFor(() => expect(store.file('/w/d.ts')?.state).toBe('ready'));
+    store.setDirty('/w/d.ts', true);
+    expect(store.dirtyIn('s').map((file) => file.path)).toEqual(['/w/d.ts']);
+    write.mockClear();
+    store.forget(['s']);
+    expect(forget).toHaveBeenCalledWith(['s']);
+    expect(store.tabs('s').keys).toEqual([]);
+    expect(store.file('/w/b.png')).toBeUndefined();
+    expect(store.file('/w/d.ts')?.dirty).toBe(true);
+    store.open('s', '/w/c.png');
+    expect(write).not.toHaveBeenCalled();
+  });
+
+  it('moves a tab, but not one closed while it was dragged', () => {
+    const { store } = setup({});
+    store.open('s', '/w/a.png');
+    store.openTerminal('s', shell('t1'));
+    store.move('s', '/w/a.png', 1);
+    expect(store.tabs('s').keys).toEqual([terminalTab('t1'), '/w/a.png']);
+    store.terminalEnded('t1');
+    store.move('s', terminalTab('t1'), 0);
+    expect(store.tabs('s').keys).toEqual(['/w/a.png']);
   });
 });
 

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type RefObject } from 'react';
 import { useInfiniteQuery, useQueries, useQuery } from '@tanstack/react-query';
-import { Import, Plus, Search, X } from 'lucide-react';
+import { Import, PanelLeftClose, Plus, Search, X } from 'lucide-react';
 import { sessionPath, type Schema } from '../api/client';
 import { useCan, useConnection, useResource, useRuntime } from '../connections/context';
 import { subagentsQuery, useSessionStates } from '../session/hooks';
@@ -9,27 +9,40 @@ import { sessionStatus, useMarkSeen, useSeenSessions } from '../session/unread';
 import { useAction } from '../components/actions';
 import { ErrorNotice, Loading } from '../components/common';
 import { Button } from '../components/ui/button';
+import { AccountMenu } from '../components/account-menu';
+import { MekaLogo } from '../components/layout';
 import { SessionListItem } from './session-list-item';
 import { foldTree, sessionTree } from './session-tree';
+import { SIDEBAR_PAGES, type SidebarPage } from './sidebar-pages';
 import { useShortcut } from '../components/use-shortcut';
 import { adjacentSession, shortcutAttribute, shortcutHint } from '../components/shortcut-keys';
 
+/**
+ * The app's sidebar: the pages of what the agent works with, the sessions, searched and started
+ * from their heading, and at its foot who is signed in, with Settings. On a wide screen it
+ * collapses, by `onCollapse`, to a column of icons.
+ */
 export function SessionList({
   selectedId,
+  page,
   onCreate,
   searchInput,
   searchOpen,
   onSearchOpen,
   onOpen,
+  onCollapse,
 }: {
   selectedId: string | undefined;
+  /** The page shown, whose row is marked so. */
+  page: SidebarPage | undefined;
   onCreate: () => void;
   searchInput: RefObject<HTMLInputElement | null>;
   searchOpen: boolean;
   onSearchOpen: (open: boolean) => void;
   onOpen: () => void;
+  onCollapse: (() => void) | undefined;
 }) {
-  const { api, controller, connection } = useConnection();
+  const { api, controller, connection, info } = useConnection();
   const authority = connection?.authority;
   const runtime = useRuntime();
   const canWrite = useCan('sessions:w');
@@ -196,6 +209,39 @@ export function SessionList({
   return (
     <>
       <header>
+        <span className="sidebar-brand">
+          <MekaLogo />
+          meka
+        </span>
+        {onCollapse && (
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="Collapse sidebar"
+            title="Collapse sidebar"
+            onClick={onCollapse}
+          >
+            <PanelLeftClose size={17} />
+          </Button>
+        )}
+      </header>
+      <nav className="sidebar-pages" aria-label="Pages">
+        {SIDEBAR_PAGES.filter((each) => !each.scope || info?.scopes.includes(each.scope)).map(
+          (each) => (
+            <a
+              key={each.id}
+              href={`#${each.path}`}
+              className="sidebar-page"
+              aria-current={each.id === page ? 'page' : undefined}
+              onClick={onOpen}
+            >
+              <each.icon size={17} aria-hidden="true" />
+              {each.name}
+            </a>
+          ),
+        )}
+      </nav>
+      <div className="sidebar-heading">
         <h2>Sessions</h2>
         <div className="session-list-actions">
           <Button
@@ -220,10 +266,10 @@ export function SessionList({
             disabled={!canWrite}
             onClick={onCreate}
           >
-            <Plus size={18} />
+            <Plus size={17} />
           </Button>
         </div>
-      </header>
+      </div>
       {searchOpen && (
         <div id="session-search" className="session-search">
           <Search size={15} aria-hidden="true" />
@@ -316,35 +362,38 @@ export function SessionList({
       </div>
       <div className="list-footer">
         <ErrorNotice error={action.error} />
-        <label className={`button button-ghost ${!canWrite ? 'disabled' : ''}`}>
-          <Import size={14} /> Import archive
-          <input
-            className="sr-only"
-            type="file"
-            accept="application/json,.json"
-            disabled={!canWrite || action.busy}
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              if (file)
-                void action.run(async () => {
-                  if (file.size > 25 * 1024 * 1024)
-                    throw new Error('This archive exceeds the browser import limit of 25 MiB.');
-                  const body: unknown = JSON.parse(await file.text());
-                  const result = await api?.mutate<Schema['ImportResponse']>(
-                    'POST',
-                    '/v1/sessions/import',
-                    body,
-                  );
-                  if (result && runtime.getSnapshot().api === api) {
-                    await runtime.queries.invalidateQueries();
-                    if (runtime.getSnapshot().api === api)
-                      location.hash = '/sessions/' + result.session_id;
-                  }
-                });
-              event.target.value = '';
-            }}
-          />
-        </label>
+        <AccountMenu>
+          <label className={`account-action ${!canWrite ? 'disabled' : ''}`} title="Import archive">
+            <Import size={16} aria-hidden="true" />
+            <span className="sr-only">Import archive</span>
+            <input
+              className="sr-only"
+              type="file"
+              accept="application/json,.json"
+              disabled={!canWrite || action.busy}
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (file)
+                  void action.run(async () => {
+                    if (file.size > 25 * 1024 * 1024)
+                      throw new Error('This archive exceeds the browser import limit of 25 MiB.');
+                    const body: unknown = JSON.parse(await file.text());
+                    const result = await api?.mutate<Schema['ImportResponse']>(
+                      'POST',
+                      '/v1/sessions/import',
+                      body,
+                    );
+                    if (result && runtime.getSnapshot().api === api) {
+                      await runtime.queries.invalidateQueries();
+                      if (runtime.getSnapshot().api === api)
+                        location.hash = '/sessions/' + result.session_id;
+                    }
+                  });
+                event.target.value = '';
+              }}
+            />
+          </label>
+        </AccountMenu>
       </div>
     </>
   );

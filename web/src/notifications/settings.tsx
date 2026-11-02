@@ -22,7 +22,6 @@ export function NotificationSettings() {
               : state.error;
   return (
     <section className="panel">
-      <h2>Notifications</h2>
       <div className="notification-settings-row">
         <SwitchField
           label="Push notifications on this device"

@@ -7,6 +7,7 @@ import { DEFAULT_INPUT_HEIGHT, emptyComposerOptions } from '../session/composer-
 import { MessageComposer } from '../components/message-composer';
 import { Field, ErrorNotice } from '../components/common';
 import { NoticeMessage } from '../components/notice-message';
+import { SettingsLink } from '../components/settings-link';
 import { Button } from '../components/ui/button';
 import { Dialog } from '../components/ui/dialog';
 import { useSessionNavigation } from './session-navigation';
@@ -59,7 +60,8 @@ export function NewConversation() {
             {noProfile && (
               <p className="notice">
                 <span>
-                  meka has no profile yet. <a href="#/providers">Add one in Providers</a> to start.
+                  meka has no profile yet.{' '}
+                  <SettingsLink section="providers">Add one in Providers</SettingsLink> to start.
                 </span>
               </p>
             )}

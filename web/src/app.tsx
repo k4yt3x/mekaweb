@@ -1,32 +1,20 @@
-import { useEffect, useRef, useState, Suspense } from 'react';
+import { useCallback, useEffect, useRef, useState, Suspense } from 'react';
 import { Outlet, useLocation } from '@tanstack/react-router';
-import {
-  BookOpen,
-  BrainCircuit,
-  CalendarClock,
-  FolderKanban,
-  Menu,
-  MessageSquare,
-  Plug,
-  Settings,
-  Sparkles,
-} from 'lucide-react';
 import type { ConnectionRuntime } from './connections/runtime';
 import { RuntimeContext, useConnection, useRuntime, useSettings } from './connections/context';
 import { SignIn } from './features/sign-in';
 import { Unavailable } from './features/unavailable';
 import { useSessionStates } from './session/hooks';
 import { Button } from './components/ui/button';
-import { Dialog } from './components/ui/dialog';
 import { ErrorNotice, Loading } from './components/common';
-import { NavigationToggle } from './components/layout';
 import { ConnectionBanner } from './components/connection-banner';
-import { AccountMenu } from './components/account-menu';
 import { trackFocusInput } from './components/focus-input';
 import { NotificationToasts } from './notifications/toasts';
 import { useVisualViewport } from './components/visual-viewport';
-import { KeyboardShortcutsButton, KeyboardShortcutsDialog } from './components/shortcuts';
 import { useShortcut } from './components/use-shortcut';
+import { SettingsControl, type SettingsSection } from './components/settings-control';
+import { SettingsDialog } from './features/settings-dialog';
+import { sidebarPage } from './features/sidebar-pages';
 import { SessionNavigationContext } from './features/session-navigation';
 import { useNewConversation } from './features/use-new-conversation';
 import { PromptCard } from './features/approval-cards';
@@ -51,7 +39,6 @@ function Workspace() {
   const state = useConnection();
   const runtime = useRuntime();
   const settings = useSettings();
-  const [nav, setNav] = useState(false);
   const location = useLocation();
   const sessions = useSessionStates();
   // meka's server feed, followed on every page: the session list reads it, and any turn ending
@@ -59,8 +46,12 @@ function Workspace() {
   useEffect(() => state.controller?.followServer(), [state.controller]);
   const [mobileSessionsOpen, setMobileSessionsOpen] = useState(false);
   const [searchRequested, setSearchRequested] = useState(false);
-  const [keymap, setKeymap] = useState(false);
-  const keymapFocus = useRef<HTMLElement | null>(null);
+  // Settings, open over whatever is shown, at its section.
+  const [settingsShown, setSettingsShown] = useState<SettingsSection>();
+  const openSettings = useCallback(
+    (section: SettingsSection = 'general') => setSettingsShown(section),
+    [],
+  );
   const composerFocusRef = useRef<string | null>(null);
   useEffect(() => {
     const expected =
@@ -104,12 +95,6 @@ function Workspace() {
       }
     }
   }
-  function openKeymap() {
-    keymapFocus.current =
-      document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    setNav(false);
-    setKeymap(true);
-  }
   useShortcut('newSession', () => newSession(), canCreate);
   useShortcut(
     'searchSessions',
@@ -117,21 +102,21 @@ function Workspace() {
       composerFocusRef.current = null;
       setSearchRequested(true);
       setMobileSessionsOpen(true);
+      // The sidebar's pages show the sessions beside them; anywhere else goes to them.
       if (
         location.pathname !== '/' &&
         location.pathname !== '/sessions' &&
-        !location.pathname.startsWith('/sessions/')
+        !location.pathname.startsWith('/sessions/') &&
+        !sidebarPage(location.pathname)
       )
         window.location.hash = '/sessions';
     },
     Boolean(state.api && state.info?.scopes.includes('sessions:r')),
   );
+  // The shortcuts are a section of Settings, which the same keys close again.
   useShortcut(
     'showShortcuts',
-    () => {
-      if (keymap) setKeymap(false);
-      else openKeymap();
-    },
+    () => setSettingsShown((shown) => (shown === 'shortcuts' ? undefined : 'shortcuts')),
     Boolean(state.api),
   );
   useEffect(() => {
@@ -216,155 +201,76 @@ function Workspace() {
       </>
     );
   return (
-    <SessionNavigationContext.Provider
-      value={{
-        newSession,
-        searchRequested,
-        finishSearch: () => setSearchRequested(false),
-        composerFocusRef,
-        mobileSessionsOpen,
-        setMobileSessionsOpen,
-        newConversation,
-      }}
-    >
-      <div className="app-frame">
-        <ConnectionBanner />
-        <div
-          className={`app-shell ${settings.layout.navigationCollapsed ? 'navigation-collapsed' : ''}`}
-        >
-          <a
-            href="#main-content"
-            className="skip-link"
-            onClick={(event) => {
-              event.preventDefault();
-              document.getElementById('main-content')?.focus();
-            }}
-          >
-            Skip to content
-          </a>
-          <aside
-            id="workspace-navigation"
-            className="app-sidebar"
-            aria-label="Workspace navigation"
-          >
-            <Navigation onShortcuts={openKeymap} />
-          </aside>
-          {settings.layout.navigationCollapsed &&
-            (!state.info?.scopes.includes('sessions:r') ||
-              (!location.pathname.startsWith('/sessions') && location.pathname !== '/')) && (
-              <NavigationToggle className="navigation-restore" />
-            )}
-          <header className="mobile-header">
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label="Open navigation"
-              onClick={() => setNav(true)}
-            >
-              <Menu size={20} />
-            </Button>
-            <strong>meka</strong>
-          </header>
-          <main id="main-content" tabIndex={-1} className="main-content">
-            <Suspense
-              fallback={
-                <div className="page">
-                  <Loading />
-                </div>
-              }
-            >
-              <Outlet />
-            </Suspense>
-          </main>
-          <Dialog
-            open={nav}
-            onOpenChange={setNav}
-            title="Navigation"
-            placement="left"
-            onCloseAutoFocus={(event) => {
-              if (keymap) event.preventDefault();
-            }}
-          >
-            <Navigation onNavigate={() => setNav(false)} onShortcuts={openKeymap} />
-          </Dialog>
-          <KeyboardShortcutsDialog
-            open={keymap}
-            onOpenChange={setKeymap}
-            returnFocus={keymapFocus}
-          />
-          {runtime.storage.warning && (
-            <p className="storage-warning" role="status">
-              {runtime.storage.warning}
-            </p>
-          )}
-          <div className="approval-tray" role="region" aria-label="Pending approvals">
-            {sessions
-              .flatMap((s) => s.approvals)
-              .map((approval) => (
-                <PromptCard key={approval.id} approval={approval} />
-              ))}
-          </div>
-          <span className="sr-only" aria-live="polite">
-            {sessions.reduce((sum, s) => sum + s.approvals.length, 0)} approvals waiting.{' '}
-            {location.pathname.split('/')[1] || 'Sessions'} view.
-          </span>
-        </div>
-      </div>
-    </SessionNavigationContext.Provider>
-  );
-}
-function Navigation({
-  onNavigate,
-  onShortcuts,
-}: {
-  onNavigate?: () => void;
-  onShortcuts: () => void;
-}) {
-  const state = useConnection();
-  const location = useLocation();
-  const entries = [
-    // By how often each is used, related pages together; the setup pages last.
-    { name: 'Sessions', path: '/sessions', icon: MessageSquare, scope: 'sessions:r' },
-    { name: 'Projects', path: '/projects', icon: FolderKanban },
-    { name: 'Memories', path: '/memory', icon: BookOpen, scope: 'memory:r' },
-    { name: 'Skills', path: '/skills', icon: Sparkles },
-    { name: 'Schedules', path: '/schedules', icon: CalendarClock, scope: 'schedule:r' },
-    { name: 'MCP', path: '/mcp', icon: Plug },
-    { name: 'Providers', path: '/providers', icon: BrainCircuit },
-    { name: 'Settings', path: '/settings', icon: Settings },
-  ];
-  const pages = entries.filter((entry) => !entry.scope || state.info?.scopes.includes(entry.scope));
-  const link = (entry: (typeof entries)[number]) => {
-    const active =
-      location.pathname.startsWith(entry.path) ||
-      (entry.path === '/sessions' && location.pathname === '/');
-    return (
-      <a
-        href={'#' + entry.path}
-        key={entry.path}
-        className={active ? 'active' : ''}
-        aria-current={active ? 'page' : undefined}
-        onClick={onNavigate}
+    <SettingsControl.Provider value={openSettings}>
+      <SessionNavigationContext.Provider
+        value={{
+          newSession,
+          searchRequested,
+          finishSearch: () => setSearchRequested(false),
+          composerFocusRef,
+          mobileSessionsOpen,
+          setMobileSessionsOpen,
+          newConversation,
+        }}
       >
-        <entry.icon size={18} />
-        {entry.name}
-      </a>
-    );
-  };
-  return (
-    <>
-      <div className="navigation-heading">
-        <a href="#/sessions" className="brand" onClick={onNavigate}>
-          <span>meka</span>
-        </a>
-        {!onNavigate && <NavigationToggle />}
-      </div>
-      <nav aria-label="Main navigation">
-        {pages.filter((entry) => entry.path !== '/settings').map(link)}
-        <KeyboardShortcutsButton onClick={onShortcuts} />
-        {pages.filter((entry) => entry.path === '/settings').map(link)}
-      </nav>
-      <AccountMenu onNavigate={onNavigate} />
-    </>
+        <div className="app-frame">
+          <ConnectionBanner />
+          <div className="app-shell">
+            <a
+              href="#main-content"
+              className="skip-link"
+              onClick={(event) => {
+                event.preventDefault();
+                // Past the sidebar, to the conversation or the page beside it, which takes the
+                // keyboard only until it leaves.
+                const target = Array.from(
+                  document.querySelectorAll<HTMLElement>('#session-main, .workspace-page'),
+                ).find((each) => each.getClientRects().length > 0);
+                if (!target) return document.getElementById('main-content')?.focus();
+                target.tabIndex = -1;
+                target.addEventListener('blur', () => target.removeAttribute('tabindex'), {
+                  once: true,
+                });
+                target.focus();
+              }}
+            >
+              Skip to content
+            </a>
+            <main id="main-content" tabIndex={-1} className="main-content">
+              <Suspense
+                fallback={
+                  <div className="page">
+                    <Loading />
+                  </div>
+                }
+              >
+                <Outlet />
+              </Suspense>
+            </main>
+            <SettingsDialog
+              section={settingsShown}
+              onSection={setSettingsShown}
+              onClose={() => setSettingsShown(undefined)}
+            />
+            {runtime.storage.warning && (
+              <p className="storage-warning" role="status">
+                {runtime.storage.warning}
+              </p>
+            )}
+            <div className="approval-tray" role="region" aria-label="Pending approvals">
+              {sessions
+                .flatMap((s) => s.approvals)
+                .map((approval) => (
+                  <PromptCard key={approval.id} approval={approval} />
+                ))}
+            </div>
+            <span className="sr-only" aria-live="polite">
+              {sessions.reduce((sum, s) => sum + s.approvals.length, 0)} approvals waiting.{' '}
+              {location.pathname.split('/')[1] || 'Sessions'} view.
+            </span>
+          </div>
+        </div>
+      </SessionNavigationContext.Provider>
+    </SettingsControl.Provider>
   );
 }

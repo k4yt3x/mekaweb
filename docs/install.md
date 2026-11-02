@@ -101,7 +101,7 @@ mekaweb has one user. Add them, choosing a password of at least 10 characters:
 mekaweb user add <username>
 ```
 
-After signing in, add a passkey in **Settings → Passkeys**. `mekaweb user passwd` sets a forgotten password and signs every device out, unless given `--keep-devices`; `mekaweb user reset-passkeys` removes lost passkeys and signs every device out. A running mekaweb ends those devices' open connections within a minute.
+After signing in, add a passkey in **Settings → Account → Passkeys**. `mekaweb user passwd` sets a forgotten password and signs every device out, unless given `--keep-devices`; `mekaweb user reset-passkeys` removes lost passkeys and signs every device out. A running mekaweb ends those devices' open connections within a minute.
 
 ## 5. Run mekaweb as a service
 

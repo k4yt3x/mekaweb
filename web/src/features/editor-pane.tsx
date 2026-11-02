@@ -5,7 +5,6 @@ import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import {
   AtSign,
   BookOpen,
-  Check,
   ChevronDown,
   Code,
   Copy,
@@ -14,6 +13,7 @@ import {
   FilePlus,
   FileQuestion,
   FolderOpen,
+  LoaderCircle,
   MoreHorizontal,
   Plus,
   RotateCw,
@@ -94,6 +94,18 @@ export function EditorPane({
       ?.querySelector('.code-tab[data-selected]')
       ?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }, [tabs.active]);
+  // A tab dragged with a mouse or pen shows, and moves among the others as it passes their middles.
+  const drag = useRef<{ key: string; pointer: number; x: number; moved: boolean }>(undefined);
+  // The click that ends a drag does not count as one on what it ends over.
+  const dragged = useRef(false);
+  function endDrag(pointer: number) {
+    const current = drag.current;
+    if (current?.pointer !== pointer) return;
+    drag.current = undefined;
+    if (!current.moved) return;
+    dragged.current = true;
+    setTimeout(() => (dragged.current = false));
+  }
   // Changes to the open files' folders are looked at for the files themselves.
   useFolderWatches(store.folders(place), (folder) => void store.folderChanged(folder));
   const terminals = tabs.keys.flatMap((key) => {
@@ -255,6 +267,54 @@ export function EditorPane({
             // A mouse's wheel scrolls the tabs sideways.
             if (!event.deltaX) event.currentTarget.scrollLeft += event.deltaY;
           }}
+          onPointerDown={(event) => {
+            dragged.current = false;
+            drag.current = undefined;
+            const target = event.target instanceof Element ? event.target : null;
+            const tab = target?.closest<HTMLElement>('.code-tab')?.dataset.tab;
+            // A finger scrolls the tabs instead.
+            if (
+              event.button !== 0 ||
+              event.pointerType === 'touch' ||
+              tab === undefined ||
+              target?.closest('.code-tab-close')
+            )
+              return;
+            drag.current = { key: tab, pointer: event.pointerId, x: event.clientX, moved: false };
+          }}
+          onPointerMove={(event) => {
+            const current = drag.current;
+            if (current?.pointer !== event.pointerId) return;
+            // Let go outside the tabs, before it was dragged far enough to take them.
+            if (!(event.buttons & 1)) {
+              drag.current = undefined;
+              return;
+            }
+            if (!current.moved) {
+              if (Math.abs(event.clientX - current.x) < 5) return;
+              current.moved = true;
+              event.currentTarget.setPointerCapture(event.pointerId);
+              store.show(place, current.key);
+            }
+            // Its place is after every other tab whose middle the pointer has passed.
+            const index = [
+              ...event.currentTarget.querySelectorAll<HTMLElement>('.code-tab'),
+            ].filter((each) => {
+              if (each.dataset.tab === current.key) return false;
+              const box = each.getBoundingClientRect();
+              return box.left + box.width / 2 < event.clientX;
+            }).length;
+            if (store.tabs(place).keys.indexOf(current.key) !== index)
+              store.move(place, current.key, index);
+          }}
+          onPointerUp={(event) => endDrag(event.pointerId)}
+          onPointerCancel={(event) => endDrag(event.pointerId)}
+          onLostPointerCapture={(event) => endDrag(event.pointerId)}
+          onClickCapture={(event) => {
+            if (!dragged.current) return;
+            dragged.current = false;
+            event.stopPropagation();
+          }}
         >
           {tabs.keys.map((key) => (
             <Tab
@@ -312,6 +372,7 @@ export function EditorPane({
           key={active.serial}
           store={store}
           file={active}
+          full={full}
           items={items}
           fontSize={fontSize}
           onZoom={zoomBy}
@@ -376,6 +437,7 @@ function Tab({
       <ContextMenu.Trigger asChild>
         <div
           className="code-tab"
+          data-tab={tab}
           data-selected={selected || undefined}
           data-dirty={file?.dirty || undefined}
           data-deleted={file?.deleted || undefined}
@@ -396,7 +458,7 @@ function Tab({
             onClick={onShow}
           >
             {terminal === undefined ? (
-              <img src={iconUrl(fileIconName(name), dark)} alt="" />
+              <img src={iconUrl(fileIconName(name), dark)} alt="" draggable={false} />
             ) : (
               <SquareTerminal size={15} aria-hidden="true" />
             )}
@@ -504,16 +566,8 @@ function PhoneBar({
   );
 }
 
-/** The "…" menu over what a tab shows, with `before` ahead of the tab's own items. */
-function MoreMenu({
-  label,
-  before,
-  children,
-}: {
-  label: string;
-  before?: ReactNode;
-  children: ReactNode;
-}) {
+/** The "…" menu over what a tab shows. */
+function MoreMenu({ label, children }: { label: string; children: ReactNode }) {
   const collisionPadding = useOverlayPadding();
   return (
     <DropdownMenu.Root modal={false}>
@@ -529,7 +583,6 @@ function MoreMenu({
           sideOffset={4}
           collisionPadding={collisionPadding}
         >
-          {before}
           {children}
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
@@ -584,12 +637,15 @@ function TerminalBody({
 function EditorBody({
   store,
   file,
+  full,
   items,
   fontSize,
   onZoom,
 }: {
   store: EditorStore;
   file: OpenFile;
+  /** Over the whole screen, with the phone's bar, which saves. */
+  full: boolean;
   items: (key: string, parts: MenuParts) => ReactNode;
   fontSize: number;
   onZoom: (step: -1 | 0 | 1) => void;
@@ -611,6 +667,8 @@ function EditorBody({
   const conflict = file.conflict;
   const showCompare = comparing && conflict?.kind === 'changed' && !touch;
   const toggleWrap = () => runtime.storage.editorWordWrap(!wrap);
+  // A file put back after a reload is read as it shows.
+  useEffect(() => store.wake(file.path), [store, file.path]);
   const bar = (
     <div className="code-file-bar">
       <span className="code-file-path" title={file.path}>
@@ -623,44 +681,34 @@ function EditorBody({
           {previewing ? 'Edit' : 'Preview'}
         </Button>
       )}
+      {/* A touch screen's editor always wraps. */}
       {text && !touch && (
         <Button
-          size="sm"
-          variant={file.dirty ? 'default' : 'ghost'}
-          disabled={!file.dirty || file.saving || readOnly}
-          title="Save (Ctrl+S)"
-          onClick={() => void store.save(file.path)}
+          size="icon"
+          variant="ghost"
+          className="wrap-toggle"
+          aria-label="Word wrap"
+          aria-pressed={wrap}
+          title={`Word wrap (${appleKeyboard() ? '⌥Z' : 'Alt+Z'})`}
+          onClick={toggleWrap}
         >
-          <Save size={14} />
-          {file.saving ? 'Saving…' : 'Save'}
+          <WrapText size={15} />
         </Button>
       )}
-      <MoreMenu
-        label={`More for ${file.name}`}
-        before={
-          // A touch screen's editor always wraps, as a phone is narrow.
-          text &&
-          !touch && (
-            <>
-              <DropdownMenu.CheckboxItem
-                className="menu-item"
-                checked={wrap}
-                onCheckedChange={toggleWrap}
-              >
-                <WrapText size={14} />
-                Word wrap
-                <span className="menu-item-hint">{appleKeyboard() ? '⌥Z' : 'Alt+Z'}</span>
-                <DropdownMenu.ItemIndicator className="menu-item-check">
-                  <Check size={14} />
-                </DropdownMenu.ItemIndicator>
-              </DropdownMenu.CheckboxItem>
-              <DropdownMenu.Separator className="menu-separator" />
-            </>
-          )
-        }
-      >
-        {items(file.path, DropdownMenu)}
-      </MoreMenu>
+      {text && !full && (
+        <Button
+          size="icon"
+          variant={file.dirty ? 'default' : 'ghost'}
+          aria-label="Save"
+          aria-busy={file.saving}
+          disabled={!file.dirty || file.saving || readOnly}
+          title={`Save (${appleKeyboard() ? '⌘S' : 'Ctrl+S'})`}
+          onClick={() => void store.save(file.path)}
+        >
+          {file.saving ? <LoaderCircle size={15} className="spin" /> : <Save size={15} />}
+        </Button>
+      )}
+      <MoreMenu label={`More for ${file.name}`}>{items(file.path, DropdownMenu)}</MoreMenu>
     </div>
   );
   if (file.state === 'loading')

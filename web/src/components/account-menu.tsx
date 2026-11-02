@@ -1,17 +1,18 @@
-import { LogOut, UserRound } from 'lucide-react';
-import { useNavigate } from '@tanstack/react-router';
+import type { ReactNode } from 'react';
+import { LogOut, Settings, UserRound } from 'lucide-react';
 import { useConnection, useRuntime } from '../connections/context';
 import { useAction } from './actions';
 import { ErrorNotice } from './common';
+import { useOpenSettings } from './settings-control';
 
 /**
- * Who is signed in, at the foot of the navigation: the name opens the account's settings, and the
- * square beside it signs out.
+ * Who is signed in, at the foot of the sidebar: the name opens the account's part of Settings,
+ * and the buttons after it open Settings and sign out, with `children` before them.
  */
-export function AccountMenu({ onNavigate }: { onNavigate?: (() => void) | undefined }) {
+export function AccountMenu({ children }: { children?: ReactNode }) {
   const state = useConnection();
   const runtime = useRuntime();
-  const navigate = useNavigate();
+  const openSettings = useOpenSettings();
   const signingOut = useAction();
   const account = state.account;
   if (!account) return null;
@@ -32,23 +33,25 @@ export function AccountMenu({ onNavigate }: { onNavigate?: (() => void) | undefi
           title={`${account.username} · ${account.device_name} · ${status}`}
           onClick={(event) => {
             event.preventDefault();
-            onNavigate?.();
-            // Settings opens at its account section, which leads it; scrolled away, it comes back.
-            void navigate({ to: '/settings' }).then(() =>
-              requestAnimationFrame(() => {
-                const section = document.getElementById('account');
-                section?.scrollIntoView({ block: 'start' });
-                section?.focus({ preventScroll: true });
-              }),
-            );
+            openSettings('account');
           }}
         >
           <UserRound size={18} aria-hidden="true" />
           <span className="account-name">{account.username}</span>
         </a>
+        {children}
         <button
           type="button"
-          className="account-sign-out"
+          className="account-action"
+          aria-label="Settings"
+          title="Settings"
+          onClick={() => openSettings()}
+        >
+          <Settings size={16} aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          className="account-action account-sign-out"
           aria-label="Sign out"
           title="Sign out"
           disabled={signingOut.busy}

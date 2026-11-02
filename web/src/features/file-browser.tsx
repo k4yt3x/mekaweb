@@ -31,7 +31,7 @@ import {
   Upload,
   X,
 } from 'lucide-react';
-import { errorMessage } from '../api/client';
+import { ApiError, errorMessage } from '../api/client';
 import {
   gatewayKey,
   useConnection,
@@ -116,12 +116,26 @@ function sharedUploads(runtime: ReturnType<typeof useRuntime>, landed: () => voi
   return shared;
 }
 
-/** The folder Files last showed for each place, so closing it loses nothing until a reload. */
+/**
+ * The folder Files last showed for each place, so closing it loses nothing; the browser keeps it
+ * too, with the open folders, for a reload.
+ */
 const lastFolders = new Map<string, string>();
 /** The folders open in the tree for each place. */
 const openFolders = new Map<string, ReadonlySet<string>>();
 /** The request from elsewhere each place last followed, so showing Files again does not repeat it. */
 const followedTargets = new Map<string, number>();
+const forgetting = new WeakSet<ReturnType<typeof useRuntime>>();
+/** Lets go of what Files remembers of each place as the account signs out. */
+function forgetOnSignOut(runtime: ReturnType<typeof useRuntime>) {
+  if (forgetting.has(runtime)) return;
+  forgetting.add(runtime);
+  runtime.onSignOut(() => {
+    lastFolders.clear();
+    openFolders.clear();
+    followedTargets.clear();
+  });
+}
 
 /** What is chosen in the tree: the paths, the one a range starts from, and how it was begun. */
 interface Chosen {
@@ -143,13 +157,17 @@ const nothing: Chosen = { paths: new Set(), held: false };
 export function FileBrowser({
   place,
   start,
+  keep,
   target,
 }: {
   place: string;
   start: string;
+  /** Whether the browser keeps where Files is, for a reload, as it does for a session. */
+  keep: boolean;
   target?: FilesTarget | undefined;
 }) {
   const runtime = useRuntime();
+  forgetOnSignOut(runtime);
   const queries = useQueryClient();
   const { account } = useConnection();
   const device = account?.device_id;
@@ -157,16 +175,29 @@ export function FileBrowser({
   const coarse = useMediaQuery('(pointer: coarse)');
   // Opened by a request from elsewhere, not followed yet, it starts where that asks.
   const fresh = target && followedTargets.get(place) !== target.nonce ? target : undefined;
-  const [root, setRoot] = useState(() => fresh?.path ?? lastFolders.get(place) ?? start);
-  const [hidden, setHidden] = useState(false);
-  const [open, setOpenState] = useState<ReadonlySet<string>>(
-    () => openFolders.get(place) ?? new Set(),
+  // What this browser kept of the place, the first time it shows since a reload.
+  const [saved] = useState(() =>
+    !keep || (lastFolders.has(place) && openFolders.has(place))
+      ? undefined
+      : runtime.storage.workspace(place),
   );
+  const [root, setRoot] = useState(
+    () => fresh?.path ?? lastFolders.get(place) ?? saved?.folder ?? start,
+  );
+  const [hidden, setHidden] = useState(false);
+  const [open, setOpenState] = useState<ReadonlySet<string>>(() => {
+    const known = openFolders.get(place);
+    if (known) return known;
+    const kept = new Set(saved?.open);
+    openFolders.set(place, kept);
+    return kept;
+  });
   /** Changes the open folders from what they are by then, as an action that awaits finds them. */
   function updateOpen(change: (open: ReadonlySet<string>) => ReadonlySet<string>) {
     setOpenState((current) => {
       const next = change(current);
       openFolders.set(place, next);
+      if (keep) runtime.storage.saveWorkspace(place, { open: [...next] });
       return next;
     });
   }
@@ -187,6 +218,18 @@ export function FileBrowser({
   const input = useRef<HTMLInputElement>(null);
   const folderInput = useRef<HTMLInputElement>(null);
   const listing = useGateway<Listing>(LIST, { path: root });
+  // A folder kept from before a reload that is gone since opens Files where it starts instead,
+  // once: one typed afterwards shows that it is not there.
+  const [keptRoot, setKeptRoot] = useState(saved?.folder);
+  if (
+    keptRoot &&
+    root === keptRoot &&
+    listing.error instanceof ApiError &&
+    listing.error.status === 404
+  ) {
+    setKeptRoot(undefined);
+    setRoot(start);
+  }
   // The working directory as the server resolves it, where it is written from home.
   const home = useGateway<Listing>(LIST, { path: start }, start.startsWith('~'));
   const startFolder = home.data?.path ?? start;
@@ -201,8 +244,12 @@ export function FileBrowser({
   // Only a folder that listed is kept, so a mistyped path is not where Files opens next.
   const listed = listing.data?.path;
   useEffect(() => {
-    if (listed) lastFolders.set(place, listed);
-  }, [place, listed]);
+    if (!listed) return;
+    lastFolders.set(place, listed);
+    // The browser keeps it only away from where Files starts: a place left as it was is not kept.
+    if (keep)
+      runtime.storage.saveWorkspace(place, { folder: listed === startFolder ? undefined : listed });
+  }, [runtime, place, keep, listed, startFolder]);
   /** What the tree knows of each folder's entries: the shown one's, then those in the cache. */
   const listings: Listings = {
     get: (path) => {

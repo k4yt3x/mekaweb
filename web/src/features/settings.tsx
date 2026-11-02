@@ -1,5 +1,5 @@
 import { useAction } from '../components/actions';
-import { useState, type FormEvent } from 'react';
+import { useState, type FormEvent, type ReactNode } from 'react';
 import { FileCog, Pencil, RefreshCw, RotateCcw } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import {
@@ -24,34 +24,116 @@ import { SwitchField } from '../components/ui/switch';
 import { ErrorNotice, Field, Json, Loading, Timestamp } from '../components/common';
 import { PixelInput } from '../components/pixel-input';
 import { appleKeyboard } from '../components/shortcut-keys';
+import { SettingsLink } from '../components/settings-link';
 import { NotificationSettings } from '../notifications/settings';
 import { AccountSettings } from './account';
 
-export function SettingsPage() {
-  const settings = useSettings();
-  const runtime = useRuntime();
-  const state = useConnection();
-  const action = useAction();
-  const queries = useQueryClient();
-  const status = useGateway<Gateway['StatusView']>('/api/status', undefined, true, 30_000);
-  const meka = status.data?.meka;
-  const live = useResource<Schema['LiveResponse']>('/v1/health/live');
-  const ready = useResource<Schema['ReadyResponse']>('/v1/health/ready');
-  const config = useResource<Schema['ConfigResponse']>('/v1/config', undefined, useCan('config:r'));
-  const canConfigure = useCan('config:w');
-  const edited = config.data?.config_changed;
-  const reload = useAction();
-  const [reloaded, setReloaded] = useState<string>();
+/** A section of Settings: its heading, with `actions` beside it, over its groups. */
+function SectionPage({
+  title,
+  actions,
+  children,
+}: {
+  title: string;
+  actions?: ReactNode;
+  children: ReactNode;
+}) {
   return (
-    <div className="page settings-page">
+    <div className="page settings-page settings-groups">
       <header className="page-heading">
         <div>
-          <h1>Settings</h1>
+          <h1>{title}</h1>
         </div>
+        {actions}
       </header>
+      {children}
+    </div>
+  );
+}
+
+/** How mekaweb behaves: what a conversation shows, and the data this device uses. */
+export function GeneralSettings() {
+  const settings = useSettings();
+  const runtime = useRuntime();
+  return (
+    <SectionPage title="General">
+      <section className="panel">
+        <h2>Conversation</h2>
+        <div className="form-stack">
+          <SwitchField
+            label="Fold finished steps"
+            checked={settings.foldSteps}
+            onCheckedChange={(checked) => runtime.storage.foldSteps(checked)}
+          />
+          <SwitchField
+            label="Show context added by meka"
+            checked={settings.showTurnContext}
+            onCheckedChange={(checked) => runtime.storage.showTurnContext(checked)}
+          />
+        </div>
+      </section>
+      <section className="panel">
+        <h2>Data saver</h2>
+        <SwitchField
+          label="Save mobile data on this device"
+          checked={settings.dataSaver}
+          onCheckedChange={(checked) => runtime.storage.dataSaver(checked)}
+        />
+        <p className="muted small">Fewer messages, pictures on tap, and batched replies.</p>
+      </section>
+    </SectionPage>
+  );
+}
+
+export function AccountSection() {
+  return (
+    <SectionPage title="Account">
       <AccountSettings />
+    </SectionPage>
+  );
+}
+
+export function NotificationsSection() {
+  return (
+    <SectionPage title="Notifications">
+      <NotificationSettings />
+    </SectionPage>
+  );
+}
+
+/** How mekaweb looks in this browser: its theme, the conversation, and the editor's text. */
+export function AppearanceSettings() {
+  const settings = useSettings();
+  const runtime = useRuntime();
+  const status = useGateway<Gateway['StatusView']>('/api/status');
+  return (
+    <SectionPage
+      title="Appearance"
+      actions={
+        <Button
+          variant="secondary"
+          disabled={
+            settings.conversationFontSize === CONVERSATION_FONT.default &&
+            settings.conversationMaxWidth === CONVERSATION_WIDTH.default &&
+            settings.conversationAnchor === 'page' &&
+            settings.conversationOffset === CONVERSATION_OFFSET.default &&
+            settings.terminalFontSize === TERMINAL_FONT.default &&
+            settings.editorFontSize === EDITOR_FONT.default
+          }
+          title="Reset the font sizes, width, and position; the color theme is kept"
+          onClick={() => {
+            runtime.storage.resetConversationAppearance();
+            runtime.storage.terminalFontSize(TERMINAL_FONT.default);
+            runtime.storage.editorFontSize(EDITOR_FONT.default);
+          }}
+        >
+          <RotateCcw size={16} />
+          Restore defaults
+        </Button>
+      }
+    >
       <section className="panel appearance-panel">
-        <h2>Appearance</h2>
+        <h2>Theme</h2>
         <div className="appearance-fields">
           <Field label="Color theme">
             <select
@@ -65,6 +147,11 @@ export function SettingsPage() {
               <option value="dark">Dark</option>
             </select>
           </Field>
+        </div>
+      </section>
+      <section className="panel appearance-panel">
+        <h2>Conversation</h2>
+        <div className="appearance-fields">
           <Field label="Conversation font size">
             <PixelInput
               label="Conversation font size"
@@ -107,6 +194,27 @@ export function SettingsPage() {
               }}
             />
           </Field>
+        </div>
+      </section>
+      <section className="panel appearance-panel">
+        <h2>{status.data?.features.terminal ? 'Editor and terminal' : 'Editor'}</h2>
+        <div className="appearance-fields">
+          <Field label="Editor font size">
+            <PixelInput
+              label="Editor font size"
+              value={settings.editorFontSize}
+              step={1}
+              min={EDITOR_FONT.min}
+              hint={
+                appleKeyboard()
+                  ? 'Cmd with =, - or 0, or a pinch, changes it until the editor closes.'
+                  : 'Ctrl with the wheel, =, - or 0 changes it until the editor closes.'
+              }
+              onCommit={(size) => {
+                if (typeof size === 'number') runtime.storage.editorFontSize(size);
+              }}
+            />
+          </Field>
           {status.data?.features.terminal && (
             <Field label="Terminal font size">
               <PixelInput
@@ -125,56 +233,29 @@ export function SettingsPage() {
               />
             </Field>
           )}
-          <Field label="Editor font size">
-            <PixelInput
-              label="Editor font size"
-              value={settings.editorFontSize}
-              step={1}
-              min={EDITOR_FONT.min}
-              hint={
-                appleKeyboard()
-                  ? 'Cmd with =, - or 0, or a pinch, changes it until the editor closes.'
-                  : 'Ctrl with the wheel, =, - or 0 changes it until the editor closes.'
-              }
-              onCommit={(size) => {
-                if (typeof size === 'number') runtime.storage.editorFontSize(size);
-              }}
-            />
-          </Field>
-        </div>
-        <div className="panel-footer">
-          <Button
-            variant="secondary"
-            disabled={
-              settings.conversationFontSize === CONVERSATION_FONT.default &&
-              settings.conversationMaxWidth === CONVERSATION_WIDTH.default &&
-              settings.conversationAnchor === 'page' &&
-              settings.conversationOffset === CONVERSATION_OFFSET.default &&
-              settings.terminalFontSize === TERMINAL_FONT.default &&
-              settings.editorFontSize === EDITOR_FONT.default
-            }
-            title="Reset the font sizes, width, and position; the color theme is kept"
-            onClick={() => {
-              runtime.storage.resetConversationAppearance();
-              runtime.storage.terminalFontSize(TERMINAL_FONT.default);
-              runtime.storage.editorFontSize(EDITOR_FONT.default);
-            }}
-          >
-            <RotateCcw size={16} />
-            Restore defaults
-          </Button>
         </div>
       </section>
-      <section className="panel">
-        <h2>Data saver</h2>
-        <SwitchField
-          label="Save mobile data on this device"
-          checked={settings.dataSaver}
-          onCheckedChange={(checked) => runtime.storage.dataSaver(checked)}
-        />
-        <p className="muted small">Fewer messages, pictures on tap, and batched replies.</p>
-      </section>
-      <NotificationSettings />
+    </SectionPage>
+  );
+}
+
+/** What is running: meka and mekaweb, their versions and health, and meka's config. */
+export function AboutSettings() {
+  const runtime = useRuntime();
+  const state = useConnection();
+  const action = useAction();
+  const queries = useQueryClient();
+  const status = useGateway<Gateway['StatusView']>('/api/status', undefined, true, 30_000);
+  const meka = status.data?.meka;
+  const live = useResource<Schema['LiveResponse']>('/v1/health/live');
+  const ready = useResource<Schema['ReadyResponse']>('/v1/health/ready');
+  const config = useResource<Schema['ConfigResponse']>('/v1/config', undefined, useCan('config:r'));
+  const canConfigure = useCan('config:w');
+  const edited = config.data?.config_changed;
+  const reload = useAction();
+  const [reloaded, setReloaded] = useState<string>();
+  return (
+    <SectionPage title="About">
       <section className="panel">
         <h2>meka</h2>
         <dl className="facts">
@@ -217,7 +298,7 @@ export function SettingsPage() {
             {ready.data?.profile_configured === false && (
               <span className="muted">
                 {' '}
-                · No profile yet. <a href="#/providers">Add one</a>
+                · No profile yet. <SettingsLink section="providers">Add one</SettingsLink>
               </span>
             )}
           </dd>
@@ -340,21 +421,16 @@ export function SettingsPage() {
             API reference ↗
           </a>
         </div>
-        <div className="panel-footer">
-          <SwitchField
-            label="Show context added by meka"
-            checked={settings.showTurnContext}
-            onCheckedChange={(checked) => runtime.storage.showTurnContext(checked)}
-          />
-          <SwitchField
-            label="Fold finished steps"
-            checked={settings.foldSteps}
-            onCheckedChange={(checked) => runtime.storage.foldSteps(checked)}
-          />
-        </div>
       </section>
-      {state.info?.scopes.includes('sessions:r') && <InstructionsPanel />}
-    </div>
+    </SectionPage>
+  );
+}
+
+export function InstructionsSettings() {
+  return (
+    <SectionPage title="Standing instructions">
+      <InstructionsPanel />
+    </SectionPage>
   );
 }
 
@@ -394,7 +470,6 @@ function InstructionsPanel() {
   const data = instructions.data;
   return (
     <section className="panel">
-      <h2>Standing instructions</h2>
       <ErrorNotice error={instructions.error ?? action.error} />
       {draft !== undefined ? (
         <form className="form-stack" onSubmit={(event) => void save(event)}>
@@ -421,9 +496,7 @@ function InstructionsPanel() {
           {data?.content ? (
             <>
               {data.source && <p className="muted small">{data.source}</p>}
-              <pre className="plain-text bounded" tabIndex={0} aria-label="Standing instructions">
-                {data.content}
-              </pre>
+              <pre className="plain-text">{data.content}</pre>
             </>
           ) : (
             !instructions.error && (
