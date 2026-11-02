@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { useEffect, useEffectEvent, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { useInfiniteQuery, useQueries, useQuery, type InfiniteData } from '@tanstack/react-query';
 import { Import, PanelLeftClose, Plus, Search, X } from 'lucide-react';
 import { sessionPath, type Schema } from '../api/client';
@@ -44,6 +44,29 @@ import { adjacentSession, shortcutAttribute, shortcutHint } from '../components/
 // Outside the component, as the React Compiler takes this address change for one made in render.
 function showSession(id: string) {
   location.hash = '/sessions/' + encodeURIComponent(id);
+}
+
+/**
+ * Where a list read in parts ends, which reads on, by `onReach`, as it nears the view of `root`.
+ * It is put in place only while nothing more is being read, and looks again each time, so a read
+ * that leaves it in view reads on.
+ */
+function ListEnd({ root, onReach }: { root: RefObject<HTMLElement | null>; onReach: () => void }) {
+  const end = useRef<HTMLDivElement>(null);
+  const reach = useEffectEvent(onReach);
+  useEffect(() => {
+    const element = end.current;
+    if (!element) return;
+    const observer = new IntersectionObserver(
+      (records) => {
+        if (records.some((record) => record.isIntersecting)) reach();
+      },
+      { root: root.current, rootMargin: '0px 0px 200px' },
+    );
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [root]);
+  return <div ref={end} className="session-list-end" />;
 }
 
 /**
@@ -167,29 +190,41 @@ export function SessionList({
         Boolean(reads.get(UNPROJECTED.key)?.data?.sessions.length),
       ).filter((group) => reads.get(group.key)?.data?.sessions.length !== 0)
     : [];
-  // More of a group are read on from where it ends, and listed once they come.
-  const more = useAction();
-  const [moreOf, setMoreOf] = useState<string>();
+  // More of a group are read on from where it ends as that nears the view, and listed once they
+  // come; a read that fails leaves the group as it was until it is read again or asked again.
+  const [readingMore, setReadingMore] = useState<ReadonlySet<string>>(() => new Set());
+  // Why a group's last read of more failed, which stands only while the group is as it was read
+  // when that began.
+  const [moreErrors, setMoreErrors] = useState<
+    ReadonlyMap<string, { error: unknown; readAt: number | undefined }>
+  >(() => new Map());
   function showMore(group: SessionGroup, page: GroupPage) {
-    setMoreOf(group.key);
+    const { key } = group;
+    if (!api || !page.cursor || readingMore.has(key)) return;
+    setReadingMore((reading) => new Set(reading).add(key));
     const current = sessionGroupKey(connection, group, limit(group));
     const readAt = runtime.queries.getQueryState(current)?.dataUpdatedAt;
-    void more.run(async () => {
-      if (!api || !page.cursor) return;
-      const rest = await readGroup(api, group, GROUP_MORE, page.cursor);
-      const had = new Set(page.sessions.map((session) => session.id));
-      const next = sessionGroupKey(connection, group, limit(group) + GROUP_MORE);
-      runtime.queries.setQueryData<GroupPage>(next, {
-        sessions: [...page.sessions, ...rest.sessions.filter((session) => !had.has(session.id))],
-        cursor: rest.cursor,
-      });
-      // Should the group have changed while the rest were read, what came before may have moved,
-      // so all of it is read again.
-      const now = runtime.queries.getQueryState(current);
-      if (now?.isInvalidated || now?.dataUpdatedAt !== readAt)
-        void runtime.queries.invalidateQueries({ queryKey: next, exact: true });
-      setAsked((asked) => ({ ...asked, [group.key]: limit(group) + GROUP_MORE }));
-    });
+    void readGroup(api, group, GROUP_MORE, page.cursor)
+      .then((rest) => {
+        const had = new Set(page.sessions.map((session) => session.id));
+        const next = sessionGroupKey(connection, group, limit(group) + GROUP_MORE);
+        runtime.queries.setQueryData<GroupPage>(next, {
+          sessions: [...page.sessions, ...rest.sessions.filter((session) => !had.has(session.id))],
+          cursor: rest.cursor,
+        });
+        // Should the group have changed while the rest were read, what came before may have
+        // moved, so all of it is read again.
+        const now = runtime.queries.getQueryState(current);
+        if (now?.isInvalidated || now?.dataUpdatedAt !== readAt)
+          void runtime.queries.invalidateQueries({ queryKey: next, exact: true });
+        setAsked((asked) => ({ ...asked, [key]: limit(group) + GROUP_MORE }));
+      })
+      .catch((error: unknown) =>
+        setMoreErrors((errors) => new Map(errors).set(key, { error, readAt })),
+      )
+      .finally(() =>
+        setReadingMore((reading) => new Set([...reading].filter((each) => each !== key))),
+      );
   }
   // Grouped, the ungrouped list is read for its first page only, so pages read before are let go.
   const listPages = list.data?.pages.length ?? 0;
@@ -557,22 +592,34 @@ export function SessionList({
               );
             }
             const page = groupRead?.data;
-            if (group && page?.cursor)
-              rendered.push(
-                <Button
-                  key={'more:' + group.key}
-                  variant="ghost"
-                  size="sm"
-                  className="session-group-more"
-                  aria-label={`Show more sessions: ${groupName(group)}`}
-                  disabled={more.busy}
-                  onClick={() => showMore(group, page)}
-                >
-                  Show more
-                </Button>,
-              );
-            if (group && shown && moreOf === group.key)
-              rendered.push(<ErrorNotice key={'more-error:' + group.key} error={more.error} />);
+            const failed = group && moreErrors.get(group.key);
+            if (group && groupRead && page?.cursor) {
+              if (readingMore.has(group.key)) rendered.push(<Loading key={'more:' + group.key} />);
+              else if (failed && failed.readAt === groupRead.dataUpdatedAt)
+                rendered.push(
+                  <ErrorNotice key={'more-error:' + group.key} error={failed.error} />,
+                  <Button
+                    key={'retry:' + group.key}
+                    variant="ghost"
+                    size="sm"
+                    className="session-group-more"
+                    aria-label={`Try again: ${groupName(group)}`}
+                    onClick={() => showMore(group, page)}
+                  >
+                    Try again
+                  </Button>,
+                );
+              // As with the ungrouped list, its end waits for a read of the group again, which
+              // leaves the cursor it would read on from behind.
+              else if (!groupRead.isFetching)
+                rendered.push(
+                  <ListEnd
+                    key={'end:' + group.key}
+                    root={sessionItems}
+                    onReach={() => showMore(group, page)}
+                  />,
+                );
+            }
             return rendered;
           })}
         {!pending && !error && (grouped ? !groups.length : !items.length) && (
@@ -580,15 +627,21 @@ export function SessionList({
             {searching ? 'No matching sessions.' : 'No sessions yet.'}
           </p>
         )}
-        {!searching && !grouped && list.hasNextPage && (
-          <Button
-            variant="ghost"
-            disabled={list.isFetchingNextPage}
-            onClick={() => void list.fetchNextPage()}
-          >
-            Load more sessions
-          </Button>
-        )}
+        {/* Its end waits for a read of the list again, which a further page would cut short. */}
+        {!searching &&
+          !grouped &&
+          list.hasNextPage &&
+          (list.isFetchingNextPage ? (
+            <Loading />
+          ) : list.isFetchNextPageError ? (
+            <Button variant="ghost" onClick={() => void list.fetchNextPage()}>
+              Try again
+            </Button>
+          ) : (
+            !list.isFetching && (
+              <ListEnd root={sessionItems} onReach={() => void list.fetchNextPage()} />
+            )
+          ))}
         {searching && !pending && items.length === 100 && (
           <p className="muted list-empty">Top 100 matches. Refine your search to find more.</p>
         )}
