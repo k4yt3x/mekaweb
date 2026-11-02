@@ -1,8 +1,8 @@
 import { createContext, useContext, type RefObject } from 'react';
-import type { NewConversationState } from './use-new-conversation';
+import type { NewConversationState, NewSessionSetup } from './use-new-conversation';
 
 export const SessionNavigationContext = createContext<{
-  newSession: (workingDirectory?: string) => void;
+  newSession: (setup?: NewSessionSetup) => void;
   mobileSessionsOpen: boolean;
   setMobileSessionsOpen: (open: boolean) => void;
   newConversation: NewConversationState;

@@ -1,5 +1,13 @@
 import { useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import { ChevronRight, LoaderCircle, Pencil, Pin, PinOff, Trash2 } from 'lucide-react';
+import {
+  ChevronRight,
+  FolderKanban,
+  LoaderCircle,
+  Pencil,
+  Pin,
+  PinOff,
+  Trash2,
+} from 'lucide-react';
 import type { Schema } from '../api/client';
 import { useCan, useConnection, useRuntime } from '../connections/context';
 import { useAction } from '../components/actions';
@@ -28,6 +36,32 @@ const statusShapes: Record<SessionStatus, ReactNode> = {
   read: <circle cx="5" cy="5" r="1.3" fill="currentColor" />,
 };
 
+/**
+ * A pin toggle pressed from the keyboard, which takes focus back once its row is `pinned` or not,
+ * as pinning moves the row; `moved` is the record meka answered with.
+ */
+export interface PinFocus {
+  pinned: boolean;
+  moved?: Schema['SessionResponse'] | undefined;
+}
+
+/** What state a session is in, or the most urgent of a folded group's. */
+export function StatusDot({ status }: { status: SessionStatus }) {
+  return (
+    <span
+      className="status-dot"
+      data-status={status}
+      role={statusLabels[status] ? 'img' : undefined}
+      aria-label={statusLabels[status]}
+      title={statusLabels[status]}
+    >
+      <svg viewBox="0 0 10 10" aria-hidden="true">
+        {statusShapes[status]}
+      </svg>
+    </span>
+  );
+}
+
 export function SessionListItem({
   session,
   depth,
@@ -37,6 +71,9 @@ export function SessionListItem({
   subagents,
   status,
   excerpt,
+  project,
+  pinFocus,
+  onPinFocus,
   onOpen,
 }: {
   session: Schema['SessionResponse'];
@@ -49,6 +86,12 @@ export function SessionListItem({
     { shown: boolean; loading: boolean; found: boolean; onToggle: () => void } | undefined;
   status: SessionStatus;
   excerpt?: string | undefined;
+  /** The project to name beneath its title, as search results do. */
+  project?: string | undefined;
+  /** Whether its pin toggle takes focus back once the row is pinned (`true`) or not. */
+  pinFocus: boolean | undefined;
+  /** Asks for its pin toggle to keep focus, as {@link PinFocus} says, or for none to. */
+  onPinFocus: (focus: PinFocus | undefined) => void;
   onOpen: () => void;
 }) {
   const { controller } = useConnection();
@@ -59,7 +102,6 @@ export function SessionListItem({
   const [rename, setRename] = useState(false);
   const renameTrigger = useRef<HTMLButtonElement>(null);
   const pinTrigger = useRef<HTMLButtonElement>(null);
-  const pinFocus = useRef<boolean | undefined>(undefined);
   const trigger = useRef<HTMLButtonElement>(null);
   const action = useAction();
   const pinAction = useAction();
@@ -72,28 +114,28 @@ export function SessionListItem({
   const tooltip = [title, statusLabels[status], about].filter(Boolean).join('\n');
   const editable = canWrite && !session.parent_id;
   useLayoutEffect(() => {
-    if (
-      pinFocus.current === undefined ||
-      pinAction.busy ||
-      Boolean(session.pinned_at) !== pinFocus.current
-    )
-      return;
+    if (pinFocus === undefined || pinAction.busy || Boolean(session.pinned_at) !== pinFocus) return;
     // Keep keyboard focus on the toggle when pin ordering moves this row in the DOM.
-    pinFocus.current = undefined;
+    onPinFocus(undefined);
     if (document.activeElement === document.body || document.activeElement === pinTrigger.current)
       pinTrigger.current?.focus();
-  }, [pinAction.busy, session.pinned_at]);
+  }, [pinFocus, onPinFocus, pinAction.busy, session.pinned_at]);
 
   function remove() {
     const source = trigger.current;
     const row = source?.closest('.session-list-entry');
+    const isRow = (element: Element | null | undefined): element is HTMLElement =>
+      element instanceof HTMLElement && element.classList.contains('session-list-entry');
     let nextRow = row?.nextElementSibling;
-    // Deleting a parent also removes its descendants, so focus must leave that subtree.
-    while (nextRow instanceof HTMLElement && Number(nextRow.dataset.depth) > depth)
+    // Deleting a parent also removes its descendants, so focus must leave that subtree; it passes
+    // over the headings of groups.
+    while (nextRow && (!isRow(nextRow) || Number(nextRow.dataset.depth) > depth))
       nextRow = nextRow.nextElementSibling;
+    let previousRow = row?.previousElementSibling;
+    while (previousRow && !isRow(previousRow)) previousRow = previousRow.previousElementSibling;
     const next =
       nextRow?.querySelector<HTMLAnchorElement>('.session-item-link') ??
-      row?.previousElementSibling?.querySelector<HTMLAnchorElement>('.session-item-link') ??
+      previousRow?.querySelector<HTMLAnchorElement>('.session-item-link') ??
       row?.closest('.session-list')?.querySelector<HTMLButtonElement>('[aria-label="New session"]');
     void action.run(async () => {
       if (!controller || !canWrite || running) return;
@@ -153,17 +195,7 @@ export function SessionListItem({
           }}
         >
           <div className="session-item-title">
-            <span
-              className="status-dot"
-              data-status={status}
-              role={statusLabels[status] ? 'img' : undefined}
-              aria-label={statusLabels[status]}
-              title={statusLabels[status]}
-            >
-              <svg viewBox="0 0 10 10" aria-hidden="true">
-                {statusShapes[status]}
-              </svg>
-            </span>
+            <StatusDot status={status} />
             <strong
               className={
                 ['failed', 'completed', 'unread'].includes(status) ? 'session-unread' : undefined
@@ -181,7 +213,17 @@ export function SessionListItem({
               })}
             </time>
           </div>
-          {excerpt && <p className="session-excerpt">{excerpt}</p>}
+          {(excerpt || project) && (
+            <p className="session-excerpt">
+              {project && (
+                <span className="session-item-project">
+                  <FolderKanban size={11} aria-label="Project" />
+                  {project}
+                </span>
+              )}
+              {excerpt}
+            </p>
+          )}
         </a>
         {subagents && (
           <button
@@ -239,13 +281,19 @@ export function SessionListItem({
                 disabled={busy}
                 onClick={(event) => {
                   action.reset();
-                  pinFocus.current = event.detail === 0 ? !session.pinned_at : undefined;
+                  const keyboard = event.detail === 0;
+                  onPinFocus(keyboard ? { pinned: !session.pinned_at } : undefined);
                   void pinAction
-                    .run(async () =>
-                      controller?.patchSettings(session.id, { pinned: !session.pinned_at }),
-                    )
-                    .then((result) => {
-                      if (!result) pinFocus.current = undefined;
+                    .run(async () => {
+                      const moved = await controller?.patchSettings(session.id, {
+                        pinned: !session.pinned_at,
+                      });
+                      if (keyboard && moved)
+                        onPinFocus({ pinned: Boolean(moved.pinned_at), moved });
+                      return moved;
+                    })
+                    .then((moved) => {
+                      if (keyboard && !moved) onPinFocus(undefined);
                     });
                 }}
               >

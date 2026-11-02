@@ -230,6 +230,7 @@ it('forgets the account’s drafts and seen sessions, keeping this device’s se
   store.markSeen('mekaweb', 's1', '2026-10-21T00:00:00Z');
   store.saveWorkspace('s1', { tabs: ['/a.ts'] });
   store.saveEditorView('/a.ts', { line: 3 });
+  store.saveFoldedGroups('mekaweb', ['pinned']);
   store.forgetAccount();
   const kept = [...Array(local.length).keys()].map((index) => local.key(index));
   expect(kept).toEqual(['mekaweb:v1:settings']);
@@ -240,6 +241,22 @@ it('forgets the account’s drafts and seen sessions, keeping this device’s se
   store.keepAccount();
   store.saveDraft('mekaweb', 's1', 'kept again');
   expect(store.draft('mekaweb', 's1')?.text).toBe('kept again');
+});
+
+it('keeps the session list’s groups folded for each connection, stable between changes', () => {
+  const local = storage();
+  const a = new BrowserStorage(local);
+  expect(a.foldedGroups('mekaweb')).toEqual([]);
+  a.saveFoldedGroups('mekaweb', ['pinned', 'project:web']);
+  const folded = a.foldedGroups('mekaweb');
+  expect(folded).toEqual(['pinned', 'project:web']);
+  expect(a.foldedGroups('mekaweb')).toBe(folded);
+  expect(new BrowserStorage(local).foldedGroups('mekaweb')).toEqual(folded);
+  expect(a.foldedGroups('other')).toEqual([]);
+  a.saveFoldedGroups('mekaweb', []);
+  expect(local.getItem('mekaweb:v1:folded-groups:mekaweb')).toBeNull();
+  local.setItem('mekaweb:v1:folded-groups:mekaweb', '{"not":"a list"}');
+  expect(a.foldedGroups('mekaweb')).toEqual([]);
 });
 
 it('keeps what each place has open, checked, the most recent places only', () => {

@@ -12,6 +12,9 @@ export interface NewSessionSettings {
   approvals: string;
 }
 
+/** What a new session has, whatever it is set up like: a folder, or a project, '' for none. */
+export type NewSessionSetup = Partial<Pick<NewSessionSettings, 'workingDirectory' | 'project'>>;
+
 const serverDefaults: NewSessionSettings = {
   workingDirectory: '',
   profile: '',
@@ -103,9 +106,9 @@ export function useNewConversation(onCreated: (id: string) => void) {
       });
     return session.id;
   }
-  /** Sets a new session up like `session`, or with the server's defaults without one. Only the
-   * message and its images stay. */
-  function prepare(session?: Schema['SessionResponse'], workingDirectory?: string) {
+  /** Sets a new session up like `session`, or with the server's defaults without one, then as
+   * `setup` says. Only the message and its images stay. */
+  function prepare(session?: Schema['SessionResponse'], setup: NewSessionSetup = {}) {
     setSettings({
       ...(session
         ? {
@@ -116,7 +119,8 @@ export function useNewConversation(onCreated: (id: string) => void) {
             approvals: String(session.approvals),
           }
         : serverDefaults),
-      ...(workingDirectory ? { workingDirectory } : {}),
+      ...(setup.workingDirectory ? { workingDirectory: setup.workingDirectory } : {}),
+      ...(setup.project !== undefined ? { project: setup.project } : {}),
     });
     if (!controller) return;
     // A skill goes with the message it was picked for, so it is not carried over.

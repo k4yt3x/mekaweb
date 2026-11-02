@@ -52,6 +52,21 @@ export function sessionStatus({
   return 'unread';
 }
 
+const URGENCY: readonly SessionStatus[] = [
+  'approval',
+  'running',
+  'failed',
+  'completed',
+  'unread',
+  'read',
+];
+/** The most urgent of `statuses`, read when there are none. */
+export function mostUrgent(statuses: Iterable<SessionStatus>): SessionStatus {
+  let most: SessionStatus = 'read';
+  for (const status of statuses) if (URGENCY.indexOf(status) < URGENCY.indexOf(most)) most = status;
+  return most;
+}
+
 const noneSeen: SeenSessions = { sessions: {} };
 const noopSubscribe = () => () => {};
 export function useSeenSessions(): SeenSessions {

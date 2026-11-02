@@ -2311,6 +2311,7 @@ progress::-moz-progress-bar {
   font-size: 0.62rem;
   white-space: nowrap;
 }
+
 .session-row-actions {
   grid-column: 2;
   grid-row: 1;
@@ -2485,6 +2486,112 @@ progress::-moz-progress-bar {
   color: var(--muted);
   font-size: 0.76rem;
   line-height: 1.5;
+}
+/* A search result names its project ahead of what it matched. */
+.session-item-project {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-right: 8px;
+  vertical-align: top;
+  font-weight: 550;
+}
+.session-item-project > svg {
+  flex-shrink: 0;
+}
+/* Once sessions are on projects, a heading over each group folds it away; its arrow sits where
+   the rows' status does. */
+.session-group-heading {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+:is(.session-list-entry, .session-group-more, .loading) + .session-group-heading {
+  margin-top: 8px;
+}
+.session-group-heading h3 {
+  flex: 1;
+  min-width: 0;
+}
+.session-group-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  min-height: 30px;
+  padding: 4px 10px 4px 8px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-align: start;
+  cursor: pointer;
+}
+@media (hover: hover) {
+  .session-group-toggle:hover {
+    color: var(--text);
+  }
+}
+.session-group-chevron {
+  flex-shrink: 0;
+  transition: transform 120ms ease;
+}
+.session-group-toggle[aria-expanded='true'] .session-group-chevron {
+  transform: rotate(90deg);
+}
+.session-group-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-group-toggle .status-dot {
+  margin-left: 2px;
+}
+.session-group-count {
+  margin-left: auto;
+  padding-left: 6px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.session-group-heading > .button {
+  width: 30px;
+  height: 30px;
+  min-height: 30px;
+  padding: 6px;
+}
+.session-group-more {
+  margin: 0 0 4px 16px;
+  min-height: 28px;
+  padding: 4px 9px;
+  font-size: 0.7rem;
+}
+/* With a pointer, a group's new-session button shows, in place of its count, only while the
+   heading is pointed at or holds the keyboard, as a row's buttons do. */
+@media (min-width: 821px) and (hover: hover) and (pointer: fine) {
+  .session-group-heading > .button {
+    position: absolute;
+    right: 5px;
+    width: 24px;
+    height: 24px;
+    min-height: 24px;
+    padding: 4px;
+    opacity: 0;
+    pointer-events: none;
+  }
+  .session-group-heading:hover > .button,
+  :root:not([data-focus-input='pointer']) .session-group-heading:has(:focus-visible) > .button {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .session-group-heading:has(> .button):hover .session-group-count,
+  :root:not([data-focus-input='pointer'])
+    .session-group-heading:has(> .button):has(:focus-visible)
+    .session-group-count {
+    visibility: hidden;
+  }
 }
 .list-footer {
   padding: 12px;
@@ -4279,6 +4386,16 @@ body:has(.settings-dialog[data-state='open']) .approval-tray {
   }
   .session-item-date {
     font-size: 0.7rem;
+  }
+  .session-group-toggle {
+    min-height: 36px;
+    font-size: 0.76rem;
+  }
+  .session-group-heading > .button {
+    width: 36px;
+    height: 36px;
+    min-height: 36px;
+    padding: 9px;
   }
   .mobile-back {
     display: inline-flex;

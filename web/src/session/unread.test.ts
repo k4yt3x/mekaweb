@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { isUnread, sessionStatus } from './unread';
+import { isUnread, mostUrgent, sessionStatus } from './unread';
 
 const seen = {
   baseline: '2026-09-26T10:00:00Z',
@@ -96,4 +96,11 @@ it('does not show an outcome already seen as news when a later change makes it u
       updated_at: '2026-09-26T12:30:00Z',
     }),
   ).toBe('unread');
+});
+
+it('picks the most urgent status of several, read for none', () => {
+  expect(mostUrgent([])).toBe('read');
+  expect(mostUrgent(['read', 'unread', 'completed'])).toBe('completed');
+  expect(mostUrgent(['failed', 'running', 'unread'])).toBe('running');
+  expect(mostUrgent(['running', 'approval'])).toBe('approval');
 });

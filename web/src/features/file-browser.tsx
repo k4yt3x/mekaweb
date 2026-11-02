@@ -1117,7 +1117,10 @@ function FolderItems({
           Mention in message
         </Item>
       )}
-      <Item className="menu-item" onSelect={() => navigation.newSession(path)}>
+      <Item
+        className="menu-item"
+        onSelect={() => navigation.newSession({ workingDirectory: path })}
+      >
         <MessageSquarePlus size={14} />
         New session here
       </Item>

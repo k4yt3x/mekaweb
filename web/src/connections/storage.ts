@@ -157,6 +157,9 @@ const WORKSPACE_LIMIT = 50;
 /** Where each file was in the editor, its cursor and scroll, as the editor writes it. */
 const EDITOR_VIEWS = PREFIX + 'editor-views';
 const EDITOR_VIEW_LIMIT = 200;
+/** The session list's groups folded, for each connection, by `src/features/session-groups.ts`. */
+const FOLDED_GROUPS = PREFIX + 'folded-groups:';
+const noneFolded: readonly string[] = [];
 function strings(value: unknown): string[] {
   return Array.isArray(value)
     ? value.filter((each): each is string => typeof each === 'string')
@@ -278,6 +281,7 @@ export class BrowserStorage {
   private memory = new Map<string, string>();
   private listeners = new Set<() => void>();
   private seenCache = new Map<string, { raw: string | null; value: SeenSessions }>();
+  private foldedCache = new Map<string, { raw: string | null; value: readonly string[] }>();
   private state: Settings = defaults();
   /** Whether what is kept of the account is: not once it signed out. */
   private keeping = true;
@@ -349,9 +353,9 @@ export class BrowserStorage {
     return () => window.removeEventListener('storage', listener);
   }
   /**
-   * Forgets what this browser kept of the account, its drafts, which sessions were seen and the
-   * files and folders open, and keeps nothing more of it until {@link keepAccount}: a draft saved
-   * as the page leaves the account is not written back.
+   * Forgets what this browser kept of the account, its drafts, which sessions were seen, the
+   * session list's groups folded and the files and folders open, and keeps nothing more of it until
+   * {@link keepAccount}: a draft saved as the page leaves the account is not written back.
    */
   forgetAccount() {
     this.keeping = false;
@@ -368,11 +372,13 @@ export class BrowserStorage {
       if (
         key.startsWith(PREFIX + 'draft') ||
         key.startsWith(PREFIX + 'seen:') ||
+        key.startsWith(FOLDED_GROUPS) ||
         key === WORKSPACES ||
         key === EDITOR_VIEWS
       )
         this.write(key, null);
     this.seenCache.clear();
+    this.foldedCache.clear();
   }
   /** Keeps what is kept of the account again, as someone signs in. */
   keepAccount() {
@@ -572,6 +578,21 @@ export class BrowserStorage {
   private saveSeen(connectionId: string, seen: SeenSessions) {
     if (!this.keeping) return;
     this.write(PREFIX + 'seen:' + connectionId, JSON.stringify(seen));
+    this.emit();
+  }
+  /** The session list's groups folded on `connectionId`; stable between changes. */
+  foldedGroups(connectionId: string): readonly string[] {
+    const raw = this.read(FOLDED_GROUPS + connectionId);
+    const cached = this.foldedCache.get(connectionId);
+    if (cached?.raw === raw) return cached.value;
+    const parsed = strings(parse(raw));
+    const value = parsed.length ? parsed : noneFolded;
+    this.foldedCache.set(connectionId, { raw, value });
+    return value;
+  }
+  saveFoldedGroups(connectionId: string, groups: readonly string[]) {
+    if (!this.keeping) return;
+    this.write(FOLDED_GROUPS + connectionId, groups.length ? JSON.stringify(groups) : null);
     this.emit();
   }
   /** What `place` had open in the editor and Files, as last kept. */

@@ -521,7 +521,7 @@ export function SessionsPage({
           <SessionList
             selectedId={id}
             page={page}
-            onCreate={() => newSession()}
+            onCreate={(setup) => newSession(setup)}
             searchInput={searchInput}
             searchOpen={searchOpen}
             onSearchOpen={setSearchOpen}

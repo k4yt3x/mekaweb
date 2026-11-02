@@ -1,26 +1,56 @@
-import { useEffect, useRef, useState, type RefObject } from 'react';
-import { useInfiniteQuery, useQueries, useQuery } from '@tanstack/react-query';
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { useInfiniteQuery, useQueries, useQuery, type InfiniteData } from '@tanstack/react-query';
 import { Import, PanelLeftClose, Plus, Search, X } from 'lucide-react';
 import { sessionPath, type Schema } from '../api/client';
 import { useCan, useConnection, useResource, useRuntime } from '../connections/context';
 import { subagentsQuery, useSessionStates } from '../session/hooks';
 import { isSessionRunning, type SessionState } from '../session/controller';
-import { sessionStatus, useMarkSeen, useSeenSessions } from '../session/unread';
+import {
+  mostUrgent,
+  sessionStatus,
+  useMarkSeen,
+  useSeenSessions,
+  type SessionStatus,
+} from '../session/unread';
 import { useAction } from '../components/actions';
 import { ErrorNotice, Loading } from '../components/common';
 import { Button } from '../components/ui/button';
 import { AccountMenu } from '../components/account-menu';
 import { MekaLogo } from '../components/layout';
-import { SessionListItem } from './session-list-item';
+import { SessionListItem, type PinFocus } from './session-list-item';
 import { foldTree, sessionTree } from './session-tree';
+import { useProjects } from './projects-query';
+import { SessionGroupHeading } from './session-group-heading';
+import {
+  GROUP_MORE,
+  PINNED,
+  UNPROJECTED,
+  groupFirst,
+  groupName,
+  groupOf,
+  projectGroup,
+  readGroup,
+  sessionGroupKey,
+  sessionGroupQuery,
+  sessionGroups,
+  useFoldedGroups,
+  type GroupPage,
+  type SessionGroup,
+} from './session-groups';
 import { SIDEBAR_PAGES, type SidebarPage } from './sidebar-pages';
 import { useShortcut } from '../components/use-shortcut';
 import { adjacentSession, shortcutAttribute, shortcutHint } from '../components/shortcut-keys';
 
+// Outside the component, as the React Compiler takes this address change for one made in render.
+function showSession(id: string) {
+  location.hash = '/sessions/' + encodeURIComponent(id);
+}
+
 /**
  * The app's sidebar: the pages of what the agent works with, the sessions, searched and started
- * from their heading, and at its foot who is signed in, with Settings. On a wide screen it
- * collapses, by `onCollapse`, to a column of icons.
+ * from their heading, and at its foot who is signed in, with Settings. Once sessions are on
+ * projects, they are grouped by them. On a wide screen it collapses, by `onCollapse`, to a column
+ * of icons.
  */
 export function SessionList({
   selectedId,
@@ -35,7 +65,8 @@ export function SessionList({
   selectedId: string | undefined;
   /** The page shown, whose row is marked so. */
   page: SidebarPage | undefined;
-  onCreate: () => void;
+  /** Starts a new session, on `setup.project` where given. */
+  onCreate: (setup?: { project: string }) => void;
   searchInput: RefObject<HTMLInputElement | null>;
   searchOpen: boolean;
   onSearchOpen: (open: boolean) => void;
@@ -93,33 +124,156 @@ export function SessionList({
   useEffect(
     () =>
       controller?.onServerChange(() => {
-        // The open session's record too, so a sub-agent's page sees a follow-up begin.
-        for (const key of ['session-list', '/v1/sessions/search', 'session-metadata'])
+        // The open session's record too, so a sub-agent's page sees a follow-up begin, and the
+        // projects, whose counts head their groups.
+        for (const key of [
+          'session-list',
+          '/v1/sessions/search',
+          'session-metadata',
+          '/v1/projects',
+        ])
           void runtime.queries.invalidateQueries({ queryKey: [connection?.id, authority, key] });
       }),
     [controller, connection?.id, authority, runtime.queries],
   );
-  const rows = searching
-    ? (matches.data?.sessions ?? [])
-    : (list.data?.pages.flatMap((page) => page.sessions) ?? []);
+  const projects = useProjects();
+  // Once a session is on a project, the list is grouped: the pinned sessions, each project's, then
+  // those on none.
+  const onProjects = (projects.data?.projects ?? []).filter((project) => project.sessions > 0);
+  const grouped = !searching && onProjects.length > 0;
+  const folded = useFoldedGroups();
+  // How many sessions each group was asked to list.
+  const [asked, setAsked] = useState<Readonly<Record<string, number>>>({});
+  const limit = (group: SessionGroup) => asked[group.key] ?? groupFirst(group);
+  // The pinned and those on none are read even folded, to know whether there are any; a project's
+  // only while it is shown, as meka counts its sessions.
+  const read = grouped
+    ? [
+        PINNED,
+        UNPROJECTED,
+        ...onProjects
+          .map((project) => projectGroup(project.name))
+          .filter((group) => !folded.includes(group.key)),
+      ]
+    : [];
+  const groupReads = useQueries({
+    queries: read.map((group) => sessionGroupQuery(api, connection, group, limit(group))),
+  });
+  const reads = new Map(read.map((group, index) => [group.key, groupReads[index]]));
+  const groups = grouped
+    ? sessionGroups(
+        onProjects,
+        reads.get(PINNED.key)?.data?.sessions ?? [],
+        Boolean(reads.get(UNPROJECTED.key)?.data?.sessions.length),
+      ).filter((group) => reads.get(group.key)?.data?.sessions.length !== 0)
+    : [];
+  // More of a group are read on from where it ends, and listed once they come.
+  const more = useAction();
+  const [moreOf, setMoreOf] = useState<string>();
+  function showMore(group: SessionGroup, page: GroupPage) {
+    setMoreOf(group.key);
+    const current = sessionGroupKey(connection, group, limit(group));
+    const readAt = runtime.queries.getQueryState(current)?.dataUpdatedAt;
+    void more.run(async () => {
+      if (!api || !page.cursor) return;
+      const rest = await readGroup(api, group, GROUP_MORE, page.cursor);
+      const had = new Set(page.sessions.map((session) => session.id));
+      const next = sessionGroupKey(connection, group, limit(group) + GROUP_MORE);
+      runtime.queries.setQueryData<GroupPage>(next, {
+        sessions: [...page.sessions, ...rest.sessions.filter((session) => !had.has(session.id))],
+        cursor: rest.cursor,
+      });
+      // Should the group have changed while the rest were read, what came before may have moved,
+      // so all of it is read again.
+      const now = runtime.queries.getQueryState(current);
+      if (now?.isInvalidated || now?.dataUpdatedAt !== readAt)
+        void runtime.queries.invalidateQueries({ queryKey: next, exact: true });
+      setAsked((asked) => ({ ...asked, [group.key]: limit(group) + GROUP_MORE }));
+    });
+  }
+  // Grouped, the ungrouped list is read for its first page only, so pages read before are let go.
+  const listPages = list.data?.pages.length ?? 0;
+  useEffect(() => {
+    if (grouped && listPages > 1)
+      runtime.queries.setQueryData<
+        InfiniteData<Schema['ListSessionsResponse'], string | undefined>
+      >(
+        [connection?.id, authority, 'session-list', 'roots'],
+        (data) =>
+          data && { pages: data.pages.slice(0, 1), pageParams: data.pageParams.slice(0, 1) },
+      );
+  }, [grouped, listPages, runtime.queries, connection?.id, authority]);
+  function foldGroup(group: SessionGroup) {
+    if (!connection) return;
+    // A project since renamed or removed is let go.
+    const known = new Set([
+      PINNED.key,
+      UNPROJECTED.key,
+      ...(projects.data?.projects ?? []).map((project) => projectGroup(project.name).key),
+    ]);
+    const next = folded.includes(group.key)
+      ? folded.filter((key) => key !== group.key)
+      : [...folded, group.key];
+    runtime.storage.saveFoldedGroups(
+      connection.id,
+      next.filter((key) => known.has(key)),
+    );
+  }
   const unfolded = (id: string) => folds.has(id);
   const spawners = searching ? [] : [...folds];
   const subagents = useQueries({
     queries: spawners.map((id) => subagentsQuery(api, connection, id)),
   });
   const spawned = new Map(spawners.map((id, index) => [id, subagents[index]]));
-  // A session can move across page boundaries while the server is being updated.
-  // Keep the server's order before grouping descendants (pin order or search relevance).
-  const listed = new Map(rows.map((item) => [item.id, item]));
-  // A map visits what is added while it is read, which reaches sub-agents' own sub-agents.
-  if (!searching)
-    for (const item of listed.values())
-      if (unfolded(item.id))
-        for (const child of spawned.get(item.id)?.data?.sessions ?? []) listed.set(child.id, child);
-  const items = [...listed.values()];
-  const entries = searching
-    ? items.map((session) => ({ session, depth: 0, branches: [] }))
-    : foldTree(sessionTree(items), unfolded);
+  /** `rows` with the sub-agents shown beneath them, however deep. */
+  function withSubagents(rows: readonly Schema['SessionResponse'][]) {
+    // A session can move across page boundaries while the server is being updated.
+    // Keep the server's order before grouping descendants (pin order or search relevance).
+    const listed = new Map(rows.map((item) => [item.id, item]));
+    // A map visits what is added while it is read, which reaches sub-agents' own sub-agents.
+    if (!searching)
+      for (const item of listed.values())
+        if (unfolded(item.id))
+          for (const child of spawned.get(item.id)?.data?.sessions ?? [])
+            listed.set(child.id, child);
+    return [...listed.values()];
+  }
+  // A session moving between groups can be in two until both are read again; it shows in the first.
+  const taken = new Set<string>();
+  const sections = (grouped ? groups : [undefined]).map((group) => {
+    const rows = group
+      ? (reads.get(group.key)?.data?.sessions ?? [])
+      : searching
+        ? (matches.data?.sessions ?? [])
+        : (list.data?.pages.flatMap((page) => page.sessions) ?? []);
+    const own = rows.filter((row) => !taken.has(row.id));
+    for (const row of own) taken.add(row.id);
+    const items = withSubagents(own);
+    const shown = !group || !folded.includes(group.key);
+    const entries = !shown
+      ? []
+      : searching
+        ? items.map((session) => ({ session, depth: 0, branches: [] }))
+        : foldTree(sessionTree(items), unfolded);
+    return { group, shown, items, entries };
+  });
+  const items = sections.flatMap((section) => section.items);
+  const entries = sections.flatMap((section) => section.entries);
+  // A pin toggle pressed from the keyboard keeps focus as pinning moves its row; a row that moves
+  // into a folded group leaves focus to that group's heading.
+  const [pinFocus, setPinFocus] = useState<PinFocus & { id: string }>();
+  const [headingFocus, setHeadingFocus] = useState<string>();
+  const movedTo = pinFocus?.moved && groupOf(pinFocus.moved);
+  if (
+    pinFocus &&
+    movedTo &&
+    folded.includes(movedTo) &&
+    !entries.some(({ session }) => session.id === pinFocus.id)
+  ) {
+    setPinFocus(undefined);
+    // Only a heading that is there takes focus; a group with no rows to show has none.
+    setHeadingFocus(groups.some((group) => group.key === movedTo) ? movedTo : undefined);
+  }
   function fold(id: string) {
     const next = new Set(folds);
     if (!next.delete(id)) next.add(id);
@@ -172,13 +326,57 @@ export function SessionList({
     live?.session && Date.parse(live.session.updated_at) > Date.parse(item.updated_at)
       ? { ...item, ...live.session }
       : item;
-  const selected = items.find((item) => item.id === selectedId);
+  /** A listed session as this page last knows it, with the state its row shows. */
+  function statusOf<T extends Schema['SessionResponse']>(listed: T) {
+    const live = state(listed.id);
+    const item = latest(listed, live);
+    const running = item.turn_in_flight || Boolean(live && isSessionRunning(live));
+    const status = sessionStatus({
+      session: item,
+      live,
+      running,
+      seen,
+      selected: item.id === selectedId,
+    });
+    return { item, running, status };
+  }
+  const selected =
+    items.find((item) => item.id === selectedId) ??
+    firstPage?.find((item) => item.id === selectedId);
   useMarkSeen(selected?.id, selected && latest(selected, state(selected.id)).updated_at);
-  const pending = waiting || (searching ? matches.isPending : list.isPending);
-  const error = waiting ? undefined : searching ? matches.error : list.error;
+  // Grouped, the list waits for the pinned and those on none; a project's group waits on its own.
+  const firstGroups = [reads.get(PINNED.key), reads.get(UNPROJECTED.key)];
+  const pending =
+    waiting ||
+    (searching
+      ? matches.isPending
+      : projects.isPending ||
+        (grouped ? firstGroups.some((group) => group?.isPending) : list.isPending));
+  const error = waiting
+    ? undefined
+    : searching
+      ? matches.error
+      : grouped
+        ? firstGroups.find((group) => group?.error)?.error
+        : list.error;
+  // A folded group's heading shows the most urgent state in it, of the sessions read anyway: the
+  // newest, those in groups read even folded, and those this page follows.
+  const attention = new Map<string, SessionStatus>();
+  if (grouped) {
+    const known = new Map([...(firstPage ?? []), ...items].map((item) => [item.id, item]));
+    for (const live of sessions)
+      if (live.session && !live.deleting && !known.has(live.id)) known.set(live.id, live.session);
+    for (const listed of known.values()) {
+      if (listed.parent_id) continue;
+      const { item, status } = statusOf(listed);
+      const key = groupOf(item);
+      attention.set(key, mostUrgent([attention.get(key) ?? 'read', status]));
+    }
+  }
   // A choice is kept only while its session is listed, so the sub-agents of one hidden beneath a
   // folded session, or of one no longer listed, stop being read, and one listed again starts over.
-  if (!searching && !pending) {
+  // Every group shown is waited for, so one still being read keeps its rows' choices.
+  if (!searching && !pending && !groupReads.some((read) => read.isPending)) {
     const visible = new Set(entries.map(({ session }) => session.id));
     if ([...folds].some((id) => !visible.has(id)))
       setFolds(new Set([...folds].filter((id) => visible.has(id))));
@@ -201,7 +399,7 @@ export function SessionList({
       link.focus({ preventScroll: true });
       link.scrollIntoView({ block: 'nearest' });
     } else document.getElementById('main-content')?.focus({ preventScroll: true });
-    location.hash = '/sessions/' + encodeURIComponent(next);
+    showSession(next);
     onOpen();
   }
   useShortcut('previousSession', () => moveSession(-1), !pending && !error);
@@ -264,7 +462,7 @@ export function SessionList({
             title={`New session (${shortcutHint('newSession')})`}
             aria-keyshortcuts={shortcutAttribute('newSession')}
             disabled={!canWrite}
-            onClick={onCreate}
+            onClick={() => onCreate()}
           >
             <Plus size={17} />
           </Button>
@@ -304,50 +502,85 @@ export function SessionList({
       <div className="session-items" aria-busy={pending} ref={sessionItems}>
         <ErrorNotice error={error} />
         {pending && <Loading label={searching ? 'Searching…' : 'Loading…'} />}
+        {/* One list of rows and headings, so a row moving to another group keeps its place. */}
         {!waiting &&
-          entries.map(({ session: listed, depth, branches }, index) => {
-            const live = state(listed.id);
-            const shown = unfolded(listed.id);
-            const item = latest(listed, live);
-            const running = item.turn_in_flight || Boolean(live && isSessionRunning(live));
-            return (
-              <SessionListItem
-                key={item.id}
-                session={item}
-                depth={depth}
-                branches={branches}
-                selected={item.id === selectedId}
-                onOpen={onOpen}
-                excerpt={
-                  'excerpt' in item && typeof item.excerpt === 'string' ? item.excerpt : undefined
-                }
-                running={running}
-                subagents={
-                  searching
-                    ? undefined
-                    : {
-                        shown,
-                        loading: shown && Boolean(spawned.get(item.id)?.isPending),
-                        found: (entries[index + 1]?.depth ?? 0) > depth,
-                        onToggle: () => fold(item.id),
-                      }
-                }
-                status={sessionStatus({
-                  session: item,
-                  live,
-                  running,
-                  seen,
-                  selected: item.id === selectedId,
-                })}
-              />
-            );
+          sections.flatMap(({ group, shown, entries: rows }) => {
+            const rendered: ReactNode[] = [];
+            const groupRead = group && shown ? reads.get(group.key) : undefined;
+            if (group) {
+              rendered.push(
+                <SessionGroupHeading
+                  key={'group:' + group.key}
+                  group={group}
+                  folded={!shown}
+                  status={attention.get(group.key) ?? 'read'}
+                  onFold={() => foldGroup(group)}
+                  onCreate={onCreate}
+                  takeFocus={headingFocus === group.key}
+                  onFocusTaken={() => setHeadingFocus(undefined)}
+                />,
+              );
+              if (group.project && groupRead?.error)
+                rendered.push(<ErrorNotice key={'error:' + group.key} error={groupRead.error} />);
+              if (groupRead?.isPending) rendered.push(<Loading key={'loading:' + group.key} />);
+            }
+            for (const [index, { session: listed, depth, branches }] of rows.entries()) {
+              const unfoldedRow = unfolded(listed.id);
+              const { item, running, status } = statusOf(listed);
+              rendered.push(
+                <SessionListItem
+                  key={item.id}
+                  session={item}
+                  depth={depth}
+                  branches={branches}
+                  selected={item.id === selectedId}
+                  onOpen={onOpen}
+                  excerpt={
+                    'excerpt' in item && typeof item.excerpt === 'string' ? item.excerpt : undefined
+                  }
+                  project={searching ? item.project : undefined}
+                  pinFocus={pinFocus?.id === item.id ? pinFocus.pinned : undefined}
+                  onPinFocus={(focus) => setPinFocus(focus && { ...focus, id: item.id })}
+                  running={running}
+                  subagents={
+                    searching
+                      ? undefined
+                      : {
+                          shown: unfoldedRow,
+                          loading: unfoldedRow && Boolean(spawned.get(item.id)?.isPending),
+                          found: (rows[index + 1]?.depth ?? 0) > depth,
+                          onToggle: () => fold(item.id),
+                        }
+                  }
+                  status={status}
+                />,
+              );
+            }
+            const page = groupRead?.data;
+            if (group && page?.cursor)
+              rendered.push(
+                <Button
+                  key={'more:' + group.key}
+                  variant="ghost"
+                  size="sm"
+                  className="session-group-more"
+                  aria-label={`Show more sessions: ${groupName(group)}`}
+                  disabled={more.busy}
+                  onClick={() => showMore(group, page)}
+                >
+                  Show more
+                </Button>,
+              );
+            if (group && shown && moreOf === group.key)
+              rendered.push(<ErrorNotice key={'more-error:' + group.key} error={more.error} />);
+            return rendered;
           })}
-        {!pending && !error && items.length === 0 && (
+        {!pending && !error && (grouped ? !groups.length : !items.length) && (
           <p className="muted list-empty" role="status">
             {searching ? 'No matching sessions.' : 'No sessions yet.'}
           </p>
         )}
-        {!searching && list.hasNextPage && (
+        {!searching && !grouped && list.hasNextPage && (
           <Button
             variant="ghost"
             disabled={list.isFetchingNextPage}

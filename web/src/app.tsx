@@ -16,7 +16,7 @@ import { SettingsControl, type SettingsSection } from './components/settings-con
 import { SettingsDialog } from './features/settings-dialog';
 import { sidebarPage } from './features/sidebar-pages';
 import { SessionNavigationContext } from './features/session-navigation';
-import { useNewConversation } from './features/use-new-conversation';
+import { useNewConversation, type NewSessionSetup } from './features/use-new-conversation';
 import { PromptCard } from './features/approval-cards';
 
 export function App({ runtime }: { runtime: ConnectionRuntime }) {
@@ -72,13 +72,13 @@ function Workspace() {
     }
   });
   /** Opens a new session set up like the one in view, or with the server's defaults when none is,
-   * so pressing it again starts from the defaults. */
-  function newSession(workingDirectory?: string) {
+   * so pressing it again starts from the defaults; `setup` overrides either. */
+  function newSession(setup?: NewSessionSetup) {
     if (!canCreate) return;
     const inView = /^\/sessions\/([^/]+)$/.exec(location.pathname)?.[1];
     newConversation.prepare(
       sessions.find((session) => session.id === inView && !session.deleting)?.session,
-      workingDirectory,
+      setup,
     );
     setSearchRequested(false);
     setMobileSessionsOpen(false);
