@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.37.0] - 2026-11-02
+
+### Changed
+
+- Recognize meka 0.88.0 as a verified server version; meka 0.85.0 and newer still connect.
+
+### Fixed
+
+- An MCP call in a finished turn names what it was for, as it did while it ran.
+- A tool call whose id the provider used again no longer takes the place of the earlier call.
+
 ## [0.36.1] - 2026-11-02
 
 ### Changed
@@ -655,7 +666,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Light and dark themes, narrow layouts, and collapsible, resizable session panels.
 - Hosting at the root or a subpath, with GitHub Pages deployment on version tags.
 
-[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.36.1...HEAD
+[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.37.0...HEAD
+[0.37.0]: https://github.com/k4yt3x/mekaweb/compare/0.36.1...0.37.0
 [0.36.1]: https://github.com/k4yt3x/mekaweb/compare/0.36.0...0.36.1
 [0.36.0]: https://github.com/k4yt3x/mekaweb/compare/0.35.0...0.36.0
 [0.35.0]: https://github.com/k4yt3x/mekaweb/compare/0.34.0...0.35.0

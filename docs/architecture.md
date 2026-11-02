@@ -133,7 +133,7 @@ New sessions always enable reasoning streams; available `thinking.delta` events 
 
 Saved tool calls and results share a disclosure, paired by explicit tool-call IDs within an assistant round. Pairing is limited to the loaded snapshot and stops at compaction boundaries. Unmatched or ambiguous results stay visible separately; loading earlier messages can supply a missing call. This presentation does not change the saved messages or merge saved history with live output.
 
-Tool headings use the server's `display_summary` from live execution events. History lacks this field and tool schemas, so `web/src/session/tool-summary.ts` follows meka's built-in primary-argument mappings, including supported older names. Unknown tools without a server summary remain bare, as in meka's history renderer. Header previews are bounded, single-line text; expanded arguments retain their original values.
+Tool headings use the server's `display_summary` from live execution events. History lacks this field, so `web/src/session/tool-summary.ts` follows meka's primary-argument rules: a built-in's mapped argument, including supported older names, and an MCP call's first argument that is text, else its first that reads as text. Unknown tools without a server summary remain bare, as in meka's history renderer. Header previews are bounded, single-line text; expanded arguments retain their original values.
 
 Consecutive assistant messages share an Agent heading. Changes in virtual turn indexes remain boundaries unless the intervening rows consist solely of matched tool results, which meka encodes as user-role messages. User input, compaction markers, and unmatched results always keep their boundaries.
 

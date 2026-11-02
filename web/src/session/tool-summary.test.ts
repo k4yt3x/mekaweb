@@ -25,7 +25,8 @@ it('uses the server summary for live calls, including unknown tools and empty la
 });
 
 it('does not guess an unknown tool, absent argument, or non-scalar value', () => {
-  expect(toolSummary('mcp__server__query', { query: 'not guessed' })).toBeUndefined();
+  expect(toolSummary('unknown_tool', { query: 'not guessed' })).toBeUndefined();
+  expect(toolSummary('mcp__server', { query: 'no tool named' })).toBeUndefined();
   expect(toolSummary('file_read', { command: 'wrong key' })).toBeUndefined();
   expect(toolSummary('file_read', { path: { nested: 'object' } })).toBeUndefined();
   for (const input of [null, undefined, [], 'path'])
@@ -33,6 +34,30 @@ it('does not guess an unknown tool, absent argument, or non-scalar value', () =>
   for (const name of ['constructor', '__proto__', 'toString'])
     expect(toolSummary(name, { path: '/not a tool' })).toBeUndefined();
   expect(toolSummary('file_read', Object.create({ path: '/inherited' }))).toBeUndefined();
+});
+
+// meka 0.88.0: src/tools.rs::an_mcp_call_is_shown_by_its_first_argument_that_reads_as_text.
+it('shows an MCP call by its first argument that is text, else its first that reads as text', () => {
+  const shown = (input: unknown) => toolSummary('mcp__exa__web_search_exa', input);
+  expect(shown({ query: 'ratatui', numResults: 5 })).toBe('ratatui');
+  // A number or a flag ahead of the text is not what the call is for.
+  expect(shown({ limit: 10, recursive: true, query: 'rust' })).toBe('rust');
+  // An object has no short form, so the next argument is taken.
+  expect(shown({ options: { deep: true }, query: 'ratatui' })).toBe('ratatui');
+  expect(shown({ query: '', urls: ['https://a.example', 'https://b.example'] })).toBe(
+    'https://a.example, https://b.example',
+  );
+  expect(shown({ count: 42 })).toBe('42');
+  expect(shown({ config: { nested: 1 } })).toBeUndefined();
+  expect(shown({})).toBeUndefined();
+  // A call whose arguments did not parse holds the reason, which is no argument.
+  expect(shown({ _meka_invalid_arguments: 'expected value at line 1' })).toBeUndefined();
+  // meka's own arguments and a blank one are not the call's to be shown by.
+  expect(shown({ background: true, scratchpad: 'results', query: '  ', topic: 'ratatui' })).toBe(
+    'ratatui',
+  );
+  // A tool's own `background`, which is no flag, is its argument.
+  expect(shown({ background: '#fff' })).toBe('#fff');
 });
 
 it('coerces scalar and list arguments like meka without serializing nested objects', () => {

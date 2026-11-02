@@ -1,7 +1,7 @@
 import { record } from './events';
 
-// meka 0.84.0: src/tools.rs::builtin_primary_param. History carries inputs, but
-// neither resolved display summaries nor the schemas needed to label MCP calls.
+// meka 0.88.0: src/tools.rs::resolve_primary_param. History carries inputs, but not the
+// display summaries meka resolves from them.
 const primaryKeys: Readonly<Record<string, string>> = {
   agent_delete: 'id',
   agent_followup: 'id',
@@ -51,7 +51,7 @@ const primaryKeys: Readonly<Record<string, string>> = {
 };
 
 function scalar(value: unknown): string | undefined {
-  if (typeof value === 'string') return value || undefined;
+  if (typeof value === 'string') return value.trim() ? value : undefined;
   if (typeof value === 'boolean' || (typeof value === 'number' && Number.isFinite(value)))
     return String(value);
   return undefined;
@@ -62,8 +62,31 @@ function displayValue(value: unknown): string | undefined {
   return value.flatMap((item) => scalar(item) ?? []).join(', ') || undefined;
 }
 
-function builtinSummary(name: string, input: unknown): string | undefined {
+// What meka puts among an MCP call's arguments, which are no argument of the call's: the reason
+// its arguments did not parse, and the keys meka adds to every MCP tool.
+function mekaArgument(key: string, value: unknown) {
+  return (
+    key === '_meka_invalid_arguments' ||
+    (key === 'background' && typeof value === 'boolean') ||
+    (key === 'scratchpad' && typeof value === 'string')
+  );
+}
+
+/** An MCP call is shown by its first argument that is text, else its first that reads as text. */
+function mcpSummary(input: Record<string, unknown>): string | undefined {
+  const values = Object.entries(input).flatMap(([key, value]) =>
+    mekaArgument(key, value) ? [] : [value],
+  );
+  return (
+    values.flatMap((value) => (typeof value === 'string' ? (scalar(value) ?? []) : [])).at(0) ??
+    values.flatMap((value) => displayValue(value) ?? []).at(0)
+  );
+}
+
+function primarySummary(name: string, input: unknown): string | undefined {
   if (!record(input)) return undefined;
+  // meka's src/tools/registry.rs::server_of_tool.
+  if (name.startsWith('mcp__') && name.slice(5).includes('__')) return mcpSummary(input);
   const get = (key: string) => (Object.hasOwn(input, key) ? input[key] : undefined);
   if (name === 'image_render') {
     const from = get('from_scratchpad');
@@ -94,7 +117,7 @@ export function toolSummary(
   displaySummary?: string,
 ): string | undefined {
   // A server-provided summary is authoritative, including an explicitly empty one.
-  const value = displaySummary ?? builtinSummary(name, input);
+  const value = displaySummary ?? primarySummary(name, input);
   if (value === undefined) return undefined;
   const line = value
     .replace(/\s+/gu, ' ')

@@ -18,6 +18,7 @@ const record = (id = 'turn', ending: Partial<Schema['TurnRecord']> = {}): Schema
   id,
   source: 'client',
   started_at: '2026-09-23T00:00:01Z',
+  permission: 'workspace',
   usage: {
     input_tokens: 0,
     output_tokens: 0,

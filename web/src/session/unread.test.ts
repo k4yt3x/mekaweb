@@ -57,6 +57,7 @@ const lastTurn = (status: string, ended = true) => ({
     id: 't',
     source: 'client',
     started_at: '2026-09-26T10:59:00Z',
+    permission: 'workspace',
     ...(ended ? { ended_at: '2026-09-26T11:00:00Z', status } : {}),
     usage: {
       input_tokens: 0,

@@ -878,6 +878,39 @@ it('retains the server tool summary through output and completion', async () => 
   expect(f.state().tools.tool?.displaySummary).toBeUndefined();
 });
 
+it('takes a call announced again under its id for another, keeping only one that finished', async () => {
+  const f = await fixture();
+  await f.event('turn.started', { turn_id: 'turn' });
+  const announce = async (path: string) => {
+    await f.event('tool_call.composing', { id: 'call_0', name: 'file_read', turn_id: 'turn' });
+    await f.event('tool_call.executing', {
+      id: 'call_0',
+      name: 'file_read',
+      turn_id: 'turn',
+      input: { path },
+    });
+  };
+  await announce('first.txt');
+  await f.event('tool_call.completed', {
+    id: 'call_0',
+    turn_id: 'turn',
+    is_error: false,
+    content: [],
+  });
+  // The next round's call has the same id, and that round is cut, so its call comes again.
+  await announce('dropped.txt');
+  await announce('again.txt');
+  const { blocks, tools } = f.state();
+  const rows = blocks.flatMap((block) => (block.kind === 'tool' ? [block.id] : []));
+  expect(rows.map((key) => tools[key]?.input)).toEqual([
+    { path: 'first.txt' },
+    { path: 'again.txt' },
+  ]);
+  expect(rows.map((key) => tools[key]?.state)).toEqual(['completed', 'executing']);
+  expect(rows.at(-1)).toBe('call_0');
+  expect(tools[rows[0]!]?.id).toBe('call_0');
+});
+
 it('ignores malformed optional tool labels without interrupting the feed', async () => {
   const f = await fixture();
   await f.event('turn.started', { turn_id: 'turn' });

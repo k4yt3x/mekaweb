@@ -9,6 +9,7 @@ function turn(overrides: Partial<Schema['TurnRecord']> = {}): Schema['TurnRecord
     id: 'turn-1',
     source: 'client',
     started_at: new Date(2026, 9, 23, 10, 26, 41).toISOString(),
+    permission: 'workspace',
     ended_at: new Date(2026, 9, 23, 10, 36, 17).toISOString(),
     status: 'succeeded',
     stop_reason: 'end_turn',

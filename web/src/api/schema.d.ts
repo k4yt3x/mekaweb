@@ -2549,8 +2549,7 @@ export interface components {
       outcome: components['schemas']['ResponseOutcome'];
     };
     /**
-     * @description The answers a parked prompt takes: the four an approval takes, and the three an elicitation
-     *     takes.
+     * @description The answers a parked prompt takes: the four an approval takes, and the three an elicitation takes.
      * @enum {string}
      */
     ResponseOutcome:
@@ -2899,6 +2898,8 @@ export interface components {
       error?: components['schemas']['TurnError'] | null;
       /** Format: uuid */
       id: string;
+      /** @description The permission level the turn ran under, as its opening told the model. */
+      permission: string;
       /**
        * @description The profile that served the turn when it was not the session's own: one of its
        *     `fallbacks`, after the session's profile could not. Absent on a turn the session's profile

@@ -7,6 +7,7 @@ const turn: Schema['TurnRecord'] = {
   id: 'turn-1',
   source: 'client',
   started_at: '2026-10-23T10:26:41Z',
+  permission: 'workspace',
   ended_at: '2026-10-23T10:36:17Z',
   status: 'succeeded',
   usage: {

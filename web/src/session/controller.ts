@@ -900,7 +900,31 @@ export class SessionController {
     } else if (frame.event.startsWith('tool_call.') || frame.event === 'progress') {
       const id = string(data, 'id') || string(data, 'tool_use_id');
       if (!id) return;
-      const old = Object.hasOwn(state.tools, id) ? state.tools[id] : undefined;
+      let { tools, blocks } = state;
+      const listed = Object.hasOwn(tools, id) ? tools[id] : undefined;
+      // A call announced under an id already listed is another call: a provider may use an id
+      // again, and a call its round dropped, which nothing completes, may be followed by one under
+      // its id. One that finished keeps its row, under a key of its own; one dropped leaves none,
+      // as it leaves nothing in the conversation.
+      if (
+        listed &&
+        (frame.event === 'tool_call.composing' ||
+          (frame.event === 'tool_call.executing' && listed.state !== 'composing'))
+      ) {
+        const kept =
+          listed.state === 'completed' || listed.state === 'error'
+            ? `${id}#${blocks.length}`
+            : undefined;
+        tools = Object.fromEntries(
+          Object.entries(tools).flatMap(([key, tool]) =>
+            key !== id ? [[key, tool]] : kept ? [[kept, tool]] : [],
+          ),
+        );
+        blocks = blocks.flatMap((block) =>
+          block.kind !== 'tool' || block.id !== id ? [block] : kept ? [{ ...block, id: kept }] : [],
+        );
+      }
+      const old = Object.hasOwn(tools, id) ? tools[id] : undefined;
       const tool: LiveTool = {
         ...(old ?? {
           id,
@@ -931,8 +955,8 @@ export class SessionController {
           .join(' ');
       this.publish(entry, {
         textStreaming: false,
-        tools: { ...entry.state.tools, [id]: tool },
-        ...(!old ? { blocks: [...state.blocks, { kind: 'tool', id }] } : {}),
+        tools: { ...tools, [id]: tool },
+        ...(!old ? { blocks: [...blocks, { kind: 'tool', id }] } : {}),
       });
     } else if (
       (frame.event === 'permission_required' || frame.event === 'elicitation_required') &&
