@@ -22,7 +22,7 @@ import {
   Trash2,
   Unplug,
 } from 'lucide-react';
-import { sessionPath, type Schema } from '../api/client';
+import { problemText, sessionPath, type Schema } from '../api/client';
 import {
   useCan,
   useConnection,
@@ -41,7 +41,6 @@ import { compactionNote } from '../session/compaction';
 import { isSessionRunning, UnsentMessage } from '../session/controller';
 import { useTextDraft } from '../session/drafts';
 import { subagentsQuery, useSessionStates } from '../session/hooks';
-import { problemText } from '../session/notices';
 import { useMarkSeen } from '../session/unread';
 import { useTurnRecords } from '../session/turn-records';
 import { Button } from '../components/ui/button';
@@ -80,7 +79,7 @@ import { CopyAction, HistoryAction, MessageEditor, TurnActions } from './turn-ac
 import { ChecklistStrip } from './checklist-strip';
 import { ContextMeter } from './session-context';
 import { TurnSummary } from './turn-summary';
-import { useMentions } from '../components/workspace';
+import { focusMessage, useMentions } from '../components/workspace';
 import {
   DEFAULT_INPUT_HEIGHT,
   emptyComposerOptions,
@@ -192,8 +191,9 @@ export function Conversation({ state }: { state: SessionState }) {
       ? undefined
       : activity;
   const problems = recoverableSubmissions(state.submissions, state.notices);
-  // A newer turn puts away what was said before it; the conversation has moved past it.
-  const notices = state.notices.filter((notice) => !notice.superseded);
+  // A newer turn puts away what was said before it, since the conversation has moved past it, and
+  // the person may put one away themselves.
+  const notices = state.notices.filter((notice) => !notice.superseded && !notice.dismissed);
   // A give-up reported below keeps its words on the message without saying why twice.
   const reported = new Set(
     state.notices.flatMap((notice) =>
@@ -623,7 +623,15 @@ export function Conversation({ state }: { state: SessionState }) {
                 ),
               )}
               {notices.map((notice) => (
-                <NoticeMessage key={notice.id} notice={notice} />
+                <NoticeMessage
+                  key={notice.id}
+                  notice={notice}
+                  onDismiss={(event) => {
+                    controller?.dismissNotice(state.id, notice.id);
+                    // From the keyboard, focus goes on to the message rather than the page.
+                    if (event.detail === 0) focusMessage();
+                  }}
+                />
               ))}
               {state.feed === 'unloaded' && (
                 <NoticeMessage

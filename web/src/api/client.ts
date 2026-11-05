@@ -17,13 +17,25 @@ export const MEKA_UNAVAILABLE = 'urn:mekaweb:meka-unavailable';
 export function asError(error: unknown): Error {
   return error instanceof Error ? error : new Error(errorMessage(error));
 }
+/**
+ * What a Problem Detail says happened, in its own words: the detail, else its title, then the
+ * provider's own response where meka relays one, which says why.
+ */
+export function problemText(problem: unknown): string {
+  if (typeof problem !== 'object' || problem === null) return '';
+  const { detail, title, provider_response } = problem as Record<string, unknown>;
+  const said = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
+  const sentence = said(detail) || said(title);
+  const response = said(provider_response);
+  return sentence && response ? `${sentence}: ${response}` : sentence || response;
+}
 export class ApiError extends Error {
   constructor(
     readonly status: number,
     readonly problem: Partial<Schema['ProblemDetail']>,
     readonly retryAfter?: number,
   ) {
-    super(problem.detail || problem.title || `The server returned HTTP ${status}.`);
+    super(problemText(problem) || `The server returned HTTP ${status}.`);
     this.name = 'ApiError';
   }
   is(kind: string) {

@@ -773,6 +773,30 @@ it('shows a running turn’s notices where they arrived, keeping warnings below 
   expect(f.state().notices.at(-1)?.text).toBe('Between turns');
 });
 
+it('keeps a notice said again once below, and lets one be put away until it is said again', async () => {
+  const f = await fixture();
+  await f.event('turn.started', { turn_id: 'turn' });
+  const retrying = { turn_id: 'turn', level: 'warn', text: 'The provider failed every retry.' };
+  await f.event('notice', retrying);
+  const first = f.state().notices.at(-1)!.id;
+  await f.event('notice', { turn_id: 'turn', level: 'warn', text: 'Provider advisory' });
+  await f.event('notice', retrying);
+  // It is the same notice, so what was opened of it stays open.
+  expect(f.state().notices.at(-1)!.id).toBe(first);
+  // The turn shows each where it arrived; below, the one said again stands where it was said last.
+  expect(f.state().blocks.filter((block) => block.kind === 'notice')).toHaveLength(3);
+  const shown = () =>
+    f
+      .state()
+      .notices.filter((notice) => !notice.dismissed)
+      .map((notice) => notice.text);
+  expect(shown()).toEqual(['Provider advisory', retrying.text]);
+  f.controller.dismissNotice(f.state().id, f.state().notices.at(-1)!.id);
+  expect(shown()).toEqual(['Provider advisory']);
+  await f.event('notice', retrying);
+  expect(shown()).toEqual(['Provider advisory', retrying.text]);
+});
+
 it('keeps the record’s open checklist as the agent changes it', async () => {
   const f = await fixture();
   await f.event('turn.started', { turn_id: 'turn' });

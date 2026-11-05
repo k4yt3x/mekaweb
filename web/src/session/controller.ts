@@ -4,6 +4,7 @@ import {
   asError,
   errorMessage,
   pause,
+  problemText,
   sessionPath,
   segment,
   UncertainMutationError,
@@ -12,7 +13,7 @@ import {
 import { emptyComposerOptions } from './composer-options';
 import { parseEvent, record, SseParser, string, type EventData, type SseFrame } from './events';
 import { createId } from '../identifiers';
-import { problemText, sessionNotice, type SessionNotice } from './notices';
+import { sessionNotice, type SessionNotice } from './notices';
 import { ServerFeed } from './server-feed';
 
 export interface LiveTool {
@@ -476,7 +477,27 @@ export class SessionController {
       )
     )
       return notices;
-    return [...notices, { ...notice, id: createId() }].slice(-20);
+    // A notice said again stands once below the conversation, where it was said last, as the same
+    // notice, so what was opened of it stays open; a running turn still shows it each time where
+    // it arrived.
+    const again = (existing: SessionNotice) =>
+      notice.event === 'notice' &&
+      existing.event === 'notice' &&
+      !existing.superseded &&
+      existing.level === notice.level &&
+      existing.text === notice.text;
+    const id = notices.find(again)?.id ?? createId();
+    return [...notices.filter((existing) => !again(existing)), { ...notice, id }].slice(-20);
+  }
+  /** Puts away a notice below the conversation; one said again shows again. */
+  dismissNotice(id: string, noticeId: string) {
+    const entry = this.entries.get(id);
+    if (!entry) return;
+    this.publish(entry, {
+      notices: entry.state.notices.map((notice) =>
+        notice.id === noticeId ? { ...notice, dismissed: true } : notice,
+      ),
+    });
   }
   /** What was said before a newer turn, kept so a replay of it is still known, but put away. */
   private pastNotices(entry: Entry) {

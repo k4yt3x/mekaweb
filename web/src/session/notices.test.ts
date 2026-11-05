@@ -44,6 +44,19 @@ it('presents terminal failures and refusals while leaving tool errors in their o
     'Provider unavailable',
   );
   expect(sessionNotice('turn.failed', {})?.text).toBe('The turn failed.');
+  // meka relays the provider's own response, which says why, beside its sentence.
+  const provider = {
+    type: 'https://meka.run/errors/provider',
+    status: 502,
+    detail: 'the provider rejected or failed this turn',
+    provider_response: 'API returned status 408 Request Timeout',
+  };
+  expect(sessionNotice('turn.failed', { error: provider })?.text).toBe(
+    'the provider rejected or failed this turn: API returned status 408 Request Timeout',
+  );
+  expect(sessionNotice('inbox.failed', { error: provider })?.text).toBe(
+    'meka gave up on a queued message: the provider rejected or failed this turn: API returned status 408 Request Timeout',
+  );
   expect(sessionNotice('turn.finished', { refusal_text: 'Request declined' })).toMatchObject({
     level: 'warning',
     text: 'Request declined',

@@ -1298,6 +1298,26 @@ pre.bounded {
   color: var(--warning);
   border: 1px solid color-mix(in srgb, var(--warning) 25%, transparent);
 }
+.notice-text {
+  flex: 1;
+  min-width: 0;
+}
+/* Long text, such as a provider's response, folds to its first lines. */
+.folded-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+.folded-text-toggle {
+  margin-top: 2px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+}
 .loading {
   display: flex;
   align-items: center;
@@ -3580,7 +3600,20 @@ progress::-moz-progress-bar {
   margin-block: 20px;
 }
 .conversation-notice > div {
+  flex: 1;
   min-width: 0;
+}
+/* Its dismiss button sits in the corner, in the notice's colour, without making it taller. */
+.conversation-notice > .notice-dismiss {
+  width: 28px;
+  height: 28px;
+  min-height: 28px;
+  margin: -6px -8px -6px 0;
+  padding: 6px;
+  color: inherit;
+}
+.conversation-notice > .notice-dismiss svg {
+  margin-top: 0;
 }
 .conversation-notice strong {
   display: block;

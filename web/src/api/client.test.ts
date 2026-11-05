@@ -141,6 +141,20 @@ describe('authenticated transport', () => {
       new ApiError(409, { type: 'https://example.com/errors/turn-in-flight' }).is('turn-in-flight'),
     ).toBe(false);
   });
+  it('says what a Problem Detail says, with the provider’s response meka relays', () => {
+    expect(
+      new ApiError(502, {
+        title: 'Provider error',
+        detail: 'the provider rejected or failed this turn',
+        provider_response: '{"error":"overloaded"}',
+      }).message,
+    ).toBe('the provider rejected or failed this turn: {"error":"overloaded"}');
+    expect(new ApiError(502, { title: 'Provider error' }).message).toBe('Provider error');
+    expect(new ApiError(502, { provider_response: ' upstream said no ' }).message).toBe(
+      'upstream said no',
+    );
+    expect(new ApiError(502, { detail: '' }).message).toBe('The server returned HTTP 502.');
+  });
   it('keeps reverse proxy paths and refuses arbitrary URLs and traversal', () => {
     const client = new ApiClient('https://meka.example/proxy/meka');
     expect(client.url('/v1/info')).toBe('https://meka.example/proxy/meka/v1/info');

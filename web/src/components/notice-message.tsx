@@ -1,5 +1,8 @@
-import { AlertCircle, Info, TriangleAlert } from 'lucide-react';
+import type { MouseEvent } from 'react';
+import { AlertCircle, Info, TriangleAlert, X } from 'lucide-react';
 import type { SessionNotice } from '../session/notices';
+import { Button } from './ui/button';
+import { FoldedText } from './common';
 
 const icons = { error: AlertCircle, warning: TriangleAlert, info: Info };
 
@@ -14,7 +17,14 @@ export function TurnNotice({ notice }: { notice: Pick<SessionNotice, 'level' | '
   );
 }
 
-export function NoticeMessage({ notice }: { notice: Pick<SessionNotice, 'level' | 'text'> }) {
+export function NoticeMessage({
+  notice,
+  onDismiss,
+}: {
+  notice: Pick<SessionNotice, 'level' | 'text'>;
+  /** Puts the notice away, where the person may. */
+  onDismiss?: (event: MouseEvent<HTMLButtonElement>) => void;
+}) {
   const Icon = icons[notice.level];
   const label =
     notice.level === 'error' ? 'Error' : notice.level === 'warning' ? 'Warning' : 'Notice';
@@ -26,8 +36,20 @@ export function NoticeMessage({ notice }: { notice: Pick<SessionNotice, 'level' 
       <Icon size={17} aria-hidden="true" />
       <div>
         <strong>{label}</strong>
-        <p>{notice.text}</p>
+        <FoldedText text={notice.text} />
       </div>
+      {onDismiss && (
+        <Button
+          variant="ghost"
+          size="icon"
+          className="notice-dismiss"
+          aria-label={`Dismiss ${label.toLowerCase()}`}
+          title="Dismiss"
+          onClick={onDismiss}
+        >
+          <X size={15} />
+        </Button>
+      )}
     </div>
   );
 }

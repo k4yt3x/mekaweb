@@ -87,7 +87,9 @@ mekaweb requires meka 0.85.0 or newer and refuses older servers when it connects
 - An MCP call's `display_summary` is its first argument that is text, else its first that reads as text, with no need of the tool's schema, so the client labels an MCP call in history by the same rule.
 - The export archive is format 21, and 0.88.0 reads a 0.87.0 archive as it is.
 
-0.70.0 also adds turn records, the `/v1/stream` server feed, conditional rewind and fork through `ETag` and `If-Match`, `conversation.rewound`, `permission_resolved`, `approvals_pending`, the `parent` list filter, and the session's open `checklist` with `checklist.updated`. The client shows the open checklist above the message input. Notices are ephemeral: a running turn's show inline where they arrived, warnings and errors also stay below the conversation, and none survives a reload. The session feed parser ignores events it does not handle.
+0.88.1 through 0.88.3 change no API; 0.88.3's schema differs from 0.88.0's only in its version. 0.88.3 no longer says a provider failure's response is in meka's log, since `provider_response` carries it, which the client shows after the `detail`.
+
+0.70.0 also adds turn records, the `/v1/stream` server feed, conditional rewind and fork through `ETag` and `If-Match`, `conversation.rewound`, `permission_resolved`, `approvals_pending`, the `parent` list filter, and the session's open `checklist` with `checklist.updated`. The client shows the open checklist above the message input. Notices are ephemeral: a running turn's show inline where they arrived, warnings and errors also stay below the conversation, once however often they are said, until dismissed or a later turn starts, and none survives a reload. The session feed parser ignores events it does not handle.
 
 A shell command may print 64 MiB, all of which `tool_call.completed` carries, while the saved result stays a bounded preview. The SSE parser therefore skips data past 2,000,000 characters and keeps the frame's id, so a reconnect cannot replay it. A skipped tool completion keeps its call, outcome, and correlation from the ends of its JSON, and other skipped events become a notice.
 

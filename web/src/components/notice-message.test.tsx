@@ -21,5 +21,5 @@ it('announces a turn failure as an error message', () => {
   );
   expect(html).toContain('role="alert"');
   expect(html).toContain('<strong>Error</strong>');
-  expect(html).toContain('<p>Provider failed</p>');
+  expect(html).toContain('>Provider failed</p>');
 });

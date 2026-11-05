@@ -1,4 +1,5 @@
-import { record, string, type EventData } from './events';
+import { problemText } from '../api/client';
+import { string, type EventData } from './events';
 
 export interface SessionNotice {
   id: string;
@@ -10,11 +11,8 @@ export interface SessionNotice {
   itemId?: string;
   /** A later turn started, so the notice no longer says where the conversation stands. */
   superseded?: boolean;
-}
-
-/** What a Problem Detail says happened, in its own words: the detail, else its title. */
-export function problemText(problem: unknown): string {
-  return record(problem) ? (string(problem, 'detail') || string(problem, 'title')).trim() : '';
+  /** Put away by the person reading it. */
+  dismissed?: boolean;
 }
 
 export function sessionNotice(

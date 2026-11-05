@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.38.0] - 2026-11-05
+
+### Changed
+
+- Dismiss a notice below the conversation with its ×; a repeated one shows there once.
+- An error shows the provider's own response to say why; a long one folds, with Show more.
+- Recognize meka 0.88.3 as a verified server version; meka 0.85.0 and newer still connect.
+
 ## [0.37.0] - 2026-11-02
 
 ### Changed
@@ -666,7 +674,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Light and dark themes, narrow layouts, and collapsible, resizable session panels.
 - Hosting at the root or a subpath, with GitHub Pages deployment on version tags.
 
-[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.37.0...HEAD
+[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.38.0...HEAD
+[0.38.0]: https://github.com/k4yt3x/mekaweb/compare/0.37.0...0.38.0
 [0.37.0]: https://github.com/k4yt3x/mekaweb/compare/0.36.1...0.37.0
 [0.36.1]: https://github.com/k4yt3x/mekaweb/compare/0.36.0...0.36.1
 [0.36.0]: https://github.com/k4yt3x/mekaweb/compare/0.35.0...0.36.0

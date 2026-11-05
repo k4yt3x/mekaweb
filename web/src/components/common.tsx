@@ -2,6 +2,7 @@ import {
   useState,
   useId,
   useEffect,
+  useLayoutEffect,
   useRef,
   cloneElement,
   type ReactElement,
@@ -18,9 +19,49 @@ export function ErrorNotice({ error }: { error: unknown }) {
   return error ? (
     <div className="notice error" role="alert">
       <AlertCircle size={17} />
-      <span>{errorMessage(error)}</span>
+      <div className="notice-text">
+        <FoldedText text={errorMessage(error)} />
+      </div>
     </div>
   ) : null;
+}
+/** Text that folds to its first lines when it runs longer, with a button for the rest. */
+export function FoldedText({ text }: { text: string }) {
+  const body = useRef<HTMLParagraphElement>(null);
+  const [open, setOpen] = useState(false);
+  const [long, setLong] = useState(false);
+  // Other text starts folded, to be measured again.
+  const [shown, setShown] = useState(text);
+  if (shown !== text) {
+    setShown(text);
+    setOpen(false);
+  }
+  useLayoutEffect(() => {
+    const element = body.current;
+    if (!element || open) return;
+    const measure = () => setLong(element.scrollHeight > element.clientHeight + 1);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [text, open]);
+  return (
+    <>
+      <p ref={body} className={open ? undefined : 'folded-text'}>
+        {text}
+      </p>
+      {long && (
+        <button
+          type="button"
+          className="folded-text-toggle"
+          aria-expanded={open}
+          onClick={() => setOpen(!open)}
+        >
+          {open ? 'Show less' : 'Show more'}
+        </button>
+      )}
+    </>
+  );
 }
 export function Empty({ title, children }: { title: string; children?: ReactNode }) {
   return (
