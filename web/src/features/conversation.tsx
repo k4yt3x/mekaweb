@@ -145,7 +145,7 @@ export function Conversation({ state }: { state: SessionState }) {
   useMarkSeen(state.id, state.session?.updated_at);
   const [inputHeight, setInputHeight] = useState(DEFAULT_INPUT_HEIGHT);
   const [resizeGeneration, setResizeGeneration] = useState(0);
-  const { showTurnContext, foldSteps } = useSettings();
+  const { showTurnContext, foldSteps, expandThinking } = useSettings();
   const scroller = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
   const dock = useRef<HTMLDivElement>(null);
@@ -593,6 +593,7 @@ export function Conversation({ state }: { state: SessionState }) {
                             blocks={group.blocks}
                             state={state}
                             fold={foldSteps}
+                            expandThinking={expandThinking}
                             ended={!running || liveSaysAfter.after[index]!}
                             hold={showLatest}
                           />
@@ -846,12 +847,15 @@ function LiveBlocks({
   blocks,
   state,
   fold,
+  expandThinking,
   ended,
   hold,
 }: {
   blocks: readonly LiveItem[];
   state: SessionState;
   fold: boolean;
+  /** Whether the thinking being streamed, the turn's last block, shows open. */
+  expandThinking: boolean;
   ended: boolean;
   hold: boolean;
 }) {
@@ -874,7 +878,12 @@ function LiveBlocks({
     block.kind === 'tool' ? (
       <Tool key={block.id} tool={state.tools[block.id]} sessionId={state.id} />
     ) : block.kind === 'thinking' ? (
-      <Thinking key={index} text={block.text} />
+      <Thinking
+        key={index}
+        text={block.text}
+        streaming={expandThinking && !ended && index === state.blocks.length - 1}
+        hold={hold}
+      />
     ) : block.kind === 'nudge' ? (
       <Nudge key={index} kind={block.nudge} text={block.text} />
     ) : block.kind === 'report' ? (
@@ -924,10 +933,35 @@ function savedStep(block: Schema['ContentBlockView'], result: ToolResultBlock | 
   return { kind: 'thinking' };
 }
 
-function Thinking({ text }: { text: string }) {
-  const [open, setOpen] = useState(false);
+/**
+ * The agent's thinking, folded to a line. While it is `streaming` it shows open, and folds once it
+ * is done: at once, or once a reader scrolled up, `hold`, is back at the latest.
+ */
+function Thinking({
+  text,
+  streaming = false,
+  hold = false,
+}: {
+  text: string;
+  streaming?: boolean;
+  hold?: boolean;
+}) {
+  const [open, setOpen] = useState(streaming);
+  // Opened as it streamed, to fold when it is done; folded or opened by hand, it stays so.
+  const [following, setFollowing] = useState(streaming);
+  if (streaming && !following) {
+    setFollowing(true);
+    setOpen(true);
+  } else if (!streaming && following && !hold) {
+    setFollowing(false);
+    setOpen(false);
+  }
   return (
-    <details className="thinking" onToggle={(event) => setOpen(event.currentTarget.open)}>
+    <details
+      className="thinking"
+      open={open}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
       <summary>
         Thinking...
         {!open && text.trim() && (

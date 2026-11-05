@@ -22,6 +22,7 @@ import type { Gateway } from '../api/gateway';
 import { Button } from '../components/ui/button';
 import { SwitchField } from '../components/ui/switch';
 import { ErrorNotice, Field, Json, Loading, Timestamp } from '../components/common';
+import { Markdown } from '../components/markdown';
 import { PixelInput } from '../components/pixel-input';
 import { appleKeyboard } from '../components/shortcut-keys';
 import { SettingsLink } from '../components/settings-link';
@@ -64,6 +65,11 @@ export function GeneralSettings() {
             label="Fold finished steps"
             checked={settings.foldSteps}
             onCheckedChange={(checked) => runtime.storage.foldSteps(checked)}
+          />
+          <SwitchField
+            label="Expand thinking as it streams"
+            checked={settings.expandThinking}
+            onCheckedChange={(checked) => runtime.storage.expandThinking(checked)}
           />
           <SwitchField
             label="Show context added by meka"
@@ -496,7 +502,9 @@ function InstructionsPanel() {
           {data?.content ? (
             <>
               {data.source && <p className="muted small">{data.source}</p>}
-              <pre className="plain-text">{data.content}</pre>
+              <div className="instructions-body">
+                <Markdown text={data.content} />
+              </div>
             </>
           ) : (
             !instructions.error && (

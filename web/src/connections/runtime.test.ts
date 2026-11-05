@@ -170,6 +170,7 @@ it('takes the preferences mekaweb kept, and saves changes for every device once 
         value: {
           showTurnContext: true,
           foldSteps: true,
+          expandThinking: false,
           inAppNotifications: true,
           completionSound: true,
           providerOrder: { accounts: [], profiles: [] },

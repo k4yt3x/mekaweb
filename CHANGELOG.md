@@ -9,11 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.38.0] - 2026-11-05
 
+### Added
+
+- Settings → General: expand the agent's thinking while it streams, folding it once it is done.
+
 ### Changed
 
 - Dismiss a notice below the conversation with its ×; a repeated one shows there once.
 - An error shows the provider's own response to say why; a long one folds, with Show more.
 - Recognize meka 0.88.3 as a verified server version; meka 0.85.0 and newer still connect.
+- Settings opens 960px wide at most, from 1280px.
+- Settings → Instructions shows the standing instructions as formatted Markdown.
 
 ## [0.37.0] - 2026-11-02
 

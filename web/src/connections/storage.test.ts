@@ -59,6 +59,7 @@ it('takes shared preferences from mekaweb, checked, and leaves this device’s o
     terminalFontSize: 20,
     editorFontSize: 20,
     showTurnContext: true,
+    expandThinking: true,
     completionSound: 'yes',
     providerOrder: { accounts: ['work', 'work', 3], profiles: 'opus' },
     dataSaver: false,
@@ -72,6 +73,7 @@ it('takes shared preferences from mekaweb, checked, and leaves this device’s o
     editorFontSize: EDITOR_FONT.default,
     showTurnContext: true,
     foldSteps: false,
+    expandThinking: true,
     completionSound: false,
     dataSaver: true,
     layout: { panel: 'context' },
@@ -82,6 +84,7 @@ it('takes shared preferences from mekaweb, checked, and leaves this device’s o
   expect(adapter.preferences()).toEqual({
     showTurnContext: true,
     foldSteps: false,
+    expandThinking: true,
     inAppNotifications: true,
     completionSound: false,
     providerOrder: { accounts: ['work'], profiles: [] },

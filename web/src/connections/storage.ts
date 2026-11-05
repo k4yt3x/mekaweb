@@ -91,6 +91,7 @@ export interface Connection {
 export const PORTABLE_PREFERENCES = [
   'showTurnContext',
   'foldSteps',
+  'expandThinking',
   'inAppNotifications',
   'completionSound',
   'providerOrder',
@@ -114,6 +115,8 @@ export interface Settings {
   showTurnContext: boolean;
   /** Whether a turn's thinking and tool calls fold into a line once the agent says more. */
   foldSteps: boolean;
+  /** Whether the thinking being streamed shows open, folding once it is done. */
+  expandThinking: boolean;
   inAppNotifications: boolean;
   completionSound: boolean;
   providerOrder: ProviderOrder;
@@ -211,6 +214,7 @@ const defaults = (): Settings => ({
   editorWordWrap: false,
   showTurnContext: false,
   foldSteps: true,
+  expandThinking: false,
   inAppNotifications: true,
   completionSound: false,
   providerOrder: { accounts: [], profiles: [] },
@@ -270,6 +274,7 @@ function normalizeSettings(value: unknown): Settings {
     editorWordWrap: value.editorWordWrap === true,
     showTurnContext: value.showTurnContext === true,
     foldSteps: value.foldSteps !== false,
+    expandThinking: value.expandThinking === true,
     inAppNotifications: value.inAppNotifications !== false,
     completionSound: value.completionSound === true,
     providerOrder: normalizeProviderOrder(value.providerOrder),
@@ -460,6 +465,9 @@ export class BrowserStorage {
   }
   foldSteps(foldSteps: boolean) {
     this.save({ ...this.readSettings(), foldSteps });
+  }
+  expandThinking(expandThinking: boolean) {
+    this.save({ ...this.readSettings(), expandThinking });
   }
   inAppNotifications(inAppNotifications: boolean) {
     this.save({ ...this.readSettings(), inAppNotifications });

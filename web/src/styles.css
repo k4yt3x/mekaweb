@@ -487,12 +487,13 @@ progress {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* Settings over the app, nearly as large as the window, its sections down its left. */
+/* Settings over the app, nearly as tall as the window and as wide as its pages need, its sections
+   down its left. */
 .dialog-content.settings-dialog {
   display: flex;
   flex-direction: column;
   width: calc(var(--app-width) - 64px);
-  max-width: 1280px;
+  max-width: 960px;
   height: min(920px, calc(var(--app-height) - 64px));
   max-height: none;
   padding: 0;
@@ -549,7 +550,6 @@ progress {
   overflow: auto;
 }
 .settings-section .page {
-  max-width: 1000px;
   margin: 0;
   padding: 28px 36px 48px;
 }
@@ -1512,6 +1512,9 @@ pre.bounded {
 .editor-preview {
   padding: 16px;
   min-height: 220px;
+}
+.instructions-body {
+  margin: 10px 0 20px;
 }
 .schedule-card header,
 .card-heading {
