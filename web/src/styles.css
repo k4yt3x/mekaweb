@@ -2328,6 +2328,9 @@ progress::-moz-progress-bar {
   flex-shrink: 0;
   color: var(--muted);
 }
+.session-item-pin {
+  color: var(--accent);
+}
 .session-item-date {
   margin-left: auto;
   padding-left: 4px;
@@ -2532,6 +2535,12 @@ progress::-moz-progress-bar {
 :is(.session-list-entry, .session-list-end, .session-group-more, .loading)
   + .session-group-heading {
   margin-top: 8px;
+}
+/* A line parts the pinned, at the top, from the rest. */
+.session-pinned-end {
+  margin: 6px 10px 8px;
+  border: 0;
+  border-top: 1px solid var(--border);
 }
 .session-group-heading h3 {
   flex: 1;

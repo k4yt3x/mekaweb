@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Recognize meka 0.88.3 as a verified server version; meka 0.85.0 and newer still connect.
 - Settings opens 960px wide at most, from 1280px.
 - Settings → Instructions shows the standing instructions as formatted Markdown.
+- Pinned sessions show a coloured pin, and a line parts them from the rest; they no longer fold.
 
 ## [0.37.0] - 2026-11-02
 

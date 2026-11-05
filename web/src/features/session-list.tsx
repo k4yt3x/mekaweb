@@ -168,8 +168,8 @@ export function SessionList({
   // How many sessions each group was asked to list.
   const [asked, setAsked] = useState<Readonly<Record<string, number>>>({});
   const limit = (group: SessionGroup) => asked[group.key] ?? groupFirst(group);
-  // The pinned and those on none are read even folded, to know whether there are any; a project's
-  // only while it is shown, as meka counts its sessions.
+  // The pinned are read always, and those on none even folded, to know whether there are any; a
+  // project's only while it is shown, as meka counts its sessions.
   const read = grouped
     ? [
         PINNED,
@@ -242,7 +242,6 @@ export function SessionList({
     if (!connection) return;
     // A project since renamed or removed is let go.
     const known = new Set([
-      PINNED.key,
       UNPROJECTED.key,
       ...(projects.data?.projects ?? []).map((project) => projectGroup(project.name).key),
     ]);
@@ -275,23 +274,31 @@ export function SessionList({
   }
   // A session moving between groups can be in two until both are read again; it shows in the first.
   const taken = new Set<string>();
-  const sections = (grouped ? groups : [undefined]).map((group) => {
-    const rows = group
-      ? (reads.get(group.key)?.data?.sessions ?? [])
-      : searching
-        ? (matches.data?.sessions ?? [])
-        : (list.data?.pages.flatMap((page) => page.sessions) ?? []);
-    const own = rows.filter((row) => !taken.has(row.id));
-    for (const row of own) taken.add(row.id);
-    const items = withSubagents(own);
-    const shown = !group || !folded.includes(group.key);
-    const entries = !shown
-      ? []
-      : searching
-        ? items.map((session) => ({ session, depth: 0, branches: [] }))
-        : foldTree(sessionTree(items), unfolded);
-    return { group, shown, items, entries };
-  });
+  const listed = list.data?.pages.flatMap((page) => page.sessions) ?? [];
+  // The pinned stand apart at the top, a line between them and the rest, whether or not the rest
+  // are grouped; ungrouped, they are the first meka lists.
+  const pinnedApart = !grouped && !searching && listed.some((row) => row.pinned_at);
+  const sections = (grouped ? groups : pinnedApart ? [PINNED, undefined] : [undefined]).map(
+    (group) => {
+      const rows = group
+        ? grouped
+          ? (reads.get(group.key)?.data?.sessions ?? [])
+          : listed.filter((row) => row.pinned_at)
+        : searching
+          ? (matches.data?.sessions ?? [])
+          : listed;
+      const own = rows.filter((row) => !taken.has(row.id));
+      for (const row of own) taken.add(row.id);
+      const items = withSubagents(own);
+      const shown = !group || group.key === PINNED.key || !folded.includes(group.key);
+      const entries = !shown
+        ? []
+        : searching
+          ? items.map((session) => ({ session, depth: 0, branches: [] }))
+          : foldTree(sessionTree(items), unfolded);
+      return { group, shown, items, entries };
+    },
+  );
   const items = sections.flatMap((section) => section.items);
   const entries = sections.flatMap((section) => section.entries);
   // A pin toggle pressed from the keyboard keeps focus as pinning moves its row; a row that moves
@@ -539,10 +546,11 @@ export function SessionList({
         {pending && <Loading label={searching ? 'Searching…' : 'Loading…'} />}
         {/* One list of rows and headings, so a row moving to another group keeps its place. */}
         {!waiting &&
-          sections.flatMap(({ group, shown, entries: rows }) => {
+          sections.flatMap(({ group, shown, entries: rows }, index) => {
             const rendered: ReactNode[] = [];
             const groupRead = group && shown ? reads.get(group.key) : undefined;
-            if (group) {
+            // The pinned need no heading: a line parts them from the rest.
+            if (group && group.key !== PINNED.key) {
               rendered.push(
                 <SessionGroupHeading
                   key={'group:' + group.key}
@@ -620,6 +628,12 @@ export function SessionList({
                   />,
                 );
             }
+            if (
+              group?.key === PINNED.key &&
+              rows.length &&
+              sections.slice(index + 1).some((next) => next.group || next.entries.length)
+            )
+              rendered.push(<hr key="pinned-end" className="session-pinned-end" />);
             return rendered;
           })}
         {!pending && !error && (grouped ? !groups.length : !items.length) && (
