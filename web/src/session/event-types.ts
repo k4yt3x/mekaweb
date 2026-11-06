@@ -12,8 +12,10 @@ export interface EventPayloads {
     job_id?: string;
   };
   // `profile` names the fallback profile that served the turn, when the session's own could not.
+  // `position` is the conversation's as the turn ends, omitted on a sub-agent's feed.
   'turn.finished': Correlation & {
     turn_id: string;
+    position?: number;
     stop_reason?: string;
     usage?: Schema['UsageView'];
     refusal_text?: string;
@@ -21,12 +23,14 @@ export interface EventPayloads {
   };
   'turn.failed': Correlation & {
     turn_id: string;
+    position?: number;
     error?: Schema['ProblemDetail'];
     message_withdrawn?: boolean;
     profile?: string;
   };
   'turn.canceled': Correlation & {
     turn_id: string;
+    position?: number;
     reason?: string;
     message_withdrawn?: boolean;
     profile?: string;
@@ -52,7 +56,7 @@ export interface EventPayloads {
     content: Schema['ToolResultContentView'][];
   };
   'tool_call.output_delta': Correlation & { id: string; chunk: string };
-  permission_required: Correlation & {
+  'approval.requested': Correlation & {
     request_id: string;
     tool_name: string;
     input: unknown;
@@ -60,9 +64,9 @@ export interface EventPayloads {
     expires_at?: string;
     subagent_id?: string;
   };
-  permission_resolved: Correlation & { request_id: string; outcome: string };
+  'approval.resolved': Correlation & { request_id: string; outcome: string };
   // 0.85 asks the person an MCP server's question: a form to fill in, or a page to visit.
-  elicitation_required: Correlation & {
+  'elicitation.requested': Correlation & {
     request_id: string;
     server: string;
     kind: 'form' | 'url';
@@ -73,7 +77,7 @@ export interface EventPayloads {
     expires_at?: string;
     subagent_id?: string;
   };
-  elicitation_resolved: Correlation & { request_id: string; outcome: string };
+  'elicitation.resolved': Correlation & { request_id: string; outcome: string };
   notice: Correlation & { text: string; level?: string };
   'inbox.delivered': Correlation & { item_ids: string[] };
   'inbox.deferred': Correlation & {
@@ -88,7 +92,11 @@ export interface EventPayloads {
   };
   'inbox.withdrawn': Correlation & { item_id: string };
   'session.updated': Schema['SessionResponse'];
-  'conversation.rewound': { revision: number; total: number; turns_removed: number };
+  // The `rewind` item as the history lists it.
+  'conversation.rewound': { session_id?: string } & Extract<
+    Schema['HistoryItem'],
+    { type: 'rewind' }
+  >;
   'turn.nudged': Correlation & { kind: string; text: string };
   'task.reported': Correlation & { task_ids: string[]; text: string };
   'feed.gap': { session_id?: string; dropped?: number };
@@ -104,10 +112,9 @@ export interface EventPayloads {
   };
   // 0.85 says what is in context after every provider round, a compaction, or a rewind.
   'context.measured': Correlation & { used: number; window?: number };
-  progress: Correlation & {
-    server_name: string;
-    tool_name: string;
-    tool_use_id?: string;
+  // 0.89 names the call by its id, which is omitted for a call that carried none.
+  'tool_call.progress': Correlation & {
+    id?: string;
     progress: number;
     total?: number;
     message?: string;

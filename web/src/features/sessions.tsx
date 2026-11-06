@@ -25,7 +25,7 @@ import {
   RefreshCw,
   Share as Export,
 } from 'lucide-react';
-import { download, sessionPath, type Schema } from '../api/client';
+import { download, segment, sessionPath, type Schema } from '../api/client';
 import {
   useCan,
   useConnection,
@@ -44,6 +44,7 @@ import { basename, join, parent } from '../files/paths';
 import { focusMessage, WorkspaceProvider, type Workspace } from '../components/workspace';
 import { useSessionContext, useSessionMetadata, useSessionStates } from '../session/hooks';
 import { isSessionRunning } from '../session/controller';
+import { compactionNote } from '../session/compaction';
 import { useLocation, useParams } from '@tanstack/react-router';
 import { Button } from '../components/ui/button';
 import { Dialog } from '../components/ui/dialog';
@@ -869,14 +870,11 @@ function SessionActions({
     () => openAction('delete'),
     canWrite && !running && !deleting && !action.busy,
   );
-  function exportSession(format: 'markdown' | 'json') {
+  function exportSession() {
     openAction('export');
     void action.run(async () => {
       if (!api) return;
-      download(
-        await api.blob(sessionPath(session.id) + '/export', { format }),
-        `meka-${session.id}.${format === 'markdown' ? 'md' : 'json'}`,
-      );
+      download(await api.blob(sessionPath(session.id) + '/export'), `meka-${session.id}.json`);
       closeAction();
     });
   }
@@ -921,16 +919,10 @@ function SessionActions({
         location.hash = '/sessions/' + result.id;
         closeAction();
       } else if (dialog === 'rewind') {
-        const result = await api.mutate<Schema['RewindResponse']>(
-          'POST',
-          sessionPath(session.id) + '/rewind',
-          { turns },
-        );
-        await controller?.refresh(session.id, true);
-        return result;
+        return controller?.rewindLast(session.id, turns);
       } else if (dialog === 'compact') {
         await controller?.attend(session.id);
-        const result = await api.mutate<Schema['CompactResponse']>(
+        const result = await api.mutate<Schema['HistoryItem']>(
           'POST',
           sessionPath(session.id) + '/compact',
           {
@@ -1001,17 +993,14 @@ function SessionActions({
               Available tools
             </DropdownMenu.Item>
             <DropdownMenu.Separator className="menu-separator" />
-            {(['markdown', 'json'] as const).map((format) => (
-              <DropdownMenu.Item
-                className="menu-item"
-                key={format}
-                disabled={action.busy}
-                onSelect={() => exportSession(format)}
-              >
-                <Export size={14} />
-                Export {format === 'markdown' ? 'transcript' : 'archive'}
-              </DropdownMenu.Item>
-            ))}
+            <DropdownMenu.Item
+              className="menu-item"
+              disabled={action.busy}
+              onSelect={() => exportSession()}
+            >
+              <Export size={14} />
+              Export archive
+            </DropdownMenu.Item>
             <DropdownMenu.Separator className="menu-separator" />
             <DropdownMenu.Item
               className="menu-item menu-item-danger"
@@ -1145,19 +1134,16 @@ function SessionActions({
 }
 function ActionResult({ value }: { value: unknown }) {
   if (!value || typeof value !== 'object') return <Json value={value} />;
-  const result = value as Record<string, unknown>;
+  // A rewind or a compaction answers with its item as the history lists it.
+  const item = 'type' in value ? (value as Schema['HistoryItem']) : undefined;
   return (
     <div className="action-result">
-      {typeof result.turns_removed === 'number' ? (
+      {item?.type === 'rewind' ? (
         <p>
-          Removed {result.turns_removed} {result.turns_removed === 1 ? 'turn' : 'turns'}.{' '}
-          {String(result.messages_after)} messages remain.
+          Removed {item.turns} {item.turns === 1 ? 'turn' : 'turns'}.
         </p>
-      ) : typeof result.messages_before === 'number' &&
-        typeof result.messages_after === 'number' ? (
-        <p>
-          Context compacted from {result.messages_before} to {result.messages_after} messages.
-        </p>
+      ) : item?.type === 'compaction' ? (
+        <p>{compactionNote(item)}</p>
       ) : null}
       <details>
         <summary>Result details</summary>
@@ -1195,8 +1181,8 @@ type DetailsTab = Exclude<Panel, 'files'>;
 function useRunningTasks(id: string | undefined, turning: boolean) {
   const [polling, setPolling] = useState(false);
   const tasks = useResource<Schema['BackgroundTasksResponse']>(
-    id ? sessionPath(id) + '/tasks' : '',
-    undefined,
+    '/v1/tasks',
+    id ? { session: id } : undefined,
     Boolean(id),
     polling ? 5000 : 120_000,
   );
@@ -1252,8 +1238,8 @@ function SessionDetails({ session, tab }: { session: Schema['SessionResponse']; 
   // The message box's meter reads it again whenever meka measures it.
   const context = useSessionContext(session.id, { enabled: tab === 'context' });
   const tasks = useResource<Schema['BackgroundTasksResponse']>(
-    sessionPath(session.id) + '/tasks',
-    undefined,
+    '/v1/tasks',
+    { session: session.id },
     tab === 'tasks',
     5000,
   );
@@ -1263,7 +1249,7 @@ function SessionDetails({ session, tab }: { session: Schema['SessionResponse']; 
         <>
           <ErrorNotice error={context.error} />
           {context.data ? (
-            <SessionContext context={context.data} />
+            <SessionContext context={context.data} session={session} />
           ) : context.isPending ? (
             <Loading />
           ) : null}
@@ -1290,10 +1276,7 @@ function SessionDetails({ session, tab }: { session: Schema['SessionResponse']; 
                 disabled={!canWrite || task.status !== 'running' || action.busy}
                 onClick={() =>
                   void action.run(async () => {
-                    await api?.mutate(
-                      'DELETE',
-                      sessionPath(session.id) + '/tasks/' + encodeURIComponent(task.id),
-                    );
+                    await api?.mutate('DELETE', '/v1/tasks/' + segment(task.id));
                     await tasks.refetch();
                   })
                 }

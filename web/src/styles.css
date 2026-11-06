@@ -3304,17 +3304,114 @@ progress::-moz-progress-bar {
 .message-user > .markdown > :last-child {
   margin-bottom: 0;
 }
-.tool-card.compaction-summary {
+/* A compaction: a line across the conversation, opening to what set it going and its summary.
+   What is above it ends in a message's bottom padding and its last block's margin, so it takes
+   its own room below, to stand as far from each. */
+.message.message-summary {
+  padding: 0 0 36px;
+}
+/* After a turn's end, whose actions tuck into the top padding a message after them has, saved or
+   while it runs. */
+.message:has(> .turn-actions:last-child) + .message-summary,
+.message:has(> .turn-actions:last-child) + .live-preview > .message-summary:first-child {
+  padding-top: 20px;
+}
+.compaction-rule {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 6px 0;
+  color: var(--muted);
+  /* As the folded steps beside it are, a step down from the conversation's own size. */
+  font-size: 0.85em;
+  list-style: none;
+  cursor: pointer;
+}
+.compaction-rule::-webkit-details-marker {
+  display: none;
+}
+.compaction-rule::before,
+.compaction-rule::after {
+  content: '';
+  flex: 1;
+  border-top: 1px solid var(--border);
+}
+.compaction-label {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 7px;
+}
+summary.compaction-rule:hover {
+  color: var(--text);
+}
+summary.compaction-rule:hover::before,
+summary.compaction-rule:hover::after {
+  border-top-color: var(--muted);
+}
+/* Under way: a light runs along each half in toward the label, as the context is drawn in. */
+.compaction-rule.compaction-running {
   margin: 0;
+  cursor: default;
+}
+.compaction-running::before,
+.compaction-running::after {
+  height: 1px;
+  border-top: 0;
+  background: linear-gradient(90deg, var(--border) 0 35%, var(--accent) 50%, var(--border) 65% 100%)
+    0 0 / 300% 100%;
+  animation: compaction-in-from-left 1.6s linear infinite;
+}
+.compaction-running::after {
+  animation-name: compaction-in-from-right;
+}
+.compaction-running svg {
+  animation: compaction-pulse 1.6s ease-in-out infinite;
+}
+@keyframes compaction-in-from-left {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0 0;
+  }
+}
+@keyframes compaction-in-from-right {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 100% 0;
+  }
+}
+@keyframes compaction-pulse {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+.compaction-chevron {
+  transition: transform 0.12s;
+}
+.compaction[open] .compaction-chevron {
+  transform: rotate(90deg);
+}
+/* What set it going, then the summary the agent read in place of what is above, set off. */
+.compaction-content {
+  margin-top: 12px;
+  border-left: 2px solid var(--border);
+  padding-left: 13px;
 }
 .compaction-note {
-  min-width: 0;
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 0.85em;
 }
-.compaction-content {
-  padding: 0 0 14px;
-}
-.compaction-content > p {
-  margin: 4px 0 16px;
+.compaction-text > :first-child {
+  margin-top: 0;
 }
 .injected,
 .thinking {
@@ -3551,11 +3648,8 @@ progress::-moz-progress-bar {
 .live-preview {
   min-width: 0;
 }
-.replay-notice {
-  /* Match the bottom gap, which includes the next message's 16px top padding. */
-  margin-top: 28px;
-}
-/* The rest of a reply shown above, as it arrives. */
+/* More of what the agent says, under its heading above: the rest of a reply as it arrives, or what
+   follows a compaction's line. */
 .message.message-continued {
   padding-top: 0;
 }

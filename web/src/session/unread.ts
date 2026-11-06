@@ -30,14 +30,14 @@ export function sessionStatus({
   /** The newest record of the session, from the listing or the live snapshot. */
   session: Pick<
     Schema['SessionResponse'],
-    'id' | 'updated_at' | 'parent_id' | 'approvals_pending' | 'last_turn'
+    'id' | 'updated_at' | 'parent_id' | 'requests_pending' | 'last_turn'
   >;
   live: Pick<SessionState, 'approvals'> | undefined;
   running: boolean;
   seen: SeenSessions;
   selected: boolean;
 }): SessionStatus {
-  if (live?.approvals.length || session.approvals_pending) return 'approval';
+  if (live?.approvals.length || session.requests_pending) return 'approval';
   if (running) return 'running';
   if (selected || !isUnread(session, seen, false)) return 'read';
   // A turn with no end that is not running died with its process, so its outcome is unknown. One
@@ -45,8 +45,11 @@ export function sessionStatus({
   // as a profile switch. Both times are the server's.
   const last = session.last_turn;
   const since = seen.sessions[session.id] ?? seen.baseline;
+  // A compaction run between turns is a turn of its own, but not the agent's work to report.
   const news =
-    last?.ended_at && (since === undefined || Date.parse(last.ended_at) > Date.parse(since));
+    last?.ended_at &&
+    last.source !== 'compaction' &&
+    (since === undefined || Date.parse(last.ended_at) > Date.parse(since));
   if (news && last.status === 'succeeded') return 'completed';
   if (news && last.status === 'failed') return 'failed';
   return 'unread';

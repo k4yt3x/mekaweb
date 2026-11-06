@@ -454,7 +454,7 @@ function AccountGroup({
             >
               {profile.name}
             </button>
-            {profile.active && <span className="badge">Default</span>}
+            {profile.default && <span className="badge">Default</span>}
           </span>
           <div className="provider-rest">
             <span className="provider-meta">

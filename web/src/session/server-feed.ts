@@ -51,7 +51,7 @@ export class ServerFeed {
       const backlog = this.cursor === undefined ? Date.now() + BACKLOG_MS : 0;
       try {
         const response = await this.api.stream(
-          '/v1/stream',
+          '/v1/feed',
           this.cursor,
           undefined,
           AbortSignal.any([signal, request.signal]),

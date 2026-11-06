@@ -13,11 +13,12 @@ import {
   resendable,
   responseActivityIndicator,
   spawnedAgent,
-  turnIndex,
+  speakers,
   type ToolResultBlock,
   type ToolUseBlock,
 } from './conversation-history';
 import type { LiveBlock, SessionState, Submission } from '../session/controller';
+import { rewindableTurns, type ConversationMessage } from '../session/history';
 
 const call = (id: string): ToolUseBlock => ({
   type: 'tool_use',
@@ -31,10 +32,10 @@ const result = (id: string): ToolResultBlock => ({
   is_error: false,
   content: [{ type: 'text', text: id }],
 });
-const message = (
-  role: string,
-  ...content: Schema['ContentBlockView'][]
-): Schema['MessageView'] => ({ role, content });
+const message = (role: string, ...content: Schema['ContentBlockView'][]): ConversationMessage => ({
+  role,
+  content,
+});
 
 it('associates queued metadata only by item ID and never repeats an already visible message', () => {
   const item: Schema['InboxItemView'] = {
@@ -199,7 +200,7 @@ it('does not reach past another assistant message to attach a late result', () =
 });
 
 it('does not pair across compaction or interpret tool blocks inside a summary as calls', () => {
-  const summary: Schema['MessageView'] = {
+  const summary: ConversationMessage = {
     ...message('assistant', call('summary')),
     compaction: {
       trigger: 'reactive',
@@ -207,7 +208,8 @@ it('does not pair across compaction or interpret tool blocks inside a summary as
       memories_written: [],
       kept_recent: true,
       generation: 1,
-      replaced_count: 12,
+      summary: 'Earlier work.',
+      checkpoint: [],
     },
   };
   const input = [
@@ -288,7 +290,8 @@ it('keeps user input, compaction, unmatched results, and distinct saved turns as
         memories_written: [],
         kept_recent: true,
         generation: 1,
-        replaced_count: 20,
+        summary: 'Earlier work.',
+        checkpoint: [],
       },
     },
     message('assistant'),
@@ -343,25 +346,19 @@ it('leaves out of a replayed turn what saved history shows, so the rest carries 
     // Saved before it ran: still running, it shows its progress live.
     message('assistant', { type: 'text', text: 'Waiting.' }, call('three')),
   ];
-  const { groups, continued } = liveAfterSaved(groupLiveMessages(blocks, []), saved);
-  expect(continued).toBe(true);
+  const { groups } = liveAfterSaved(groupLiveMessages(blocks, []), saved);
   expect(groups).toHaveLength(1);
   expect(groups[0]?.kind === 'agent' && groups[0].blocks.map(({ block }) => block)).toEqual([
     { kind: 'notice', level: 'warning', text: 'The provider is slow.' },
     { kind: 'text', text: 'Waiting.' },
     { kind: 'tool', id: 'three' },
   ]);
-  // Nothing in common with history: all of it shows, under its own heading.
+  // Nothing in common with history: all of it shows.
   const fresh = liveAfterSaved(groupLiveMessages(blocks.slice(5), []), saved);
-  expect(fresh.continued).toBe(false);
   expect(fresh.groups[0]?.kind === 'agent' && fresh.groups[0].blocks).toHaveLength(2);
   // All of it saved, with nothing after: nothing is left to show.
-  expect(liveAfterSaved(groupLiveMessages(blocks.slice(0, 2), []), saved)).toEqual({
-    groups: [],
-    continued: false,
-  });
-  // A notice kept from before someone's words, and the saved output going on after them: what
-  // goes on after them is not taken to carry on from what is shown before them.
+  expect(liveAfterSaved(groupLiveMessages(blocks.slice(0, 2), []), saved)).toEqual({ groups: [] });
+  // A notice kept from before someone's words, and the saved output going on after them.
   const interrupted = liveAfterSaved(
     groupLiveMessages(
       [
@@ -380,7 +377,6 @@ it('leaves out of a replayed turn what saved history shows, so the rest carries 
     saved,
   );
   expect(interrupted.groups.map((group) => group.kind)).toEqual(['agent', 'message', 'agent']);
-  expect(interrupted.continued).toBe(false);
 });
 
 const words: Schema['ContentBlockView'] = { type: 'text', text: 'Hello.' };
@@ -553,11 +549,9 @@ function waitingState(patch: Partial<SessionState> = {}): SessionState {
     running: false,
     compacting: false,
     textStreaming: false,
-    offset: 0,
     loading: false,
     deleting: false,
     settingsPending: false,
-    partial: false,
     tools: {},
     approvals: [],
     notices: [],
@@ -708,29 +702,6 @@ it('names a running compaction, but not a turn whose compaction flag outlived it
   expect(activity(waitingState({ compacting: true }))?.status).toBe('working');
 });
 
-it('counts the turns a rewind drops by meka’s labels, from the turn holding a message', () => {
-  const labeled = (label: string, row: Schema['MessageView']) => ({ ...row, turn_label: label });
-  const input = [
-    labeled('t_0001', message('user', { type: 'text', text: 'First.' })),
-    labeled('t_0001', message('assistant', call('a'))),
-    labeled('t_0001', message('user', result('a'))),
-    labeled('t_0001', message('assistant', { type: 'text', text: 'One.' })),
-    labeled('t_0002', message('user', { type: 'text', text: 'Second.' })),
-    labeled('t_0002', message('assistant', { type: 'text', text: 'Two.' })),
-    labeled('t_0003', message('user', { type: 'text', text: 'Third.' })),
-    // A row meka labels no turn, such as one from before turns were labeled, counts for none.
-    message('assistant', { type: 'text', text: 'Unlabeled.' }),
-  ];
-  const turns = turnIndex(input, 0);
-  expect(turns.get('t_0001')).toEqual({ start: 0, turns: 3 });
-  expect(turns.get('t_0002')).toEqual({ start: 4, turns: 2 });
-  expect(turns.get('t_0003')).toEqual({ start: 6, turns: 1 });
-  // The first loaded turn may open before the loaded history, so it cannot be addressed.
-  const later = turnIndex(input.slice(2), 2);
-  expect(later.has('t_0001')).toBe(false);
-  expect(later.get('t_0002')).toEqual({ start: 2, turns: 2 });
-});
-
 it('copies what was written, without thinking, tools, or context meka added', () => {
   expect(
     messageText([
@@ -753,11 +724,11 @@ it('keeps a nudge in the turn it answers, apart from one a steer rides', () => {
     message('assistant', { type: 'text', text: 'Did the other.' }),
     nudge({ type: 'inbox', class: 'steer', body: 'Also the third.', text: '[Message]\nAlso…' }),
     message('assistant', { type: 'text', text: 'And the third.' }),
-  ].map((row) => ({ ...row, turn_id: 'turn', turn_label: 't_0001' }));
+  ].map((row, index) => ({ ...row, turn_id: 'turn', position: index + 1 }));
   const groups = groupAgentMessages(groupToolResults(input).messages);
   expect(groups.map((group) => group.map((row) => row.index))).toEqual([[0], [1, 2, 3], [4], [5]]);
-  // meka labels neither nudge as a turn of its own, so rewinding before the reply drops one.
-  expect(turnIndex(input, 0).get('t_0001')).toEqual({ start: 0, turns: 1 });
+  // Neither nudge is a turn of its own, so rewinding before the reply drops one.
+  expect(rewindableTurns(input).get('turn')).toEqual({ start: 0, turns: 1 });
   expect(messageText(input.slice(1, 4))).toBe('Did one.\n\nDid the other.');
 });
 
@@ -949,4 +920,56 @@ it('keeps work that finished while the reply was written in the turn it carries 
       (group) => group.kind,
     ),
   ).toEqual(['agent', 'message']);
+});
+
+it('heads what the agent says only after someone else’s words', () => {
+  const said = (role: string, turn: string, ...content: Schema['ContentBlockView'][]) => ({
+    ...message(role, ...(content.length ? content : [{ type: 'text' as const, text: role }])),
+    turn_id: turn,
+  });
+  const line = (turn: string): ConversationMessage => ({
+    role: 'user',
+    content: [{ type: 'text', text: 'Summary.' }],
+    turn_id: turn,
+    compaction: {
+      trigger: 'requested',
+      source: 'checkpoint',
+      memories_written: [],
+      kept_recent: false,
+      generation: 1,
+      summary: 'Summary.',
+      checkpoint: [],
+    },
+  });
+  const groups = (input: ConversationMessage[]) =>
+    groupAgentMessages(groupToolResults(input).messages);
+  // A turn a compaction cut in two: one heading, and one reply, its actions at its end.
+  const cut = speakers(
+    groups([said('user', 't'), said('assistant', 't'), line('t'), said('assistant', 't')]),
+    false,
+  );
+  expect(cut.heads).toEqual([true, true, true, false]);
+  expect(cut.goesOn[1]).toBe(true);
+  expect(cut.runs[3]).toBe(1);
+  expect(cut.agentLast).toBe(true);
+  // A compaction between someone's words and the reply carries on theirs: the reply is headed.
+  const after = speakers(groups([said('user', 't'), line('t'), said('assistant', 't')]), false);
+  expect(after.heads[2]).toBe(true);
+  expect(after.goesOn).toEqual([]);
+  // An opening of meka's context alone shows nothing while that is hidden, and parts nothing.
+  const context = said('user', 'u', { type: 'turn_context', text: 'Context.' });
+  const hidden = groups([said('assistant', 't'), context, said('assistant', 'u')]);
+  expect(speakers(hidden, false).heads).toEqual([true, undefined, false]);
+  expect(speakers(hidden, true).heads).toEqual([true, true, true]);
+  // Another turn of the agent's carries on its words, but is a reply of its own.
+  const turns = speakers(groups([said('assistant', 't'), said('assistant', 'u')]), false);
+  expect(turns.heads).toEqual([true, false]);
+  expect(turns.goesOn).toEqual([]);
+  expect(turns.runs).toEqual([0, 1]);
+  // Results with no call to pair with are a tool's words: the agent after them is headed.
+  const tool = speakers(
+    groups([said('assistant', 't'), said('user', 't', result('lost')), said('assistant', 'u')]),
+    false,
+  );
+  expect(tool.heads).toEqual([true, true, true]);
 });

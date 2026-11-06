@@ -10,6 +10,8 @@ import { Markdown } from '../components/markdown';
 import { SwitchField } from '../components/ui/switch';
 import { projectNames, useProjects } from './projects-query';
 type Kind = 'memory' | 'skills';
+/** Where meka keeps each kind. */
+const routes: Record<Kind, string> = { memory: '/v1/memories', skills: '/v1/skills' };
 type Detail = Schema['MemoryDetail'] | Schema['SkillDetail'];
 /** Where an entry is: meka 0.84 lets projects share a memory name, so a name alone is ambiguous. */
 interface Entry {
@@ -39,13 +41,13 @@ export function ResourcesPage({ kind }: { kind: Kind }) {
   }, [query]);
   // meka searches memory as the agent's `memory_search` does, bodies included, best match first.
   const memories = useResource<Schema['MemoryListResponse']>(
-    '/v1/memory',
+    '/v1/memories',
     { ...tierScope, ...(words ? { q: words, limit: SEARCH_LIMIT } : {}) },
     kind === 'memory' && canRead,
   );
   // meka decides what has expired, by its own clock and time zone.
   const expired = useResource<Schema['MemoryListResponse']>(
-    '/v1/memory',
+    '/v1/memories',
     { expired: true, ...tierScope },
     kind === 'memory' && canRead,
   );
@@ -59,7 +61,7 @@ export function ResourcesPage({ kind }: { kind: Kind }) {
   // Only a project memory needs its tier named: a global memory's name is in no project.
   const tierQuery = selected?.project ? { project: selected.project } : undefined;
   const detail = useResource<Detail>(
-    `/v1/${kind}/${segment(selected?.name ?? '_')}`,
+    `${routes[kind]}/${segment(selected?.name ?? '_')}`,
     tierQuery,
     Boolean(selected) && canRead,
   );
@@ -74,7 +76,7 @@ export function ResourcesPage({ kind }: { kind: Kind }) {
   const title = kind === 'memory' ? 'Memories' : 'Skills';
   function open(entry: Entry) {
     runtime.queries.removeQueries({
-      queryKey: [connection?.id, connection?.authority, `/v1/${kind}/${segment(entry.name)}`],
+      queryKey: [connection?.id, connection?.authority, `${routes[kind]}/${segment(entry.name)}`],
     });
     setSelected(entry);
   }
@@ -84,7 +86,7 @@ export function ResourcesPage({ kind }: { kind: Kind }) {
     if (!cited) return;
     // The shown list may be filtered or searched, so ask meka which memories cite this one.
     const citing = await api
-      ?.get<Schema['MemoryListResponse']>('/v1/memory', { referencing: cited.name })
+      ?.get<Schema['MemoryListResponse']>('/v1/memories', { referencing: cited.name })
       .then((list) => list.memories.filter((memory) => memory.name === name))
       .catch(() => undefined);
     const found =
@@ -99,7 +101,7 @@ export function ResourcesPage({ kind }: { kind: Kind }) {
       onConfirm={async () => {
         await api?.mutate(
           'DELETE',
-          `/v1/${kind}/${segment(selected.name)}`,
+          `${routes[kind]}/${segment(selected.name)}`,
           undefined,
           undefined,
           undefined,
@@ -168,8 +170,8 @@ export function ResourcesPage({ kind }: { kind: Kind }) {
           >
             <h2>{item.name}</h2>
             <p>{item.description}</p>
-            {'snippet' in item && item.snippet && (
-              <p className="resource-snippet">{item.snippet}</p>
+            {'excerpt' in item && item.excerpt && (
+              <p className="resource-snippet">{item.excerpt}</p>
             )}
             <div className="card-meta">
               <span>Priority {item.priority}</span>
@@ -347,7 +349,7 @@ function ResourceEditor({
         if (cited.length > 20) throw new Error('Use at most 20 references, one per line.');
         // Each is sent only when changed, so a save cannot move what it did not touch, such as
         // an expiry meka stores as the moment after the day it was given.
-        await api.mutate('PUT', `/v1/memory/${segment(name)}`, {
+        await api.mutate('PUT', `/v1/memories/${segment(name)}`, {
           ...base,
           ...(JSON.stringify(values) !== JSON.stringify(original) ? { tags: values } : {}),
           ...(load !== (memory?.load ?? 'index') ? { load } : {}),

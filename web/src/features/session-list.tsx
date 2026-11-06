@@ -138,8 +138,8 @@ export function SessionList({
     retry: false,
   });
   // Search finds sub-agents too, which the list only reaches through their parents.
-  const matches = useResource<Schema['SearchSessionsResponse']>(
-    '/v1/sessions/search',
+  const matches = useResource<Schema['ListSessionsResponse']>(
+    '/v1/sessions',
     { q: debounced, limit: 100, include_children: true },
     searching && !waiting,
     120_000,
@@ -149,12 +149,7 @@ export function SessionList({
       controller?.onServerChange(() => {
         // The open session's record too, so a sub-agent's page sees a follow-up begin, and the
         // projects, whose counts head their groups.
-        for (const key of [
-          'session-list',
-          '/v1/sessions/search',
-          'session-metadata',
-          '/v1/projects',
-        ])
+        for (const key of ['session-list', '/v1/sessions', 'session-metadata', '/v1/projects'])
           void runtime.queries.invalidateQueries({ queryKey: [connection?.id, authority, key] });
       }),
     [controller, connection?.id, authority, runtime.queries],

@@ -177,6 +177,15 @@ export type EventData = Record<string, unknown>;
 export function record(value: unknown): value is EventData {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
+/** Whether `value` lists positions of the log, as a rewind's `ranges` do. */
+function positionRanges(value: unknown) {
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (range) => record(range) && Number.isInteger(range.from) && Number.isInteger(range.through),
+    )
+  );
+}
 export function string(data: EventData, key: string): string {
   return typeof data[key] === 'string' ? data[key] : '';
 }
@@ -192,10 +201,10 @@ const required: Record<keyof EventPayloads, string[]> = {
   'tool_call.executing': ['id', 'name'],
   'tool_call.completed': ['id'],
   'tool_call.output_delta': ['id', 'chunk'],
-  permission_required: ['request_id', 'tool_name'],
-  permission_resolved: ['request_id', 'outcome'],
-  elicitation_required: ['request_id', 'server', 'kind', 'message'],
-  elicitation_resolved: ['request_id', 'outcome'],
+  'approval.requested': ['request_id', 'tool_name'],
+  'approval.resolved': ['request_id', 'outcome'],
+  'elicitation.requested': ['request_id', 'server', 'kind', 'message'],
+  'elicitation.resolved': ['request_id', 'outcome'],
   notice: ['text'],
   'inbox.delivered': [],
   'inbox.deferred': [],
@@ -211,7 +220,7 @@ const required: Record<keyof EventPayloads, string[]> = {
   'context.compacted': ['source'],
   'context.compaction_failed': ['compaction_id'],
   'context.measured': [],
-  progress: ['server_name', 'tool_name'],
+  'tool_call.progress': [],
 };
 export function parseEvent(
   frame: SseFrame,
@@ -224,12 +233,12 @@ export function parseEvent(
   )
     throw new Error(`Invalid ${frame.event} event. Saved messages will be refreshed.`);
   if (
-    frame.event === 'permission_required' &&
+    frame.event === 'approval.requested' &&
     (typeof value.expires_in_seconds !== 'number' || !('input' in value))
   )
     throw new Error('Invalid approval event. Reconnect before submitting work.');
   if (
-    frame.event === 'elicitation_required' &&
+    frame.event === 'elicitation.requested' &&
     (typeof value.expires_in_seconds !== 'number' ||
       (value.kind === 'form'
         ? !record(value.schema)
@@ -258,8 +267,9 @@ export function parseEvent(
     'expires_in_seconds',
     'progress',
     'total',
-    'replaced_count',
     'generation',
+    'position',
+    'turns',
     'used',
     'window',
   ])
@@ -283,12 +293,14 @@ export function parseEvent(
       ))
   )
     throw new Error('Invalid tool result event.');
-  if (
-    frame.event === 'context.compacted' &&
-    (!Number.isInteger(value.replaced_count) || !Number.isInteger(value.generation))
-  )
+  if (frame.event === 'context.compacted' && !Number.isInteger(value.generation))
     throw new Error('Invalid compaction event.');
-  if (frame.event === 'progress' && typeof value.progress !== 'number')
+  if (
+    frame.event === 'conversation.rewound' &&
+    (!Number.isInteger(value.position) || !positionRanges(value.ranges))
+  )
+    throw new Error('Invalid rewind event.');
+  if (frame.event === 'tool_call.progress' && typeof value.progress !== 'number')
     throw new Error('Invalid progress event.');
   return value as EventPayloads[keyof EventPayloads] & EventData;
 }

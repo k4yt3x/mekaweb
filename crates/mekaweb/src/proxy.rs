@@ -175,7 +175,7 @@ fn streamed_session(path: &str, method: &Method) -> Option<String> {
     let rest = path.strip_prefix("v1/sessions/")?;
     let (id, tail) = rest.split_once('/')?;
     let streams =
-        (tail == "stream" && method == Method::GET) || (tail == "turn" && method == Method::POST);
+        (tail == "feed" && method == Method::GET) || (tail == "turns" && method == Method::POST);
     streams.then(|| id.to_owned())
 }
 
@@ -314,7 +314,7 @@ pub(crate) async fn forward(
     let guard = streamed_session(rest, &parts.method)
         .map(|session| app.watching.watch(&signed.session.id, &session))
         .or_else(|| {
-            (rest == "v1/stream" && parts.headers.contains_key(FOCUSED_HEADER))
+            (rest == "v1/feed" && parts.headers.contains_key(FOCUSED_HEADER))
                 .then(|| app.watching.focus(&signed.session.id))
         });
     out_headers.remove(header::CONTENT_LENGTH);
@@ -534,15 +534,19 @@ mod tests {
     #[test]
     fn a_feed_or_a_streamed_turn_marks_its_session_watched() {
         assert_eq!(
-            streamed_session("v1/sessions/abc/stream", &Method::GET).as_deref(),
+            streamed_session("v1/sessions/abc/feed", &Method::GET).as_deref(),
             Some("abc")
         );
         assert_eq!(
-            streamed_session("v1/sessions/abc/turn", &Method::POST).as_deref(),
+            streamed_session("v1/sessions/abc/turns", &Method::POST).as_deref(),
             Some("abc")
         );
         assert_eq!(streamed_session("v1/sessions/abc", &Method::GET), None);
-        assert_eq!(streamed_session("v1/stream", &Method::GET), None);
+        assert_eq!(streamed_session("v1/feed", &Method::GET), None);
+        assert_eq!(
+            streamed_session("v1/sessions/abc/turns", &Method::GET),
+            None
+        );
     }
 
     #[test]
@@ -571,8 +575,8 @@ mod tests {
     #[test]
     fn a_path_to_meka_keeps_its_encoding_and_has_no_dot_segments() {
         assert_eq!(
-            meka_path("/meka/v1/memory/a%2Fb%3Fc").ok(),
-            Some("v1/memory/a%2Fb%3Fc")
+            meka_path("/meka/v1/memories/a%2Fb%3Fc").ok(),
+            Some("v1/memories/a%2Fb%3Fc")
         );
         for path in [
             "/meka/v1/x/../openapi.json",

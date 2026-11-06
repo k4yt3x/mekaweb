@@ -2,6 +2,7 @@ import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { sessionPath, type Schema } from '../api/client';
 import { useConnection } from '../connections/context';
 import { isSessionRunning, type SessionState } from './controller';
+import type { ConversationMessage } from './history';
 
 /** How many turns a page holds, the most meka gives. */
 const PAGE = 200;
@@ -15,7 +16,7 @@ const UNSETTLED_MS = 2000;
 const UNSETTLED_TRIES = 5;
 
 /** The first and last turns the saved messages name. */
-function loadedTurns(messages: readonly Schema['MessageView'][] | undefined) {
+function loadedTurns(messages: readonly ConversationMessage[] | undefined) {
   let oldest: string | undefined;
   let newest: string | undefined;
   for (const message of messages ?? []) {

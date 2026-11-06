@@ -49,7 +49,7 @@ it('patches only what moved, clears with null, and leaves the name to a rename',
     account: 'anthropic',
     model: 'claude-opus-5-5',
     fallbacks: ['backup'],
-    active: true,
+    default: true,
     effort: 'high',
     thinking: 'adaptive',
   });
@@ -116,7 +116,7 @@ it('lists profiles under their accounts, and an account only a profile names aft
     name,
     account: on,
     backend: 'anthropic-messages',
-    active: false,
+    default: false,
     vision: true,
   });
   const groups = providerGroups(
@@ -138,7 +138,7 @@ it('puts accounts and profiles in the order given, with ones it does not name af
     name,
     account: on,
     backend: 'anthropic-messages',
-    active: false,
+    default: false,
     vision: true,
   });
   const groups = providerGroups(

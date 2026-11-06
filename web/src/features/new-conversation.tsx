@@ -126,7 +126,7 @@ export function NewConversation() {
             profile={{
               value:
                 creation.settings.profile ||
-                profiles.data?.profiles.find((profile) => profile.active)?.name,
+                profiles.data?.profiles.find((profile) => profile.default)?.name,
               profiles: profiles.data?.profiles ?? [],
               disabled: disabled || !profiles.data?.profiles.length,
               busy: false,

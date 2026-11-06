@@ -6,7 +6,7 @@ import { ConnectionRuntime } from './runtime';
 import { BrowserStorage } from './storage';
 
 const info: Schema['InfoResponse'] = {
-  version: '0.85.0',
+  version: '0.89.0',
   default_permission: 'read',
   enabled_permissions: ['read'],
   scopes: ['sessions:r', 'sessions:w'],
@@ -101,19 +101,20 @@ it('stays signed in and says why while meka is unavailable', async () => {
 it('refuses a meka older than the release supports', async () => {
   const { runtime } = fixture({
     ...signedIn,
-    'GET /meka/v1/info': () => Response.json({ ...info, version: '0.84.0' }),
+    'GET /meka/v1/info': () => Response.json({ ...info, version: '0.88.3' }),
   });
   await runtime.check();
-  expect(runtime.getSnapshot().error).toMatch(/meka 0\.84\.0.*0\.85\.0 or newer/);
+  expect(runtime.getSnapshot().error).toMatch(/meka 0\.88\.3.*0\.89\.0 or newer/);
 });
 
 it('goes back to signing in when mekaweb says the sign-in ended', async () => {
   const { runtime } = fixture({
     ...signedIn,
-    'GET /meka/v1/memory': () => Response.json({ type: 'urn:mekaweb:signed-out' }, { status: 401 }),
+    'GET /meka/v1/memories': () =>
+      Response.json({ type: 'urn:mekaweb:signed-out' }, { status: 401 }),
   });
   await runtime.check();
-  await expect(runtime.getSnapshot().api?.get('/v1/memory')).rejects.toThrow();
+  await expect(runtime.getSnapshot().api?.get('/v1/memories')).rejects.toThrow();
   expect(runtime.getSnapshot()).toMatchObject({ auth: 'signed-out', notice: expect.any(String) });
   expect(runtime.getSnapshot().api).toBeUndefined();
 });

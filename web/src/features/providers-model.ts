@@ -79,7 +79,7 @@ export function profileDraft(profile?: Schema['ProfileDetailView']): ProfileDraf
     account: profile?.account ?? '',
     model: profile?.model ?? '',
     fallbacks: profile?.fallbacks ?? [],
-    makeDefault: profile?.active ?? false,
+    makeDefault: profile?.default ?? false,
     context_window: text(profile?.context_window),
     max_output_tokens: text(profile?.max_output_tokens),
     max_request_bytes: text(profile?.max_request_bytes),

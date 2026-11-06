@@ -38,12 +38,12 @@ export class ApiError extends Error {
     super(problemText(problem) || `The server returned HTTP ${status}.`);
     this.name = 'ApiError';
   }
+  /**
+   * Whether meka named this `kind` of problem, by the identifier after `/errors/` alone: meka has
+   * moved its type URIs to another host more than once, and the identifier is the contract.
+   */
   is(kind: string) {
-    // 0.59 moved the identifiers; retain recognition of the previously supported release.
-    return (
-      this.problem.type === `https://meka.run/errors/${kind}` ||
-      this.problem.type === `https://meka.so/errors/${kind}`
-    );
+    return /\/errors\/([^/?#]+)$/.exec(this.problem.type ?? '')?.[1] === kind;
   }
 }
 export class UncertainMutationError extends Error {

@@ -51,7 +51,7 @@ async fn stand_in_meka() -> (SocketAddr, Arc<Mutex<Seen>>) {
                     return StatusCode::UNAUTHORIZED.into_response();
                 }
                 Json(serde_json::json!({
-                    "version": "0.85.0",
+                    "version": "0.89.0",
                     "scopes": ["sessions:r", "sessions:w"],
                     "default_permission": "workspace",
                     "enabled_permissions": ["read", "workspace"],
@@ -79,7 +79,7 @@ async fn stand_in_meka() -> (SocketAddr, Arc<Mutex<Seen>>) {
             ),
         )
         .route(
-            "/v1/sessions/s1/stream",
+            "/v1/sessions/s1/feed",
             get(|| async {
                 let old = (1..=50).map(|n| format!("line {n}\n")).collect::<String>();
                 let new = old.replace("line 25\n", "line twenty-five\n");
@@ -99,7 +99,7 @@ async fn stand_in_meka() -> (SocketAddr, Arc<Mutex<Seen>>) {
             }),
         )
         .route(
-            "/v1/stream",
+            "/v1/feed",
             get(|| async {
                 let stream =
                     futures_util::stream::iter([Ok::<_, std::io::Error>("retry: 3000\n\n")])
@@ -367,7 +367,7 @@ async fn an_event_stream_arrives_compressed_with_its_change_as_a_diff_and_marks_
     let device = json(devices).await[0]["id"].as_str().unwrap().to_owned();
     let response = send(
         &router,
-        request("GET", "/meka/v1/sessions/s1/stream")
+        request("GET", "/meka/v1/sessions/s1/feed")
             .header(header::COOKIE, &cookie)
             .header(header::ACCEPT_ENCODING, "gzip, br")
             .body(Body::empty())
@@ -427,7 +427,7 @@ async fn a_server_feed_from_a_page_in_front_marks_its_device_while_open() {
     .await;
     let device = json(devices).await[0]["id"].as_str().unwrap().to_owned();
     let feed = |focused: bool| {
-        let mut builder = request("GET", "/meka/v1/stream").header(header::COOKIE, &cookie);
+        let mut builder = request("GET", "/meka/v1/feed").header(header::COOKIE, &cookie);
         if focused {
             builder = builder.header("x-mekaweb-focused", "1");
         }
@@ -830,10 +830,10 @@ async fn paths_reach_meka_as_written_and_never_leave_its_api() {
             .body(Body::empty())
             .unwrap()
     };
-    let response = send(&router, get("/meka/v1/memory/a%2Fb%3Fc%25d?x=1")).await;
+    let response = send(&router, get("/meka/v1/memories/a%2Fb%3Fc%25d?x=1")).await;
     assert_eq!(response.status(), StatusCode::OK);
     let seen = json(response).await;
-    assert_eq!(seen["path"], "/v1/memory/a%2Fb%3Fc%25d");
+    assert_eq!(seen["path"], "/v1/memories/a%2Fb%3Fc%25d");
     assert_eq!(seen["query"], "x=1");
     for path in [
         "/meka/v1/x/../openapi.json",
@@ -899,7 +899,7 @@ async fn signing_a_device_out_ends_its_open_streams() {
     let cookie = sign_in(&router).await;
     let response = send(
         &router,
-        request("GET", "/meka/v1/sessions/s1/stream")
+        request("GET", "/meka/v1/sessions/s1/feed")
             .header(header::COOKIE, &cookie)
             .body(Body::empty())
             .unwrap(),

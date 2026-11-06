@@ -1,8 +1,8 @@
 # API schema maintenance
 
-`meka-0.88.0.json` was captured from meka `0.88.0`, commit `a78f7aacae46d86a532a8122e7ec68dc93dd8968`, through `/v1/openapi.json` with `[serve].docs = true`. The generated REST types are committed in `web/src/api/schema.d.ts`; runtime connections do not require schema access.
+`meka-0.89.0.json` was captured from meka `0.89.0`, commit `250a5ee7b66464097240ca9c208c00ad9415b83e`, through `/v1/openapi.json` with `[serve].docs = true`. The generated REST types are committed in `web/src/api/schema.d.ts`; runtime connections do not require schema access.
 
-mekaweb requires meka 0.85.0 or newer and refuses older servers when it connects. Compared with 0.68.0, the 0.70.0 and 0.71.0 APIs change these shapes the client used:
+mekaweb requires meka 0.89.0 or newer and refuses older servers when it connects. Compared with 0.68.0, the 0.70.0 and 0.71.0 APIs change these shapes the client used:
 
 - `/v1/info` no longer reports `vision`; each `/v1/profiles` entry does.
 - `/v1/sessions/{id}/context` no longer reports `used_percent`. The client divides `used` by `window`, rounding down as meka did.
@@ -13,6 +13,8 @@ mekaweb requires meka 0.85.0 or newer and refuses older servers when it connects
 - A hole in a feed is a `feed.gap` event, no longer a `notice`, and a reader that falls behind is caught up rather than told to re-attach. A notice is only what the agent or a provider said.
 - A turn's `images` take `{hash}` for an image the session's history holds, so a message is sent again without uploading its images. `ImageInput` therefore types every field as optional; the client keeps its own types for an attached image and a stored one.
 - A message meka writes to send the model back to work opens with a `nudge` block. It stays in the agent's turn, is not counted as a turn, and arrives live as `turn.nudged`.
+
+0.70.0 also adds turn records, the `/v1/stream` server feed, conditional rewind and fork through `ETag` and `If-Match`, `conversation.rewound`, `permission_resolved`, `approvals_pending`, the `parent` list filter, and the session's open `checklist` with `checklist.updated`. The client shows the open checklist above the message input. Notices are ephemeral: a running turn's show inline where they arrived, warnings and errors also stay below the conversation, once however often they are said, until dismissed or a later turn starts, and none survives a reload. The session feed parser ignores events it does not handle.
 
 0.72.0 through 0.75.0 change no shape the client uses; the schema differs from 0.71.0's only in its descriptions. A title meka derives from the first message keeps 200 characters rather than 80. `[session].turn_retention` deletes the turns a compaction summarized once they age past its window, without an event and without moving `revision`, which counts the rewrite rows and so can even fall when an old compaction's row goes. Every later message moves up, so a page of earlier history is read with one message more and must end with the first one shown; otherwise the conversation is read again.
 
@@ -89,18 +91,31 @@ mekaweb requires meka 0.85.0 or newer and refuses older servers when it connects
 
 0.88.1 through 0.88.3 change no API; 0.88.3's schema differs from 0.88.0's only in its version. 0.88.3 no longer says a provider failure's response is in meka's log, since `provider_response` carries it, which the client shows after the `detail`.
 
-0.70.0 also adds turn records, the `/v1/stream` server feed, conditional rewind and fork through `ETag` and `If-Match`, `conversation.rewound`, `permission_resolved`, `approvals_pending`, the `parent` list filter, and the session's open `checklist` with `checklist.updated`. The client shows the open checklist above the message input. Notices are ephemeral: a running turn's show inline where they arrived, warnings and errors also stay below the conversation, once however often they are said, until dismissed or a later turn starts, and none survives a reload. The session feed parser ignores events it does not handle.
+0.89.0 changes these, and the client therefore requires it:
+
+- A conversation is told two ways. `GET /history` is what was said: every turn, the ones a compaction summarized included, each once where it was said, without what a rewind took back. `GET /context/messages` is what the model sees. `GET /messages` is gone, and with it `revision`, `total`, `turn_label`, and paging by `offset`. The conversation shows the history, so turns before a compaction stay on screen above it.
+- Every row of a session's log has a `position`, never reused, which orders the history and pages it with `before` and `after`. The client opens on the last page, reads the page before what it holds as the reader scrolls up, and after a turn's terminal, a feed gap, a compaction, or a rewind reads only what came after the position it holds. The conversation's `ETag` is its position, which an edit checks before it sends the tag as `If-Match`.
+- A history item is a `message`, a `compaction` with its `summary` and the rounds its `checkpoint` ran, a `rewind` naming the position `ranges` it took out, or a `join` naming a prompt taken back to join a message to it. The client takes an edit's ranges out of what it holds, and keeps them, so an earlier page read before the edit cannot bring them back. A summary's `replaced_count` is gone.
+- `POST /rewind` takes the `turn_id` of the first turn to drop, and refuses a turn the context does not hold. `POST /fork` takes `turn_id` to branch before a turn, in one call where the client forked and then rewound the copy, and answers with the new session. `POST /rewind` and `POST /compact` answer with the history item they wrote, which the session menu shows, where they answered with message counts. The client offers rewinds and branches on the turns the context holds: those the agent answered in after the last compaction, and, as `GET /context/messages` places the context in the history, those the compaction kept.
+- A prompt withdrawn because its turn produced nothing stays in the history, though the context no longer holds it. While the history shows a turn that said nothing past its opening, the client reads `/context/messages` for the turns it holds, and offers rewinds and branches on those alone.
+- A history page can hold a row written while it was read, past the `position` it reports, since meka reads the position first. The client holds the history as far as the page reaches, so the next read does not take the row again.
+- A compaction run between turns is a turn of its own, so it can be a session's `last_turn`; the session list does not report it as the agent finishing.
+- Routes moved: `POST /turn` is `POST /turns`, a session's `/stream` is its `/feed`, and `/v1/stream` is `/v1/feed`. Search is `GET /v1/sessions?q=`. Tasks are `/v1/tasks?session=` and `/v1/tasks/{task_id}`, jobs `/v1/jobs`, with the session as `session_id` in a new job's body, and memories `/v1/memories`.
+- Events renamed: `approval.requested` and `approval.resolved`, `elicitation.requested` and `elicitation.resolved`, and `tool_call.progress`, which names its call by `id`. Each terminal carries the conversation's `position`.
+- A session's record carries `requests_pending` for `approvals_pending`, and `turn_count` and `usage`, its turns summed, which the context view shows where it read `/context`'s `totals`. `/context` loses `message_count`. A profile's `active` is `default`, and a memory search hit's `snippet` is `excerpt`.
+- `GET /export` answers the JSON archive alone; the client no longer offers a Markdown transcript. The archive is format 22, and 0.89.0 reads a 0.88 archive as it is.
+- Problem `type` URIs moved to `https://meka.bot/errors/`. The client reads the identifier after `/errors/` alone, so the move needed no change to what it recognizes.
 
 A shell command may print 64 MiB, all of which `tool_call.completed` carries, while the saved result stays a bounded preview. The SSE parser therefore skips data past 2,000,000 characters and keeps the frame's id, so a reconnect cannot replay it. A skipped tool completion keeps its call, outcome, and correlation from the ends of its JSON, and other skipped events become a notice.
 
 The feed's 409 covers `session-not-loaded`: a token with only `sessions:r` does not load a session by attaching. The client then shows the saved conversation and retries the feed until the server loads the session. `POST /compact` runs as a turn on the feed, with `source: "compaction"` on `turn.started`; the client shows it as compacting and does not notify when it ends.
 
-Schema capture is a manual maintenance step. Choose a disposable meka instance with `[serve].docs = true`, confirm its version, and download its schema. For a 0.88.0 instance listening on port 8081:
+Schema capture is a manual maintenance step. Choose a disposable meka instance with `[serve].docs = true`, confirm its version, and download its schema. For a 0.89.0 instance listening on port 8081:
 
 ```sh
-curl --fail --silent --show-error http://127.0.0.1:8081/v1/openapi.json --output docs/api/meka-0.88.0.json
+curl --fail --silent --show-error http://127.0.0.1:8081/v1/openapi.json --output docs/api/meka-0.89.0.json
 cd web
-npx prettier --write ../docs/api/meka-0.88.0.json
+npx prettier --write ../docs/api/meka-0.89.0.json
 npm run api:generate
 ```
 
@@ -110,7 +125,7 @@ Review the captured version and schema diff before committing. When upgrading th
 
 Generation uses an npm workspace with TypeScript 5 because openapi-typescript 7.13.0 declares a TypeScript 5 peer dependency. The application retains TypeScript 6. Generated types preserve the upstream wire schema, including nullable optional annotations, even though the API omits absent response values.
 
-Problem Details use `https://meka.run/errors/`. The client also recognizes exact identifiers from the older `https://meka.so/errors/` namespace.
+Problem Details use `https://meka.bot/errors/`, where 0.89.0 moved them from `https://meka.run/errors/`, as 0.59.0 had moved them from `https://meka.so/errors/`. The client reads only the identifier after `/errors/`, whatever the host, as meka's upgrade guide advises, so a move of host changes nothing.
 
 Session SSE validation is maintained separately in `web/src/session/events.ts`, against meka's HTTP frontend and API reference. Streaming responses are not a complete event schema. No private database schema or transcript replay implementation is duplicated here.
 

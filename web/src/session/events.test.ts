@@ -22,7 +22,7 @@ it('parses every transport boundary, CRLF, multiline data and transient events w
 it('rejects malformed approval payloads and ignores unknown events', () => {
   expect(() =>
     parseEvent({
-      event: 'permission_required',
+      event: 'approval.requested',
       data: '{"request_id":"id","tool_name":"file_write"}',
     }),
   ).toThrow();
@@ -38,8 +38,8 @@ it('takes a question only with the form or the address it asks about', () => {
   };
   const form = { ...question, kind: 'form', schema: { type: 'object', properties: {} } };
   const url = { ...question, kind: 'url', url: 'https://example.com/authorize' };
-  expect(parseEvent({ event: 'elicitation_required', data: JSON.stringify(form) })).toEqual(form);
-  expect(parseEvent({ event: 'elicitation_required', data: JSON.stringify(url) })).toEqual(url);
+  expect(parseEvent({ event: 'elicitation.requested', data: JSON.stringify(form) })).toEqual(form);
+  expect(parseEvent({ event: 'elicitation.requested', data: JSON.stringify(url) })).toEqual(url);
   for (const broken of [
     { ...question, kind: 'form' },
     { ...question, kind: 'url' },
@@ -47,7 +47,7 @@ it('takes a question only with the form or the address it asks about', () => {
     { ...form, expires_in_seconds: undefined },
   ])
     expect(() =>
-      parseEvent({ event: 'elicitation_required', data: JSON.stringify(broken) }),
+      parseEvent({ event: 'elicitation.requested', data: JSON.stringify(broken) }),
     ).toThrow();
   expect(() => parseEvent({ event: 'context.measured', data: '{"window":1000}' })).toThrow();
   expect(parseEvent({ event: 'context.measured', data: '{"used":10}' })).toEqual({ used: 10 });

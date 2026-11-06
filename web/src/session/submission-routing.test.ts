@@ -1,6 +1,13 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { ApiClient, ApiError, UncertainMutationError, type Schema } from '../api/client';
+import {
+  ApiClient,
+  ApiError,
+  UncertainMutationError,
+  type Query,
+  type Schema,
+} from '../api/client';
 import { isSessionRunning, SessionController, type ComposerOptions } from './controller';
+import { FakeHistory } from './fake-history';
 
 const controllers: SessionController[] = [];
 afterEach(() => {
@@ -66,6 +73,13 @@ async function fixture(open = true) {
     approvals: true,
     title: '',
     turn_in_flight: false,
+    turn_count: 0,
+    usage: {
+      input_tokens: 0,
+      output_tokens: 0,
+      cache_creation_input_tokens: 0,
+      cache_read_input_tokens: 0,
+    },
     created_at: '2026-09-23T00:00:00Z',
     updated_at: '2026-09-23T00:00:00Z',
     capabilities: {
@@ -75,24 +89,19 @@ async function fixture(open = true) {
       supports_elicitation: true,
     },
   };
-  const saved: Schema['MessagesResponse'] = {
-    session_id: 's',
-    messages: [],
-    total: 0,
-    revision: 0,
-  };
+  const history = new FakeHistory();
   const inbox: Schema['InboxListResponse'] = { session_id: 's', items: [] };
   // The records `GET /turns/{turn_id}` reads; a turn missing here is a 404.
   const turns = new Map<string, Schema['TurnRecord']>();
-  vi.spyOn(api, 'get').mockImplementation(async <T>(path: string) => {
+  vi.spyOn(api, 'get').mockImplementation(async <T>(path: string, query?: Query) => {
     const turn = /\/turns\/([^/]+)$/.exec(path)?.[1];
     if (turn) {
       const found = turns.get(decodeURIComponent(turn));
-      if (!found) throw new ApiError(404, { type: 'https://meka.run/errors/not-found' });
+      if (!found) throw new ApiError(404, { type: 'https://meka.bot/errors/not-found' });
       return structuredClone(found) as T;
     }
     return structuredClone(
-      path.endsWith('/messages') ? saved : path.endsWith('/inbox') ? inbox : session,
+      path.endsWith('/history') ? history.page(query) : path.endsWith('/inbox') ? inbox : session,
     ) as T;
   });
   const feed = channel();
@@ -102,7 +111,7 @@ async function fixture(open = true) {
   const mutate = vi
     .spyOn(api, 'mutate')
     .mockImplementation((_method, path) =>
-      path.endsWith('/turn')
+      path.endsWith('/turns')
         ? new Promise((resolve, reject) => admissions.push({ resolve, reject }))
         : Promise.resolve({ item_id: 'item', state: 'pending' }),
     );
@@ -133,7 +142,7 @@ async function fixture(open = true) {
   return {
     api,
     session,
-    saved,
+    history,
     inbox,
     turns,
     feed,
@@ -154,7 +163,7 @@ it('notifies once when the feed finishes before admission reaches the client', a
   const completed = vi.fn();
   f.controller.onCompletion(completed);
   const sending = f.controller.submitMessage('s', 'Hello.', options());
-  await vi.waitFor(() => expect(f.calls('/turn')).toHaveLength(1));
+  await vi.waitFor(() => expect(f.calls('/turns')).toHaveLength(1));
   await f.feed.event('turn.started');
   await f.feed.event('turn.finished');
   await f.admit();
@@ -182,10 +191,10 @@ it.each(['steer', 'followup', 'interrupt'])(
       ...options(mode),
       source: 'not a relay',
     });
-    await vi.waitFor(() => expect(f.calls('/turn')).toHaveLength(1));
+    await vi.waitFor(() => expect(f.calls('/turns')).toHaveLength(1));
     expect(f.mutate).toHaveBeenCalledWith(
       'POST',
-      '/v1/sessions/s/turn',
+      '/v1/sessions/s/turns',
       { message: 'Plain user input', detach: true },
       f.state().submissions[0]?.key,
     );
@@ -219,18 +228,17 @@ it('reads the session again once a turn’s opening is saved, but not when it is
 it('reads the history a send put off once its turn makes progress', async () => {
   const f = await fixture();
   const sending = f.controller.submitMessage('s', 'Hello.', options());
-  await vi.waitFor(() => expect(f.calls('/turn')).toHaveLength(1));
-  f.saved.messages = [{ role: 'assistant', content: [{ type: 'text', text: 'Earlier answer.' }] }];
-  f.saved.total = 1;
+  await vi.waitFor(() => expect(f.calls('/turns')).toHaveLength(1));
+  f.history.say({ role: 'assistant', content: [{ type: 'text', text: 'Earlier answer.' }] });
   // The previous turn's refresh lands while this send awaits admission, so it waits.
   await f.controller.refresh('s');
-  expect(f.state().saved?.total).toBe(0);
+  expect(f.state().saved?.messages.length).toBe(0);
   f.session.turn_in_flight = true;
   await f.admit();
   expect(await sending).toBe(true);
   await f.feed.event('turn.started');
   await f.feed.event('thinking.delta', { text: 'Considering' });
-  await vi.waitFor(() => expect(f.state().saved?.total).toBe(1));
+  await vi.waitFor(() => expect(f.state().saved?.messages.length).toBe(1));
 });
 
 it.each(['steer', 'followup', 'interrupt'])(
@@ -248,16 +256,16 @@ it.each(['steer', 'followup', 'interrupt'])(
       },
       expect.any(String),
     );
-    expect(f.calls('/turn')).toHaveLength(1);
+    expect(f.calls('/turns')).toHaveLength(1);
   },
 );
 
 it('routes text through the inbox only after a definitive busy rejection', async () => {
   const f = await fixture();
   const sending = f.controller.submitMessage('s', 'Keep this exact text', options('interrupt'));
-  await f.refuse(new ApiError(409, { type: 'https://meka.run/errors/turn-in-flight' }));
+  await f.refuse(new ApiError(409, { type: 'https://meka.bot/errors/turn-in-flight' }));
   expect(await sending).toBe(true);
-  expect(f.calls('/turn')).toHaveLength(1);
+  expect(f.calls('/turns')).toHaveLength(1);
   expect(f.mutate).toHaveBeenLastCalledWith(
     'POST',
     '/v1/sessions/s/inbox',
@@ -276,7 +284,7 @@ it.each(['session-locked', 'idempotency'])(
   async (kind) => {
     const f = await fixture();
     const sending = f.controller.submitMessage('s', 'Hello.', options());
-    await f.refuse(new ApiError(409, { type: 'https://meka.run/errors/' + kind }));
+    await f.refuse(new ApiError(409, { type: 'https://meka.bot/errors/' + kind }));
     expect(await sending).toBe(false);
     expect(f.calls('/inbox')).toHaveLength(0);
     expect(f.state().submissions[0]?.state).toBe('failed');
@@ -290,7 +298,7 @@ it.each([
 ])('preserves direct-only options on a racing busy rejection: %s', async (extra) => {
   const f = await fixture();
   const sending = f.controller.submitMessage('s', 'Hello.', { ...options(), ...extra });
-  await f.refuse(new ApiError(409, { type: 'https://meka.run/errors/turn-in-flight' }));
+  await f.refuse(new ApiError(409, { type: 'https://meka.bot/errors/turn-in-flight' }));
   expect(await sending).toBe(false);
   expect(f.calls('/inbox')).toHaveLength(0);
   expect(f.state().submissions[0]).toMatchObject({ kind: 'turn', state: 'failed', preview: false });
@@ -302,7 +310,7 @@ it('rejects direct-only options while busy before dispatching another request', 
   await expect(
     f.controller.submitMessage('s', 'Hello.', { ...options(), skill: 'review' }),
   ).rejects.toThrow('idle session');
-  expect(f.calls('/turn')).toHaveLength(1);
+  expect(f.calls('/turns')).toHaveLength(1);
   expect(f.calls('/inbox')).toHaveLength(0);
 });
 
@@ -314,8 +322,8 @@ it('passes images, skill activation, and retention through the detached turn', a
     skill: 'review',
     retention: 'withdraw',
   });
-  await vi.waitFor(() => expect(f.calls('/turn')).toHaveLength(1));
-  expect(f.calls('/turn')[0]?.[2]).toEqual({
+  await vi.waitFor(() => expect(f.calls('/turns')).toHaveLength(1));
+  expect(f.calls('/turns')[0]?.[2]).toEqual({
     message: 'Inspect this.',
     detach: true,
     images: [{ media_type: 'image/png', data: 'synthetic' }],
@@ -334,14 +342,14 @@ it.each(['network', 'wrong response'])(
     else await f.answer({ ok: true });
     expect(await sending).toBe(false);
     expect(f.state().submissions[0]).toMatchObject({ kind: 'turn', state: 'uncertain' });
-    expect(f.calls('/turn')).toHaveLength(1);
+    expect(f.calls('/turns')).toHaveLength(1);
     expect(f.calls('/inbox')).toHaveLength(0);
     // meka answers a repeated key with the turn the first request started, or starts it now.
     f.session.turn_in_flight = true;
     const retry = f.controller.retrySubmission('s', f.state().submissions[0]!.key);
     await f.admit();
     expect(await retry).toBe(true);
-    const [first, second] = f.calls('/turn');
+    const [first, second] = f.calls('/turns');
     expect(second).toEqual(first);
     expect(f.state().submissions[0]).toMatchObject({ state: 'running', turnId: 'turn' });
   },
@@ -370,7 +378,7 @@ it('follows an admitted turn on the feed to its end', async () => {
   f.session.turn_in_flight = false;
   await f.feed.event('turn.finished');
   await vi.waitFor(() => expect(f.state().submissions[0]?.state).toBe('completed'));
-  expect(f.calls('/turn')).toHaveLength(1);
+  expect(f.calls('/turns')).toHaveLength(1);
 });
 
 it.each([
@@ -390,7 +398,7 @@ it.each([
         ended_at: '2026-09-23T00:01:00Z',
         status,
         ...(status === 'failed'
-          ? { error: { type: 'https://meka.run/errors/provider', detail: 'Provider refused.' } }
+          ? { error: { type: 'https://meka.bot/errors/provider', detail: 'Provider refused.' } }
           : {}),
         ...(status === 'canceled' ? { reason: 'abandoned' } : {}),
       }),
@@ -418,7 +426,7 @@ it('asks for review when a turn no longer runs but its record has no ending', as
   await expect(f.controller.retrySubmission('s', f.state().submissions[0]!.key)).rejects.toThrow(
     'This turn started',
   );
-  expect(f.calls('/turn')).toHaveLength(1);
+  expect(f.calls('/turns')).toHaveLength(1);
 });
 
 it('does not notify or warn for each attempt of a queued message meka will retry', async () => {
@@ -588,10 +596,9 @@ it('ignores delayed feed replay after the turn has reconciled saved history', as
   await f.start();
   await f.feed.event('turn.started');
   f.session.turn_in_flight = false;
-  f.saved.messages = [{ role: 'assistant', content: [{ type: 'text', text: 'Saved answer.' }] }];
-  f.saved.total = 1;
+  f.history.say({ role: 'assistant', content: [{ type: 'text', text: 'Saved answer.' }] });
   await f.feed.event('turn.finished');
-  await vi.waitFor(() => expect(f.state().saved?.total).toBe(1));
+  await vi.waitFor(() => expect(f.state().saved?.messages.length).toBe(1));
   await f.feed.event('turn.started');
   await f.feed.event('assistant_text.delta', { text: 'Saved answer.' });
   await f.feed.event('turn.finished');
@@ -624,7 +631,6 @@ it('can cancel an externally started turn when replay lost its start event', asy
   await f.feed.event('tool_call.executing', { id: 'call', name: 'shell_execute', input: {} });
   await f.controller.cancel('s');
   expect(f.mutate).toHaveBeenCalledWith('POST', '/v1/sessions/s/cancel', { turn_id: 'turn' });
-  expect(f.state().partial).toBe(true);
 });
 
 it('targets the admitted turn when an idle refresh left an older observed ID', async () => {
@@ -644,7 +650,7 @@ it('observes a new turn after the preceding turn finished even when the new star
   await vi.waitFor(() => expect(f.state().loading).toBe(false));
   f.session.turn_in_flight = true;
   await f.feed.event('thinking.delta', { text: 'New reasoning.' });
-  expect(f.state()).toMatchObject({ turnId: 'turn', running: true, partial: true });
+  expect(f.state()).toMatchObject({ turnId: 'turn', running: true });
   expect(f.state().blocks).toEqual([{ kind: 'thinking', text: 'New reasoning.' }]);
   await f.controller.cancel('s');
   expect(f.mutate).toHaveBeenCalledWith('POST', '/v1/sessions/s/cancel', { turn_id: 'turn' });
@@ -653,7 +659,7 @@ it('observes a new turn after the preceding turn finished even when the new star
 it('does not reopen completed work when the entire feed arrives before admission', async () => {
   const f = await fixture();
   const sending = f.controller.submitMessage('s', 'Hello.', options());
-  await vi.waitFor(() => expect(f.calls('/turn')).toHaveLength(1));
+  await vi.waitFor(() => expect(f.calls('/turns')).toHaveLength(1));
   await f.feed.event('turn.started');
   await f.feed.event('assistant_text.delta', { text: 'Done.' });
   await f.feed.event('turn.finished');
@@ -690,7 +696,7 @@ it('cancels the admitted turn ID before the feed catches up', async () => {
 it('settles a pending admission when the connection is disposed', async () => {
   const f = await fixture();
   const sending = f.controller.submitMessage('s', 'Hello.', options());
-  await vi.waitFor(() => expect(f.calls('/turn')).toHaveLength(1));
+  await vi.waitFor(() => expect(f.calls('/turns')).toHaveLength(1));
   f.controller.dispose();
   // Disposing the connection's client aborts the request in flight.
   await f.refuse(new DOMException('The operation was aborted.', 'AbortError'));
@@ -717,13 +723,12 @@ it('previews a first message while opening its feed and keeps it through route c
   });
   f.controller.select(undefined);
   await vi.waitFor(() => expect(connect).toBeDefined());
-  expect(f.calls('/turn')).toHaveLength(0);
+  expect(f.calls('/turns')).toHaveLength(0);
   connect(f.feed.response);
-  await vi.waitFor(() => expect(f.calls('/turn')).toHaveLength(1));
+  await vi.waitFor(() => expect(f.calls('/turns')).toHaveLength(1));
   expect(f.feed.canceled()).toBe(false);
-  expect(f.state().saved?.total).toBe(0);
+  expect(f.state().saved?.messages.length).toBe(0);
   await f.feed.event('turn.started');
-  expect(f.state().partial).toBe(false);
   await f.admit();
   expect(await sending).toBe(true);
   expect(f.state().submissions).toHaveLength(1);
@@ -745,7 +750,7 @@ it('retains a failed first message for retry within its created session', async 
   const retry = f.controller.submitMessage('s', 'Retry this', options());
   await f.admit();
   expect(await retry).toBe(true);
-  expect(f.calls('/turn')).toHaveLength(2);
+  expect(f.calls('/turns')).toHaveLength(2);
   expect(f.calls('/inbox')).toHaveLength(0);
 });
 
@@ -753,7 +758,7 @@ it('does not send a first turn when its attending feed could not open', async ()
   const f = await fixture(false);
   vi.mocked(f.api.stream).mockRejectedValueOnce(new Error('Feed unavailable'));
   expect(await f.controller.submitInitialMessage(f.session, 'Keep draft', options())).toBe(false);
-  expect(f.calls('/turn')).toHaveLength(0);
+  expect(f.calls('/turns')).toHaveLength(0);
   expect(f.state().submissions[0]).toMatchObject({ state: 'failed', preview: false });
   expect(f.state().error?.message).toBe('Feed unavailable');
 });
@@ -767,7 +772,7 @@ it('does not send an uncertain first turn again on its own', async () => {
   await expect(f.controller.submitMessage('s', 'Only once', options())).rejects.toThrow(
     'pending submission',
   );
-  expect(f.calls('/turn')).toHaveLength(1);
+  expect(f.calls('/turns')).toHaveLength(1);
 });
 
 it('abandons a first-turn handoff when the connection is retired', async () => {
@@ -784,7 +789,7 @@ it('abandons a first-turn handoff when the connection is retired', async () => {
   f.controller.dispose();
   connect(f.feed.response);
   expect(await sending).toBe(false);
-  expect(f.calls('/turn')).toHaveLength(0);
+  expect(f.calls('/turns')).toHaveLength(0);
 });
 
 it('fails a first turn whose feed restarts before sending, so it can be sent again', async () => {
@@ -802,7 +807,7 @@ it('fails a first turn whose feed restarts before sending, so it can be sent aga
   connect(channel().response);
   await reconnecting;
   expect(await sending).toBe(false);
-  expect(f.calls('/turn')).toHaveLength(0);
+  expect(f.calls('/turns')).toHaveLength(0);
   await vi.waitFor(() =>
     expect(f.state().submissions[0]).toMatchObject({
       state: 'failed',
@@ -810,7 +815,7 @@ it('fails a first turn whose feed restarts before sending, so it can be sent aga
       body: { message: 'Interrupted' },
     }),
   );
-  expect(f.state().saved?.total).toBe(0);
+  expect(f.state().saved?.messages.length).toBe(0);
   const retry = f.controller.submitMessage('s', 'Interrupted', options());
   await f.admit();
   expect(await retry).toBe(true);

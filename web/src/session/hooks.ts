@@ -63,7 +63,24 @@ export function useMeasured(id: string) {
 }
 
 /**
- * A session's context: what fills it and what the session has used. With `follow`, it is read
+ * Where in the history the context of the session `id` is, read only for a `question` the history
+ * cannot answer; see `contextQuestion`. Read again when the question changes.
+ */
+export function useContextPositions(id: string, question: string | undefined) {
+  const { controller, connection } = useConnection();
+  return useQuery({
+    queryKey: [connection?.id, connection?.authority, 'context-positions', id, question],
+    queryFn: ({ signal }) => {
+      if (!controller) throw new Error('meka is not connected.');
+      return controller.contextPositions(id, signal);
+    },
+    enabled: Boolean(controller) && question !== undefined,
+    staleTime: Infinity,
+    retry: false,
+  }).data;
+}
+/**
+ * A session's context: what fills it, and how near it is to compacting. With `follow`, it is read
  * again each time meka measures it, after every provider round; the message box's meter follows
  * it, so whatever else shows it is kept up to date too.
  */

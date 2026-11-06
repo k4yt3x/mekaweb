@@ -2,7 +2,7 @@ import { useAction } from '../components/actions';
 import { useState, type FormEvent } from 'react';
 import { CalendarClock, Plus } from 'lucide-react';
 import { useCan, useConnection, useResource, useRuntime } from '../connections/context';
-import { sessionPath, segment, type Schema } from '../api/client';
+import { segment, type Schema } from '../api/client';
 import { Button } from '../components/ui/button';
 import { Dialog } from '../components/ui/dialog';
 import {
@@ -21,7 +21,7 @@ export function SchedulesPage({ sessionId }: { sessionId?: string }) {
   const canWrite = useCan('schedule:w');
   const [create, setCreate] = useState(false);
   const query = useResource<Schema['ScheduledJobsResponse']>(
-    '/v1/schedule',
+    '/v1/jobs',
     sessionId ? { session: sessionId } : undefined,
     canRead,
   );
@@ -93,7 +93,7 @@ export function SchedulesPage({ sessionId }: { sessionId?: string }) {
               title="Cancel schedule"
               description="Cancel future runs. A running turn will continue."
               onConfirm={async () => {
-                await api?.mutate('DELETE', '/v1/schedule/' + segment(job.id));
+                await api?.mutate('DELETE', '/v1/jobs/' + segment(job.id));
                 await runtime.queries.invalidateQueries();
               }}
             >
@@ -155,7 +155,8 @@ function ScheduleForm({
                 ? { at: pointer, is: condition }
                 : when,
         };
-      await api?.mutate('POST', sessionPath(id) + '/schedule', {
+      await api?.mutate('POST', '/v1/jobs', {
+        session_id: id,
         prompt,
         ...(kind === 'at' ? { at: time } : kind === 'every' ? { every: time } : { cron: time }),
         ...(gateValue ? { gate: gateValue } : {}),

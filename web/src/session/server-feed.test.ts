@@ -64,7 +64,7 @@ it('resumes after the last event it received', async () => {
   await vi.advanceTimersByTimeAsync(1000);
   expect(f.stream).toHaveBeenCalledTimes(2);
   expect(f.stream).toHaveBeenLastCalledWith(
-    '/v1/stream',
+    '/v1/feed',
     '7',
     undefined,
     expect.any(AbortSignal),
@@ -107,7 +107,7 @@ it('rejoins at once, from where it stood, when the page comes to the front or le
   await vi.advanceTimersByTimeAsync(0);
   expect(first?.aborted).toBe(true);
   expect(f.stream).toHaveBeenCalledTimes(3);
-  expect(f.stream).toHaveBeenLastCalledWith('/v1/stream', '4', undefined, expect.any(AbortSignal), {
+  expect(f.stream).toHaveBeenLastCalledWith('/v1/feed', '4', undefined, expect.any(AbortSignal), {
     'X-Mekaweb-Focused': '1',
   });
   feed.focus(true);

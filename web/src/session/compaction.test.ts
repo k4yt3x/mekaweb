@@ -6,7 +6,6 @@ const usual = {
   source: 'checkpoint',
   memories_written: [],
   kept_recent: true,
-  replaced_count: 12,
   generation: 1,
 };
 

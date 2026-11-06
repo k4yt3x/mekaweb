@@ -2,7 +2,7 @@
 //! subscribed hears of it through its browser's push service, even with the app closed. That is
 //! the only way a suspended iPhone app hears anything.
 //!
-//! mekaweb follows meka's server feed, `/v1/stream`, which carries every session's turn
+//! mekaweb follows meka's server feed, `/v1/feed`, which carries every session's turn
 //! lifecycle and approval prompts, and keeps each session's title and parent from the records it
 //! also carries. A device watching a session (its event stream open through mekaweb) is not
 //! notified of that session, and a device with a page in front is not notified of turns ending,
@@ -314,7 +314,7 @@ impl Push {
         let mut request = self
             .meka
             .client()
-            .get(self.meka.url("/v1/stream")?)
+            .get(self.meka.url("/v1/feed")?)
             .bearer_auth(self.meka.token())
             .header("Accept", "text/event-stream");
         if let Some(cursor) = cursor.as_deref() {
@@ -397,7 +397,7 @@ impl Push {
                 };
                 self.notify(&session, message).await;
             }
-            "permission_required" | "elicitation_required" => {
+            "approval.requested" | "elicitation.requested" => {
                 let Some(session) = text("session_id").filter(|_| news) else {
                     return;
                 };
@@ -407,7 +407,7 @@ impl Push {
                     .map(|info| info.title)
                     .unwrap_or_default();
                 let message = Message {
-                    kind: if frame.event == "permission_required" {
+                    kind: if frame.event == "approval.requested" {
                         PushKind::Approval
                     } else {
                         PushKind::Question
@@ -484,7 +484,7 @@ impl Push {
             list.get("sessions")?
                 .as_array()?
                 .iter()
-                .filter_map(|session| session.get("approvals_pending")?.as_u64())
+                .filter_map(|session| session.get("requests_pending")?.as_u64())
                 .sum(),
         )
     }

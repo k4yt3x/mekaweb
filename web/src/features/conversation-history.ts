@@ -5,13 +5,14 @@ import {
   type SessionState,
   type Submission,
 } from '../session/controller';
+import type { ConversationMessage } from '../session/history';
 import type { SessionNotice } from '../session/notices';
 
 export type ToolUseBlock = Extract<Schema['ContentBlockView'], { type: 'tool_use' }>;
 export type ToolResultBlock = Extract<Schema['ContentBlockView'], { type: 'tool_result' }>;
 
 /** Pair saved blocks by their explicit IDs without changing the API snapshot or its indexes. */
-export function groupToolResults(messages: readonly Schema['MessageView'][]) {
+export function groupToolResults(messages: readonly ConversationMessage[]) {
   const results = new Map<ToolUseBlock, ToolResultBlock>();
   const pending = new Map<string, { calls: ToolUseBlock[]; results: ToolResultBlock[] }>();
   const finishRound = () => {
@@ -55,6 +56,56 @@ export function groupToolResults(messages: readonly Schema['MessageView'][]) {
 
 export type HistoryMessage = ReturnType<typeof groupToolResults>['messages'][number];
 
+/** Whether a group shows anything, by the rules `Message` draws it by. */
+function shows(group: HistoryMessage[], showTurnContext: boolean) {
+  const first = group[0]?.message;
+  if (!first) return false;
+  if (first.compaction) return true;
+  const content = group.some(({ blocks }) =>
+    blocks.some(
+      ({ block }) =>
+        (showTurnContext || block.type !== 'turn_context') &&
+        !(block.type === 'text' && !block.text.trim()),
+    ),
+  );
+  return content || first.content.length === 0;
+}
+
+/**
+ * Who says what in the saved conversation's groups, for headings and a reply's actions. The
+ * agent's heading marks a change of speaker: it heads what the agent says only after someone
+ * else's words, not after more of its own, nor after a compaction's line, which carries on whoever
+ * spoke before it. A turn a compaction cut in two reads as one reply. Groups that show nothing are
+ * passed over.
+ */
+export function speakers(groups: readonly HistoryMessage[][], showTurnContext: boolean) {
+  /** For each group shown, whether it heads what it says. */
+  const heads: boolean[] = [];
+  /** For each of the agent's groups, where its turn's reply begins. */
+  const runs: number[] = [];
+  /** Whether the reply a group is in goes on past it, across a compaction's line. */
+  const goesOn: boolean[] = [];
+  let agentLast = false;
+  let any = false;
+  let reply: { position: number; turn: string | null | undefined } | undefined;
+  groups.forEach((group, position) => {
+    if (!shows(group, showTurnContext)) return;
+    const message = group[0]!.message;
+    const head = !(message.role === 'assistant' && any && agentLast);
+    heads[position] = head;
+    if (message.role === 'assistant') {
+      const goes = !head && reply?.turn && reply.turn === message.turn_id;
+      if (goes) goesOn[reply!.position] = true;
+      runs[position] = goes ? runs[reply!.position]! : position;
+      reply = { position, turn: group.at(-1)?.message.turn_id };
+    } else if (!message.compaction) reply = undefined;
+    if (!message.compaction) agentLast = message.role === 'assistant';
+    any = true;
+  });
+  /** Whether what shows last is the agent's, which what it says live carries on. */
+  return { heads, runs, goesOn, agentLast: any && agentLast };
+}
+
 /**
  * Whether a block holds someone's words: typed here, an inbox item they sent, or a skill or an MCP
  * prompt they ran.
@@ -64,7 +115,7 @@ function spoken(block: Schema['ContentBlockView']) {
 }
 
 /** A message someone sent, rather than one meka or a tool wrote into the conversation. */
-export function isInput(message: Schema['MessageView']) {
+export function isInput(message: ConversationMessage) {
   return (
     message.role === 'user' &&
     message.content.some(
@@ -128,27 +179,11 @@ export function groupAgentMessages(messages: HistoryMessage[]) {
 }
 
 /**
- * The turns of the loaded history by `turn_label`, which meka gives every message by the rule its
- * rewinds count by: for each label, the loaded message its turn opens at, and how many turns a
- * rewind to before it drops, that one and every later one. One pass, from the end. The first
- * loaded turn is left out when earlier messages are not loaded, since it may open among them.
- */
-export function turnIndex(messages: readonly Schema['MessageView'][], offset: number) {
-  const turns = new Map<string, { start: number; turns: number }>();
-  for (let index = messages.length - 1; index >= 0; index--) {
-    const label = messages[index]!.turn_label;
-    if (label) turns.set(label, { start: index, turns: turns.get(label)?.turns ?? turns.size + 1 });
-  }
-  const first = messages[0]?.turn_label;
-  if (offset > 0 && first) turns.delete(first);
-  return turns;
-}
-/**
  * What the messages say, as written: their text with the files attached among it by name, the
  * inbox items someone sent, the words sent with a skill or an MCP prompt, and a scheduled job's
  * words, without thinking, tools, or what meka wrote around them.
  */
-export function messageText(messages: readonly Schema['MessageView'][]) {
+export function messageText(messages: readonly ConversationMessage[]) {
   return messages
     .flatMap((message) =>
       mentionsInline(message.content.map((block) => ({ block }))).flatMap(({ block }) =>
@@ -173,7 +208,7 @@ export function messageText(messages: readonly Schema['MessageView'][]) {
  * skill is run by name over HTTP. Undefined when it has nothing to send, or an image without a
  * hash to name it by.
  */
-export function resendable(message: Schema['MessageView']) {
+export function resendable(message: ConversationMessage) {
   const images = message.content.flatMap((block) => (block.type === 'image' ? [block] : []));
   const invocation = message.content.find((block) => block.type === 'invocation');
   const skill = invocation?.kind === 'skill' ? invocation.name : '';
@@ -225,7 +260,7 @@ export function groupLiveMessages(blocks: LiveBlock[], submissions: Submission[]
   );
   const groups: (
     | { kind: 'user'; key: string; submission: Submission }
-    | { kind: 'message'; key: string; message: Schema['MessageView'] }
+    | { kind: 'message'; key: string; message: ConversationMessage }
     | { kind: 'agent'; key: string; blocks: { block: AgentBlock; index: number }[] }
   )[] = [];
   const agent = (block: AgentBlock, index: number) => {
@@ -277,13 +312,12 @@ export type LiveGroup = ReturnType<typeof groupLiveMessages>[number];
  * The live groups without the agent's output that saved history shows already: a turn replayed on
  * reconnect starts again from its beginning, so what came up to the last tool call history holds
  * with its result is left out; one still running shows its progress here. Notices stay, which
- * history does not keep. `continued` says whether what is left starts by carrying on that saved
- * output.
+ * history does not keep.
  */
 export function liveAfterSaved(
   groups: readonly LiveGroup[],
-  saved: readonly Schema['MessageView'][],
-): { groups: LiveGroup[]; continued: boolean } {
+  saved: readonly ConversationMessage[],
+): { groups: LiveGroup[] } {
   const savedCalls = new Set(
     saved.flatMap((message) =>
       message.content.flatMap((block) =>
@@ -299,22 +333,17 @@ export function liveAfterSaved(
           last = { group: groupIndex, block: blockIndex };
       });
   });
-  if (!last) return { groups: [...groups], continued: false };
+  if (!last) return { groups: [...groups] };
   const through = last;
-  let carried: LiveGroup | undefined;
   const left = groups.flatMap((group, groupIndex): LiveGroup[] => {
     if (group.kind !== 'agent' || groupIndex > through.group) return [group];
     const blocks = group.blocks.filter(
       ({ block }, blockIndex) =>
         block.kind === 'notice' || (groupIndex === through.group && blockIndex > through.block),
     );
-    if (!blocks.length) return [];
-    const kept = { ...group, blocks };
-    if (groupIndex === through.group) carried = kept;
-    return [kept];
+    return blocks.length ? [{ ...group, blocks }] : [];
   });
-  // Only the group the saved output ends in carries it on, and only with nothing before it.
-  return { groups: left, continued: carried !== undefined && left[0] === carried };
+  return { groups: left };
 }
 
 /**

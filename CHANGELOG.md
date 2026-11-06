@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.39.0] - 2026-11-06
+
+### Changed
+
+- **Breaking:** mekaweb requires meka 0.89.0 or newer.
+- The conversation keeps the turns before a compaction instead of starting at its summary.
+- Earlier messages load as you scroll up, without a button.
+- A compaction shows as a line across the conversation; open it for its cause and summary.
+- While meka compacts, the line appears at once and moves until the compaction is done.
+- The Agent heading appears only after someone else's message, not again after a compaction.
+- Delete, edit, run again and branch appear only on turns the agent still has in context.
+- Rewind in the session menu removes only turns the agent still has in context.
+- Context's session usage counts every turn, and the context window drops its message count.
+- The live turn no longer warns that it may be incomplete; the saved turn replaces it when done.
+
+### Removed
+
+- Export transcript, since meka 0.89.0 no longer renders one; Export archive remains.
+
 ## [0.38.0] - 2026-11-05
 
 ### Added
@@ -681,7 +700,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Light and dark themes, narrow layouts, and collapsible, resizable session panels.
 - Hosting at the root or a subpath, with GitHub Pages deployment on version tags.
 
-[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.38.0...HEAD
+[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.39.0...HEAD
+[0.39.0]: https://github.com/k4yt3x/mekaweb/compare/0.38.0...0.39.0
 [0.38.0]: https://github.com/k4yt3x/mekaweb/compare/0.37.0...0.38.0
 [0.37.0]: https://github.com/k4yt3x/mekaweb/compare/0.36.1...0.37.0
 [0.36.1]: https://github.com/k4yt3x/mekaweb/compare/0.36.0...0.36.1

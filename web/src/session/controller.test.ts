@@ -8,6 +8,8 @@ import {
   type Schema,
 } from '../api/client';
 import { SessionController, UnsentMessage } from './controller';
+import { FakeHistory } from './fake-history';
+import type { ConversationMessage } from './history';
 import { emptyComposerOptions } from './composer-options';
 const controllers: SessionController[] = [];
 afterEach(() => {
@@ -35,20 +37,22 @@ async function fixture(
       supports_elicitation: false,
     },
     turn_in_flight: false,
+    turn_count: 0,
+    usage: {
+      input_tokens: 0,
+      output_tokens: 0,
+      cache_creation_input_tokens: 0,
+      cache_read_input_tokens: 0,
+    },
     ...record,
   };
-  const saved: Schema['MessagesResponse'] = {
-    session_id: 's',
-    messages: [],
-    total: 0,
-    revision: 0,
-  };
+  const history = new FakeHistory();
   const api = new ApiClient('https://example.org');
   const inbox: Schema['InboxListResponse'] = { session_id: 's', items: [] };
   vi.spyOn(api, 'get').mockImplementation(
-    async <T>(path: string) =>
+    async <T>(path: string, query?: Query) =>
       structuredClone(
-        path.endsWith('/messages') ? saved : path.endsWith('/inbox') ? inbox : session,
+        path.endsWith('/history') ? history.page(query) : path.endsWith('/inbox') ? inbox : session,
       ) as T,
   );
   let writer: ReadableStreamDefaultController<Uint8Array>;
@@ -79,14 +83,14 @@ async function fixture(
     api,
     event,
     session,
-    saved,
+    history,
     inbox,
     closeFeed: () => writer.close(),
     state: () => controller.getSnapshot()[0]!,
   };
 }
 
-const remoteOpening: Schema['MessageView'] = {
+const remoteOpening: ConversationMessage = {
   role: 'user',
   content: [
     { type: 'turn_context', text: 'Environment' },
@@ -114,14 +118,13 @@ it('shows another client’s opening from the feed without reading the history a
   expect(f.api.get).not.toHaveBeenCalled();
   expect(f.state().saved?.messages).toEqual([]);
   f.session.turn_in_flight = false;
-  f.saved.messages = [
+  f.history.sayAll([
     remoteOpening,
     { role: 'assistant', content: [{ type: 'text', text: 'Live output' }], turn_id: 'remote' },
-  ];
-  f.saved.total = 2;
+  ]);
   await f.event('turn.finished', { turn_id: 'remote' });
   await vi.waitFor(() => expect(f.state().blocks).toEqual([]));
-  expect(f.state().saved?.messages).toEqual(f.saved.messages);
+  expect(f.state().saved?.messages).toEqual(f.history.messages());
 });
 
 it.each<[string, Schema['ContentBlockView']]>([
@@ -189,8 +192,7 @@ it('places a message an interrupt appends after the answer it cut', async () => 
 
 it('does not repeat an opening the saved conversation already holds when joining mid-turn', async () => {
   const f = await fixture();
-  f.saved.messages = [remoteOpening];
-  f.saved.total = 1;
+  f.history.sayAll([remoteOpening]);
   f.session.turn_in_flight = true;
   await f.controller.refresh('s');
   await f.event('turn.started', { turn_id: 'remote', resumed: true }, true);
@@ -205,7 +207,7 @@ it('does not repeat an opening the saved conversation already holds when joining
 it('knows an opening an interrupt rewrote in place by its turn', async () => {
   const f = await fixture();
   // An interrupt joined onto an opening nothing answered adds its item to the saved opening.
-  f.saved.messages = [
+  f.history.sayAll([
     {
       ...remoteOpening,
       content: [
@@ -213,8 +215,7 @@ it('knows an opening an interrupt rewrote in place by its turn', async () => {
         { type: 'inbox', class: 'interrupt', body: 'Stop', text: 'Stop', item_id: 'item' },
       ],
     },
-  ];
-  f.saved.total = 1;
+  ]);
   f.session.turn_in_flight = true;
   await f.controller.refresh('s');
   await f.event('turn.started', { turn_id: 'remote', resumed: true }, true);
@@ -229,8 +230,7 @@ it('knows an opening an interrupt rewrote in place by its turn', async () => {
 
 it('does not take a later message for the opening of a turn whose opening it skipped', async () => {
   const f = await fixture();
-  f.saved.messages = [remoteOpening];
-  f.saved.total = 1;
+  f.history.sayAll([remoteOpening]);
   f.session.turn_in_flight = true;
   await f.controller.refresh('s');
   await f.event('turn.started', { turn_id: 'remote', resumed: true }, true);
@@ -279,8 +279,8 @@ it.each(['before', 'after'])(
   'does not show an opening the earlier history holds, handed over %s the history is read',
   async (order) => {
     const f = await fixture();
-    // The running turn did more than a page holds, so its opening is behind Load earlier.
-    const rows: Schema['MessageView'][] = [
+    // The running turn did more than a page holds, so its opening is in earlier history.
+    f.history.sayAll([
       ...Array.from({ length: 10 }, (_, i) => ({
         role: i % 2 ? 'assistant' : 'user',
         content: [{ type: 'text' as const, text: `old ${i}` }],
@@ -292,86 +292,80 @@ it.each(['before', 'after'])(
         content: [{ type: 'text' as const, text: `step ${i}` }],
         turn_id: 'remote',
       })),
-    ];
-    vi.spyOn(f.api, 'get').mockImplementation(async <T>(path: string, query?: Query) => {
-      if (!path.endsWith('/messages')) return f.session as T;
-      const offset = Number(query?.offset ?? 0);
-      const limit = Number(query?.limit ?? 100);
-      return {
-        session_id: 's',
-        total: rows.length,
-        revision: 1,
-        messages: structuredClone(rows.slice(offset, offset + limit)),
-      } as T;
-    });
+    ]);
     f.session.turn_in_flight = true;
+    const tab = await reopened(f, { hold: order === 'before' });
     // Rejoining, as after mekaweb restarts, the feed hands over the turn's opening.
     const rejoin = async () => {
-      await f.event('turn.started', { turn_id: 'remote', resumed: true }, true);
-      await f.event(
+      await tab.event('turn.started', { turn_id: 'remote', resumed: true }, true);
+      await tab.event(
         'message.appended',
         { turn_id: 'remote', role: 'user', content: remoteOpening.content, resumed: true },
         true,
       );
     };
-    if (order === 'before') await rejoin();
-    await f.controller.refresh('s');
-    if (order === 'after') await rejoin();
-    expect(f.state().offset).toBe(20);
-    expect(f.state().blocks).toEqual([]);
-    await f.controller.earlier('s');
-    expect(f.state().offset).toBe(0);
-    expect(f.state().saved?.messages.filter((message) => message.role === 'user')).toContainEqual(
-      remoteOpening,
-    );
-    expect(f.state().blocks).toEqual([]);
+    if (order === 'before') {
+      await rejoin();
+      // Shown live until the history says it holds it.
+      expect(tab.state().blocks).toEqual([
+        { kind: 'message', message: remoteOpening, opening: true },
+      ]);
+      tab.release();
+      await vi.waitFor(() => expect(tab.state().saved).toBeDefined());
+    } else await rejoin();
+    expect(tab.state().saved?.messages).toHaveLength(100);
+    expect(tab.state().saved?.earlier).toBe(true);
+    await vi.waitFor(() => expect(tab.state().blocks).toEqual([]));
+    await tab.controller.earlier('s');
+    expect(tab.state().saved?.earlier).toBe(false);
+    expect(
+      tab.state().saved?.messages.filter((message) => message.turn_id === 'remote')[0],
+    ).toMatchObject(remoteOpening);
+    expect(tab.state().blocks).toEqual([]);
   },
 );
 
 it('opens history on the calls whose results would begin it, loaded at first or earlier', async () => {
   const f = await fixture();
-  // A tool round at each page's edge: a call at 19 answered at 20, and one at 119 answered at 120.
-  const rows: Schema['MessageView'][] = Array.from({ length: 220 }, (_, i) => {
-    const id = `call-${i}`;
-    if (i === 19 || i === 119)
-      return {
-        role: 'assistant',
-        content: [{ type: 'tool_use', id, name: 'shell_execute', input: { command: 'true' } }],
-      };
-    if (i === 20 || i === 120)
-      return {
-        role: 'user',
-        content: [
-          {
-            type: 'tool_result',
-            tool_use_id: `call-${i - 1}`,
-            is_error: false,
-            content: [{ type: 'text', text: 'ok' }],
-          },
-        ],
-      };
-    return { role: i % 2 ? 'assistant' : 'user', content: [{ type: 'text', text: `row ${i}` }] };
-  });
-  vi.mocked(f.api.get).mockImplementation(async <T>(path: string, query?: Query) => {
-    if (!path.endsWith('/messages')) return structuredClone(f.session) as T;
-    const offset = Number(query?.offset ?? 0);
-    const limit = Number(query?.limit ?? rows.length);
-    return {
-      session_id: 's',
-      messages: structuredClone(rows.slice(offset, offset + limit)),
-      total: rows.length,
-      revision: 1,
-    } as T;
-  });
-  await f.controller.refresh('s');
-  expect(f.state().offset).toBe(119);
-  expect(f.state().saved?.messages[0]).toEqual(rows[119]);
-  await f.controller.earlier('s');
-  expect(f.state().offset).toBe(19);
-  expect(f.state().saved?.messages).toEqual(rows.slice(19));
-  await f.controller.earlier('s');
-  expect(f.state().offset).toBe(0);
-  expect(f.state().saved?.messages).toEqual(rows);
+  // A tool round at each page's edge: a call at 20 answered at 21, and one at 119 answered at 120.
+  const rows = f.history.sayAll(
+    Array.from({ length: 220 }, (_, i) => {
+      const id = `call-${i}`;
+      if (i === 20 || i === 119)
+        return {
+          role: 'assistant',
+          content: [{ type: 'tool_use', id, name: 'shell_execute', input: { command: 'true' } }],
+        };
+      if (i === 21 || i === 120)
+        return {
+          role: 'user',
+          content: [
+            {
+              type: 'tool_result',
+              tool_use_id: `call-${i - 1}`,
+              is_error: false,
+              content: [{ type: 'text', text: 'ok' }],
+            },
+          ],
+        };
+      return { role: i % 2 ? 'assistant' : 'user', content: [{ type: 'text', text: `row ${i}` }] };
+    }),
+  );
+  // Opened afresh, the last page starts with results, which wait for the page with their calls.
+  const controller = new SessionController(f.api, true);
+  controllers.push(controller);
+  f.controller.dispose();
+  controller.select('s');
+  const state = () => controller.getSnapshot()[0]!;
+  await vi.waitFor(() => expect(state().saved).toBeDefined());
+  expect(state().saved?.messages[0]?.position).toBe(rows[121]!.position);
+  await controller.earlier('s');
+  expect(state().saved?.messages[0]?.position).toBe(rows[22]!.position);
+  await controller.earlier('s');
+  expect(state().saved?.messages.map((message) => message.position)).toEqual(
+    rows.map((row) => row.position),
+  );
+  expect(state().saved?.earlier).toBe(false);
 });
 
 it('drops a shown interrupt once a refresh finds it saved, whatever order its keys come in', async () => {
@@ -388,15 +382,14 @@ it('drops a shown interrupt once a refresh finds it saved, whatever order its ke
   };
   await f.event('message.appended', { turn_id: 'remote', role: 'user', content: [interrupt] });
   expect(f.state().blocks.at(-1)).toMatchObject({ kind: 'message', opening: false });
-  f.saved.messages = [
+  f.history.sayAll([
     remoteOpening,
     {
       role: 'user',
       content: [Object.fromEntries(Object.entries(interrupt).reverse()) as typeof interrupt],
       turn_id: 'remote',
     },
-  ];
-  f.saved.total = 2;
+  ]);
   await f.controller.refresh('s');
   expect(f.state().blocks).toEqual([{ kind: 'text', text: 'Partial answer' }]);
 });
@@ -411,10 +404,9 @@ it('drops a shown opening once a refresh finds it saved', async () => {
     content: remoteOpening.content,
   });
   await f.event('thinking.delta', { turn_id: 'remote', text: 'Thinking' });
-  f.saved.messages = [remoteOpening];
-  f.saved.total = 1;
+  f.history.sayAll([remoteOpening]);
   await f.controller.refresh('s');
-  expect(f.state().saved?.messages).toEqual([remoteOpening]);
+  expect(f.state().saved?.messages).toEqual(f.history.messages());
   expect(f.state().blocks).toEqual([{ kind: 'thinking', text: 'Thinking' }]);
 });
 
@@ -492,13 +484,11 @@ it('follows a compaction turn without notifying', async () => {
   await f.event('context.compacted', {
     turn_id: 'compaction',
     source: 'checkpoint',
-    replaced_count: 2,
     generation: 1,
   });
   expect(f.state()).toMatchObject({ running: true, compacting: true });
   await f.event('turn.finished', { turn_id: 'compaction' });
-  await vi.waitFor(() => expect(f.state().partial).toBe(false));
-  expect(f.state()).toMatchObject({ running: false, compacting: false });
+  await vi.waitFor(() => expect(f.state()).toMatchObject({ running: false, compacting: false }));
   await f.event('turn.started', { turn_id: 'joined', source: 'compaction', resumed: true });
   await f.event('turn.failed', { turn_id: 'joined' });
   expect(completed).not.toHaveBeenCalled();
@@ -506,6 +496,7 @@ it('follows a compaction turn without notifying', async () => {
 
 it('shows a compaction meka opens inside a turn until it lands or fails', async () => {
   const f = await fixture();
+  f.session.turn_in_flight = true;
   await f.event('turn.started', { turn_id: 'work' });
   expect(f.state()).toMatchObject({ running: true, compacting: false });
   const opened = { turn_id: 'work', compaction_id: 'c1', trigger: 'proactive' };
@@ -518,22 +509,69 @@ it('shows a compaction meka opens inside a turn until it lands or fails', async 
   });
   expect(f.state()).toMatchObject({ running: true, compacting: false });
   await f.event('context.compacting', { ...opened, compaction_id: 'c2' });
+  await f.event('assistant_text.delta', { turn_id: 'work', text: 'Working.' });
+  f.history.say({ role: 'user', content: [{ type: 'text', text: 'Work.' }], turn_id: 'work' });
+  f.history.compact({ trigger: 'proactive' }, 'work');
   await f.event('context.compacted', {
     ...opened,
     compaction_id: 'c2',
     source: 'checkpoint',
     memories_written: [],
     kept_recent: true,
-    replaced_count: 2,
     generation: 1,
   });
-  expect(f.state()).toMatchObject({ running: true, compacting: false });
+  // Compacting until the history holds the compaction, so its line takes the live one's place.
+  expect(f.state().compacting).toBe(true);
+  await vi.waitFor(() => expect(f.state().saved?.messages.at(-1)?.compaction).toBeDefined());
+  await vi.waitFor(() => expect(f.state()).toMatchObject({ running: true, compacting: false }));
+  expect(f.state().blocks).toEqual([{ kind: 'text', text: 'Working.' }]);
+});
+
+it('keeps a compaction under way until the history holds it, across a resume', async () => {
+  const f = await fixture();
+  f.session.turn_in_flight = true;
+  await f.event('turn.started', { turn_id: 'work' });
+  await f.event('context.compacting', {
+    turn_id: 'work',
+    compaction_id: 'c1',
+    trigger: 'reactive',
+  });
+  // A reconnect resumes the turn, and a read that brings nothing new ends nothing.
+  await f.event('turn.started', { turn_id: 'work', resumed: true }, true);
+  expect(f.state().compacting).toBe(true);
+  await f.event('feed.gap', { session_id: 's' }, true);
+  await vi.waitFor(() => expect(f.state().loading).toBe(false));
+  expect(f.state().compacting).toBe(true);
+  f.history.compact({ trigger: 'reactive', generation: 1 }, 'work');
+  await f.event('context.compacted', {
+    turn_id: 'work',
+    compaction_id: 'c1',
+    source: 'checkpoint',
+    generation: 1,
+  });
+  await vi.waitFor(() => expect(f.state().compacting).toBe(false));
+  // A second in the same turn is under way until the history holds it too.
+  await f.event('context.compacting', {
+    turn_id: 'work',
+    compaction_id: 'c2',
+    trigger: 'reactive',
+  });
+  expect(f.state().compacting).toBe(true);
+  f.history.compact({ trigger: 'reactive', generation: 2 }, 'work');
+  await f.event('context.compacted', {
+    turn_id: 'work',
+    compaction_id: 'c2',
+    source: 'checkpoint',
+    generation: 2,
+  });
+  await vi.waitFor(() => expect(f.state().compacting).toBe(false));
+  expect(f.state().saved?.messages.filter((message) => message.compaction)).toHaveLength(2);
 });
 
 it('reads a running sub-agent’s feed without attending, and lets it go when the run ends', async () => {
   const f = await fixture(true, undefined, { parent_id: 'parent', turn_in_flight: true });
   expect(f.api.stream).toHaveBeenCalledWith(
-    '/v1/sessions/s/stream',
+    '/v1/sessions/s/feed',
     undefined,
     undefined,
     expect.any(AbortSignal),
@@ -546,7 +584,7 @@ it('reads a running sub-agent’s feed without attending, and lets it go when th
   });
   expect(f.state().spawnedBy).toEqual({ sessionId: 'parent', toolCallId: 'call' });
   // The parent's feed carries the prompt and takes the answer.
-  await f.event('permission_required', {
+  await f.event('approval.requested', {
     turn_id: 'run',
     request_id: 'prompt',
     tool_name: 'file_write',
@@ -576,7 +614,7 @@ it('opens an idle sub-agent’s feed when a follow-up runs it, until the run is 
   vi.mocked(f.api.stream).mockImplementation(() => {
     f.session.turn_in_flight = false;
     return Promise.reject(
-      new ApiError(409, { type: 'https://meka.run/errors/subagent-not-running' }),
+      new ApiError(409, { type: 'https://meka.bot/errors/subagent-not-running' }),
     );
   });
   await f.controller.reconnect('s');
@@ -589,47 +627,146 @@ it('rewinds only the conversation it shows', async () => {
   const f = await fixture();
   const head = vi
     .spyOn(f.api, 'getTagged')
-    .mockResolvedValue({ value: structuredClone(f.saved), etag: 'W/"0-0"' });
+    .mockResolvedValue({ value: f.history.page({ limit: 1 }), etag: '"0"' });
   const mutate = vi.spyOn(f.api, 'mutate').mockResolvedValue(undefined);
-  await f.controller.rewind('s', 2);
+  await f.controller.rewind('s', 'turn-2');
   expect(mutate).toHaveBeenCalledWith(
     'POST',
     '/v1/sessions/s/rewind',
-    { turns: 2 },
+    { turn_id: 'turn-2' },
     undefined,
-    'W/"0-0"',
+    '"0"',
   );
   // A conversation that moved on since it was shown is left alone.
-  head.mockResolvedValue({ value: { ...f.saved, total: 4 }, etag: 'W/"0-4"' });
-  await expect(f.controller.rewind('s', 1)).rejects.toThrow('changed since it was shown');
+  head.mockResolvedValue({ value: { ...f.history.page({ limit: 1 }), position: 4 }, etag: '"4"' });
+  await expect(f.controller.rewind('s', 'turn-1')).rejects.toThrow('changed since it was shown');
   expect(mutate).toHaveBeenCalledTimes(1);
   // As is one that moved on before the rewind landed.
-  head.mockResolvedValue({ value: structuredClone(f.saved), etag: 'W/"0-0"' });
+  head.mockResolvedValue({ value: f.history.page({ limit: 1 }), etag: '"0"' });
   mutate.mockRejectedValue(new ApiError(412, {}));
-  await expect(f.controller.rewind('s', 1)).rejects.toThrow('changed since it was shown');
+  await expect(f.controller.rewind('s', 'turn-1')).rejects.toThrow('changed since it was shown');
   // And without a version to hold it to, nothing is changed at all.
   mutate.mockClear();
-  head.mockResolvedValue({ value: structuredClone(f.saved), etag: undefined });
-  await expect(f.controller.rewind('s', 1)).rejects.toThrow('ETag');
+  head.mockResolvedValue({ value: f.history.page({ limit: 1 }), etag: undefined });
+  await expect(f.controller.rewind('s', 'turn-1')).rejects.toThrow('ETag');
   expect(mutate).not.toHaveBeenCalled();
+});
+
+it('rewinds the last turns since the last compaction, counted back from the end', async () => {
+  const f = await fixture();
+  f.history.sayAll([
+    { role: 'user', content: [{ type: 'text', text: 'Old.' }], turn_id: 'old' },
+    { role: 'assistant', content: [{ type: 'text', text: 'Old answer.' }], turn_id: 'old' },
+  ]);
+  f.history.compact();
+  f.history.sayAll([
+    { role: 'user', content: [{ type: 'text', text: 'One.' }], turn_id: 'one' },
+    { role: 'assistant', content: [{ type: 'text', text: 'First.' }], turn_id: 'one' },
+    { role: 'user', content: [{ type: 'text', text: 'Two.' }], turn_id: 'two' },
+    { role: 'assistant', content: [{ type: 'text', text: 'Second.' }], turn_id: 'two' },
+  ]);
+  await f.controller.refresh('s');
+  vi.spyOn(f.api, 'getTagged').mockResolvedValue({
+    value: f.history.page({ limit: 1 }),
+    etag: 'tag',
+  });
+  const mutate = vi.spyOn(f.api, 'mutate').mockResolvedValue(undefined);
+  await f.controller.rewindLast('s', 2);
+  expect(mutate).toHaveBeenCalledWith(
+    'POST',
+    '/v1/sessions/s/rewind',
+    { turn_id: 'one' },
+    undefined,
+    'tag',
+  );
+  // A turn the compaction summarized is not one to name.
+  await expect(f.controller.rewindLast('s', 3)).rejects.toThrow('Only the last 2 turns');
+});
+
+it.each([
+  ['kept its prompt', [1, 2, 3], 'withdrawn'],
+  ['took its prompt back', [1, 2], 'one'],
+])(
+  'asks the context about a turn that said nothing, and counts it when it %s',
+  async (_, held, named) => {
+    const f = await fixture();
+    f.history.sayAll([
+      { role: 'user', content: [{ type: 'text', text: 'One.' }], turn_id: 'one' },
+      { role: 'assistant', content: [{ type: 'text', text: 'First.' }], turn_id: 'one' },
+      // A failed turn: whether meka took its opening back only the context says.
+      { role: 'user', content: [{ type: 'text', text: 'Failed.' }], turn_id: 'withdrawn' },
+    ]);
+    await f.controller.refresh('s');
+    const get = vi.mocked(f.api.get).getMockImplementation()!;
+    vi.mocked(f.api.get).mockImplementation(async <T>(path: string, query?: Query) =>
+      path.endsWith('/context/messages')
+        ? ({
+            session_id: 's',
+            position: 3,
+            messages: held.map((position) => ({
+              position,
+              created_at: '',
+              role: 'user',
+              content: [],
+            })),
+          } as T)
+        : ((await get(path, query)) as T),
+    );
+    vi.spyOn(f.api, 'getTagged').mockResolvedValue({
+      value: f.history.page({ limit: 1 }),
+      etag: 'tag',
+    });
+    const mutate = vi.spyOn(f.api, 'mutate').mockResolvedValue(undefined);
+    await f.controller.rewindLast('s', 1);
+    expect(mutate).toHaveBeenCalledWith(
+      'POST',
+      '/v1/sessions/s/rewind',
+      { turn_id: named },
+      undefined,
+      'tag',
+    );
+    expect(
+      vi.mocked(f.api.get).mock.calls.filter(([path]) => path.endsWith('/context/messages')),
+    ).toHaveLength(1);
+  },
+);
+
+it('takes a rewind’s turns out of the history it holds', async () => {
+  const f = await fixture();
+  f.history.sayAll([
+    { role: 'user', content: [{ type: 'text', text: 'One.' }], turn_id: 'one' },
+    { role: 'assistant', content: [{ type: 'text', text: 'First.' }], turn_id: 'one' },
+    { role: 'user', content: [{ type: 'text', text: 'Two.' }], turn_id: 'two' },
+    { role: 'assistant', content: [{ type: 'text', text: 'Second.' }], turn_id: 'two' },
+  ]);
+  await f.controller.refresh('s');
+  expect(f.state().saved?.messages).toHaveLength(4);
+  const rewound = f.history.rewind('two');
+  await f.event('conversation.rewound', { session_id: 's', ...rewound });
+  await vi.waitFor(() => expect(f.state().saved?.messages).toEqual(f.history.messages()));
+  expect(f.state().saved?.messages).toHaveLength(2);
+  expect(f.state().saved?.position).toBe(rewound.position);
 });
 
 it('sends a turn again after rewinding to before it', async () => {
   const f = await fixture();
-  vi.spyOn(f.api, 'getTagged').mockResolvedValue({ value: structuredClone(f.saved), etag: 'tag' });
+  vi.spyOn(f.api, 'getTagged').mockResolvedValue({
+    value: f.history.page({ limit: 1 }),
+    etag: 'tag',
+  });
   const mutate = vi.spyOn(f.api, 'mutate').mockResolvedValue(undefined);
   const submit = vi.spyOn(f.controller, 'submitMessage').mockResolvedValue(true);
-  expect(await f.controller.resend('s', 1, 'Again')).toBe(true);
+  expect(await f.controller.resend('s', 'turn', 'Again')).toBe(true);
   expect(mutate).toHaveBeenCalledWith(
     'POST',
     '/v1/sessions/s/rewind',
-    { turns: 1 },
+    { turn_id: 'turn' },
     undefined,
     'tag',
   );
   expect(submit).toHaveBeenCalledWith('s', 'Again', expect.objectContaining({ images: [] }));
   // A skill the message ran runs with it again.
-  await f.controller.resend('s', 1, 'Again', [], 'review');
+  await f.controller.resend('s', 'turn', 'Again', [], 'review');
   expect(submit).toHaveBeenLastCalledWith(
     's',
     'Again',
@@ -639,12 +776,15 @@ it('sends a turn again after rewinding to before it', async () => {
 
 it('hands back a message whose turn was rewound but which could not be sent', async () => {
   const f = await fixture();
-  vi.spyOn(f.api, 'getTagged').mockResolvedValue({ value: structuredClone(f.saved), etag: 'tag' });
+  vi.spyOn(f.api, 'getTagged').mockResolvedValue({
+    value: f.history.page({ limit: 1 }),
+    etag: 'tag',
+  });
   vi.spyOn(f.api, 'mutate').mockResolvedValue(undefined);
   vi.spyOn(f.controller, 'submitMessage').mockRejectedValue(new Error('Wait for the feed.'));
   const images = [{ name: 'Image 1', hash: 'stored' }];
   const failure: unknown = await f.controller
-    .resend('s', 1, 'Again', images, 'review')
+    .resend('s', 'turn', 'Again', images, 'review')
     .catch((error) => error);
   expect(failure).toBeInstanceOf(UnsentMessage);
   expect(failure).toMatchObject({ text: 'Again', images, skill: 'review' });
@@ -667,56 +807,45 @@ it('sends a saved image again by its hash, and an attached one as its bytes', as
   });
 });
 
-it('branches by forking the shown conversation and trimming the copy', async () => {
+it('branches by forking the shown conversation before a turn', async () => {
   const f = await fixture();
-  vi.spyOn(f.api, 'getTagged').mockResolvedValue({ value: structuredClone(f.saved), etag: 'tag' });
+  vi.spyOn(f.api, 'getTagged').mockResolvedValue({
+    value: f.history.page({ limit: 1 }),
+    etag: 'tag',
+  });
   const mutate = vi
     .spyOn(f.api, 'mutate')
     .mockImplementation(
       async (_method, path) =>
         (path.endsWith('/fork') ? { ...f.session, id: 'copy' } : undefined) as never,
     );
-  expect(await f.controller.branch('s', 2)).toBe('copy');
+  expect(await f.controller.branch('s', 'next')).toBe('copy');
   expect(mutate.mock.calls).toEqual([
-    ['POST', '/v1/sessions/s/fork', {}, undefined, 'tag'],
-    ['POST', '/v1/sessions/copy/rewind', { turns: 2 }],
+    ['POST', '/v1/sessions/s/fork', { turn_id: 'next' }, undefined, 'tag'],
   ]);
   mutate.mockClear();
-  // Branching from the latest turn keeps the whole copy.
-  await f.controller.branch('s', 0);
-  expect(mutate).toHaveBeenCalledTimes(1);
-});
-
-it('removes a branch’s copy that could not be trimmed, rather than leave a whole one', async () => {
-  const f = await fixture();
-  vi.spyOn(f.api, 'getTagged').mockResolvedValue({ value: structuredClone(f.saved), etag: 'tag' });
-  const mutate = vi.spyOn(f.api, 'mutate').mockImplementation(async (_method, path) => {
-    if (path.endsWith('/fork')) return { ...f.session, id: 'copy-0123' } as never;
-    if (path.endsWith('/rewind')) throw new ApiError(422, { detail: 'out of range' });
-    return undefined as never;
-  });
-  await expect(f.controller.branch('s', 2)).rejects.toThrow(
-    'could not be trimmed, so its copy was removed: out of range',
-  );
-  expect(mutate).toHaveBeenLastCalledWith('DELETE', '/v1/sessions/copy-0123');
-  // If the copy cannot go either, the error names it.
-  mutate.mockImplementation(async (_method, path) => {
-    if (path.endsWith('/fork')) return { ...f.session, id: 'copy-0123' } as never;
-    throw new ApiError(422, { detail: 'refused' });
-  });
-  await expect(f.controller.branch('s', 2)).rejects.toThrow('Delete the session copy-012 by hand');
+  // Branching from the latest turn copies all of it.
+  await f.controller.branch('s');
+  expect(mutate.mock.calls).toEqual([['POST', '/v1/sessions/s/fork', {}, undefined, 'tag']]);
 });
 
 it('reads the conversation again when another client rewinds it', async () => {
   const f = await fixture();
   const reads = vi.mocked(f.api.get).mock.calls.length;
-  await f.event('conversation.rewound', { revision: 1, total: 0, turns_removed: 1 });
+  await f.event('conversation.rewound', {
+    session_id: 's',
+    type: 'rewind',
+    position: 1,
+    created_at: '2026-11-06T00:00:00Z',
+    ranges: [],
+    turns: 0,
+  });
   await vi.waitFor(() =>
     expect(
       vi
         .mocked(f.api.get)
         .mock.calls.slice(reads)
-        .some(([path]) => path.endsWith('/messages')),
+        .some(([path]) => path.endsWith('/history')),
     ).toBe(true),
   );
 });
@@ -739,17 +868,15 @@ it('shows a nudge and a background report in the live turn, and reads the conver
   });
   // A notice is what the agent or a provider said, never a hole in the feed.
   await f.event('notice', { level: 'warn', text: 'Provider advisory' });
-  expect(f.state().partial).toBe(false);
   expect(f.state().notices.at(-1)?.text).toBe('Provider advisory');
   const reads = vi.mocked(f.api.get).mock.calls.length;
   await f.event('feed.gap', { session_id: 's', dropped: 3 }, true);
-  expect(f.state().partial).toBe(true);
   await vi.waitFor(() =>
     expect(
       vi
         .mocked(f.api.get)
         .mock.calls.slice(reads)
-        .some(([path]) => path.endsWith('/messages')),
+        .some(([path]) => path.endsWith('/history')),
     ).toBe(true),
   );
 });
@@ -821,7 +948,7 @@ it('shows the saved conversation of a session a read-only token cannot load, the
   const f = await fixture(false);
   vi.useFakeTimers();
   const unloaded = new ApiError(409, {
-    type: 'https://meka.run/errors/session-not-loaded',
+    type: 'https://meka.bot/errors/session-not-loaded',
     title: 'Session not loaded',
   });
   vi.mocked(f.api.stream)
@@ -830,9 +957,8 @@ it('shows the saved conversation of a session a read-only token cannot load, the
     .mockResolvedValueOnce(
       new Response(new ReadableStream(), { headers: { 'Content-Type': 'text/event-stream' } }),
     );
-  const input: Schema['MessageView'] = { role: 'user', content: [{ type: 'text', text: 'Hi' }] };
-  f.saved.messages = [input];
-  f.saved.total = 1;
+  const input: ConversationMessage = { role: 'user', content: [{ type: 'text', text: 'Hi' }] };
+  f.history.sayAll([input]);
   await f.controller.reconnect('s');
   expect(f.state()).toMatchObject({ feed: 'unloaded', saved: { messages: [input] } });
   expect(f.state().error).toBeUndefined();
@@ -957,7 +1083,7 @@ it.each([
   ['tool_call.composing', { id: 'tool', name: 'file_read' }],
   ['tool_call.executing', { id: 'tool', name: 'file_read', input: {} }],
   [
-    'permission_required',
+    'approval.requested',
     { request_id: 'approval', tool_name: 'file_write', input: {}, expires_in_seconds: 60 },
   ],
 ] as const)('ends text activity immediately on %s', async (name, payload) => {
@@ -1066,14 +1192,12 @@ it('reconciles a followed turn when a read-only feed comes back unloaded', async
   expect(f.state().running).toBe(true);
   // The server restarts mid-turn: the feed breaks without a terminal, and nothing is loaded.
   vi.mocked(f.api.stream).mockRejectedValue(
-    new ApiError(409, { type: 'https://meka.run/errors/session-not-loaded' }),
+    new ApiError(409, { type: 'https://meka.bot/errors/session-not-loaded' }),
   );
   f.session.turn_in_flight = false;
   f.closeFeed();
   await vi.advanceTimersByTimeAsync(1000);
-  await vi.waitFor(() =>
-    expect(f.state()).toMatchObject({ feed: 'unloaded', running: false, partial: false }),
-  );
+  await vi.waitFor(() => expect(f.state()).toMatchObject({ feed: 'unloaded', running: false }));
   expect(f.state().blocks).toEqual([]);
 });
 
@@ -1094,7 +1218,7 @@ it('waits quietly when deletion ends the feed, and reconnects if the deletion fa
   // meka 0.68 closes the feed before it removes the rows and answers.
   f.closeFeed();
   await vi.advanceTimersByTimeAsync(0);
-  expect(f.state()).toMatchObject({ feed: 'connected', partial: false, deleting: true });
+  expect(f.state()).toMatchObject({ feed: 'connected', deleting: true });
   refuse(new ApiError(409, { title: 'Session locked' }));
   await expect(deleting).rejects.toMatchObject({ status: 409 });
   await vi.advanceTimersByTimeAsync(1000);
@@ -1125,8 +1249,8 @@ it('releases known descendants after deleting their parent', async () => {
   vi.mocked(f.api.get).mockImplementation(
     async <T>(path: string) =>
       structuredClone(
-        path.endsWith('/messages')
-          ? { ...f.saved, session_id: 'child' }
+        path.endsWith('/history')
+          ? { ...f.history.page(), session_id: 'child' }
           : { ...f.session, id: 'child', parent_id: 's' },
       ) as T,
   );
@@ -1169,8 +1293,7 @@ it('records delivery and completion arriving before an inbox POST response', asy
   await vi.waitFor(() => expect(f.state().submissions).toHaveLength(1));
   await f.event('turn.started', { turn_id: 'turn-1' });
   await f.event('inbox.delivered', { item_ids: ['item'], turn_id: 'turn-1' });
-  f.saved.messages = [{ role: 'user', content: [{ type: 'text', text: 'hello' }] }];
-  f.saved.total = 1;
+  f.history.sayAll([{ role: 'user', content: [{ type: 'text', text: 'hello' }] }]);
   await f.event('turn.finished', { turn_id: 'turn-1' });
   await vi.waitFor(() => expect(f.state().loading).toBe(false));
   expect(f.state().saved?.messages).toEqual([]);
@@ -1186,7 +1309,7 @@ it('records delivery and completion arriving before an inbox POST response', asy
   expect(await sending).toBe(true);
   expect(f.state().submissions[0]?.state).toBe('completed');
   await vi.waitFor(() => expect(f.state().submissions[0]?.preview).toBe(false));
-  expect(f.state().saved?.messages).toEqual(f.saved.messages);
+  expect(f.state().saved?.messages).toEqual(f.history.messages());
   f.controller.select(undefined);
   expect(f.state().feed).toBe('closed');
 });
@@ -1314,15 +1437,14 @@ it('shows a submission before POST acknowledgment, preserves it across navigatio
   expect(await sending).toBe(true);
   await f.event('inbox.delivered', { item_ids: ['item'], turn_id: 'turn' });
   expect(f.state().submissions[0]?.preview).toBe(true);
-  f.saved.messages = [
+  f.history.sayAll([
     { role: 'user', content: [{ type: 'text', text: '[Server envelope]\nCheck the workspace.' }] },
     { role: 'assistant', content: [{ type: 'text', text: 'Done.' }] },
-  ];
-  f.saved.total = 2;
+  ]);
   f.session.turn_in_flight = false;
   await f.event('turn.finished', { turn_id: 'turn' });
   await vi.waitFor(() => expect(f.state().submissions[0]?.preview).toBe(false));
-  expect(f.state().saved?.messages).toEqual(f.saved.messages);
+  expect(f.state().saved?.messages).toEqual(f.history.messages());
   expect(f.state().blocks).toEqual([]);
 });
 
@@ -1347,8 +1469,7 @@ it('keeps a queued identical message while the preceding message is reconciled',
       source: 'client',
     },
   ];
-  f.saved.messages = [{ role: 'user', content: [{ type: 'text', text: 'Again.' }] }];
-  f.saved.total = 1;
+  f.history.sayAll([{ role: 'user', content: [{ type: 'text', text: 'Again.' }] }]);
   await f.event('inbox.delivered', { item_ids: ['first'], turn_id: 'first-turn' });
   f.session.turn_in_flight = false;
   await f.event('turn.finished', { turn_id: 'first-turn' });
@@ -1381,16 +1502,15 @@ it.each(['appended', 'absent'])(
               source: 'client',
             },
           ];
-    f.saved.messages = [
+    f.history.sayAll([
       { role: 'user', content: [{ type: 'text', text: 'Persisted envelope: Hello.' }] },
-    ];
-    f.saved.total = 1;
+    ]);
 
     f.controller.select(undefined);
     await f.controller.refresh('s');
 
     expect(f.state().submissions[0]).toMatchObject({ preview: false, state: 'accepted' });
-    expect(f.state().saved?.messages).toEqual(f.saved.messages);
+    expect(f.state().saved?.messages).toEqual(f.history.messages());
     expect(f.state().blocks.some((block) => block.kind === 'submission')).toBe(false);
     f.session.turn_in_flight = false;
     await f.controller.refresh('s');
@@ -1416,11 +1536,11 @@ it('does not retire a preview using a snapshot begun before delivery', async () 
     },
   ];
   const get = vi.mocked(f.api.get).getMockImplementation()!;
-  let finish!: (response: Schema['MessagesResponse']) => void;
+  let finish!: (response: Schema['HistoryResponse']) => void;
   vi.spyOn(f.api, 'get').mockImplementation(
     async <T>(path: string, query?: Query, signal?: AbortSignal) => {
-      if (path.endsWith('/messages'))
-        return (await new Promise<Schema['MessagesResponse']>((resolve) => {
+      if (path.endsWith('/history'))
+        return (await new Promise<Schema['HistoryResponse']>((resolve) => {
           finish = resolve;
         })) as T;
       return (await get(path, query, signal)) as T;
@@ -1429,7 +1549,7 @@ it('does not retire a preview using a snapshot begun before delivery', async () 
   const reading = f.controller.refresh('s');
   await vi.waitFor(() => expect(finish).toBeDefined());
   await f.event('inbox.delivered', { item_ids: ['item'], turn_id: 'turn' });
-  finish({ ...f.saved, total: 0, messages: [] });
+  finish(f.history.page());
   await reading;
   expect(f.state().submissions[0]?.preview).toBe(true);
   vi.mocked(f.api.get).mockImplementation(get);
@@ -1613,7 +1733,7 @@ it('retries uncertain inbox submissions with the same body and key', async () =>
 it('keeps approvals attended across navigation and clears a prompt answered in another tab', async () => {
   const f = await fixture();
   await f.event('turn.started', { turn_id: 'turn-1' });
-  await f.event('permission_required', {
+  await f.event('approval.requested', {
     request_id: 'a',
     tool_name: 'file_write',
     input: { path: 'test' },
@@ -1622,7 +1742,7 @@ it('keeps approvals attended across navigation and clears a prompt answered in a
   f.controller.select(undefined);
   expect(f.state().feed).toBe('connected');
   vi.spyOn(f.api, 'mutate').mockRejectedValue(
-    new ApiError(404, { type: 'https://meka.run/errors/not-found' }),
+    new ApiError(404, { type: 'https://meka.bot/errors/not-found' }),
   );
   await f.controller.respond(f.state().approvals[0]!, 'allow');
   expect(f.state().approvals).toHaveLength(0);
@@ -1630,7 +1750,7 @@ it('keeps approvals attended across navigation and clears a prompt answered in a
 it('takes down a prompt resolved elsewhere, and keeps its deadline and sub-agent', async () => {
   const f = await fixture();
   await f.event('turn.started', { turn_id: 'turn-1' });
-  await f.event('permission_required', {
+  await f.event('approval.requested', {
     request_id: 'a',
     tool_name: 'file_write',
     input: { path: 'test' },
@@ -1642,14 +1762,14 @@ it('takes down a prompt resolved elsewhere, and keeps its deadline and sub-agent
     expires: Date.parse('2026-09-17T00:30:00Z'),
     subagentId: 'worker',
   });
-  await f.event('permission_resolved', { request_id: 'a', outcome: 'allow' });
+  await f.event('approval.resolved', { request_id: 'a', outcome: 'allow' });
   expect(f.state().approvals).toEqual([]);
 });
 it('holds an MCP server’s question beside approvals and sends the answer’s content', async () => {
   const f = await fixture();
   await f.event('turn.started', { turn_id: 'turn-1' });
   const schema = { type: 'object', properties: { name: { type: 'string' } } };
-  await f.event('elicitation_required', {
+  await f.event('elicitation.requested', {
     request_id: 'q',
     server: 'github',
     kind: 'form',
@@ -1657,7 +1777,7 @@ it('holds an MCP server’s question beside approvals and sends the answer’s c
     schema,
     expires_in_seconds: 60,
   });
-  await f.event('elicitation_required', {
+  await f.event('elicitation.requested', {
     request_id: 'u',
     server: 'github',
     kind: 'url',
@@ -1675,7 +1795,7 @@ it('holds an MCP server’s question beside approvals and sends the answer’s c
     outcome: 'accept',
     content: { name: 'Ada' },
   });
-  await f.event('elicitation_resolved', { request_id: 'u', outcome: 'expired' });
+  await f.event('elicitation.resolved', { request_id: 'u', outcome: 'expired' });
   expect(f.state().approvals).toEqual([]);
 });
 it('keeps what meka last measured in context, inside a turn or not', async () => {
@@ -1687,7 +1807,7 @@ it('keeps what meka last measured in context, inside a turn or not', async () =>
 });
 it('does not send approval responses through a read-only controller', async () => {
   const f = await fixture(false);
-  await f.event('permission_required', {
+  await f.event('approval.requested', {
     request_id: 'read-only-approval',
     tool_name: 'file_write',
     input: {},
@@ -1757,11 +1877,10 @@ it.each([404, 409])(
     f.mutate.mockImplementationOnce(async () => {
       f.inbox.items = [];
       if (status === 409) {
-        f.saved.messages = [{ role: 'user', content: [{ type: 'text', text: 'Queued work' }] }];
-        f.saved.total = 1;
+        f.history.sayAll([{ role: 'user', content: [{ type: 'text', text: 'Queued work' }] }]);
       }
       throw new ApiError(status, {
-        type: `https://meka.run/errors/${status === 409 ? 'inbox-appended' : 'not-found'}`,
+        type: `https://meka.bot/errors/${status === 409 ? 'inbox-appended' : 'not-found'}`,
       });
     });
     await expect(f.controller.withdrawInbox('s', 'item')).rejects.toThrow(
@@ -1770,7 +1889,7 @@ it.each([404, 409])(
     expect(f.mutate).toHaveBeenCalledTimes(2);
     expect(f.state().submissions[0]?.state).not.toBe('withdrawn');
     expect(f.state().submissions[0]?.preview).toBe(false);
-    if (status === 409) expect(f.state().saved?.messages).toEqual(f.saved.messages);
+    if (status === 409) expect(f.state().saved?.messages).toEqual(f.history.messages());
   },
 );
 
@@ -1855,7 +1974,7 @@ it('never cancels without an observed turn id and retains a direct-turn draft on
   const f = await fixture();
   const mutate = vi
     .spyOn(f.api, 'mutate')
-    .mockRejectedValue(new ApiError(409, { type: 'https://meka.run/errors/turn-in-flight' }));
+    .mockRejectedValue(new ApiError(409, { type: 'https://meka.bot/errors/turn-in-flight' }));
   await expect(f.controller.cancel('s')).rejects.toThrow('observed');
   expect(mutate).not.toHaveBeenCalled();
   expect(
@@ -2091,9 +2210,9 @@ it('does not reopen feeds or send work after the controller is disposed', async 
 it('does not erase a newer live turn when an older reconciliation finishes', async () => {
   const f = await fixture();
   await f.event('turn.started', { turn_id: 'old' });
-  let resolve: (value: Schema['MessagesResponse']) => void = () => {};
+  let resolve: (value: Schema['HistoryResponse']) => void = () => {};
   vi.spyOn(f.api, 'get').mockImplementation(async <T>(path: string) => {
-    if (path.endsWith('/messages'))
+    if (path.endsWith('/history'))
       return (await new Promise((r) => {
         resolve = r as typeof resolve;
       })) as T;
@@ -2102,8 +2221,9 @@ it('does not erase a newer live turn when an older reconciliation finishes', asy
   await f.event('turn.finished', { turn_id: 'old' });
   await f.event('turn.started', { turn_id: 'new' });
   await f.event('assistant_text.delta', { turn_id: 'new', text: 'new output' });
-  resolve({ ...f.saved, revision: 1 });
-  await vi.waitFor(() => expect(f.state().saved?.revision).toBe(1));
+  f.history.say({ role: 'assistant', content: [{ type: 'text', text: 'old output' }] });
+  resolve(f.history.page({ after: 0 }));
+  await vi.waitFor(() => expect(f.state().saved?.messages).toHaveLength(1));
   expect(f.state().turnId).toBe('new');
   expect(f.state().blocks).toEqual([{ kind: 'text', text: 'new output' }]);
 });
@@ -2190,101 +2310,211 @@ it('puts notices away once a newer turn starts, still knowing their replays', as
   expect(shown()).toEqual([]);
 });
 
-it('labels resumed previews as partial and keeps saved state separate', async () => {
+it('keeps a resumed preview apart from saved state', async () => {
   const f = await fixture();
   await f.event('turn.started', { turn_id: 'joined', resumed: true }, true);
   await f.event('assistant_text.delta', { turn_id: 'joined', text: 'partial' });
-  expect(f.state().partial).toBe(true);
   expect(f.state().saved?.messages).toEqual([]);
   expect(f.state().blocks).toEqual([{ kind: 'text', text: 'partial' }]);
 });
 
-it('preserves loaded earlier pages on refresh and replaces them on a history revision', async () => {
+/**
+ * The session opened afresh on a controller of its own, with a feed of its own, which reads the
+ * history's last page; with `hold`, that read waits for `release`.
+ */
+async function reopened(
+  f: Awaited<ReturnType<typeof fixture>>,
+  { pageSize, hold = false }: { pageSize?: number; hold?: boolean } = {},
+) {
+  f.controller.dispose();
+  let writer!: ReadableStreamDefaultController<Uint8Array>;
+  vi.mocked(f.api.stream).mockResolvedValue(
+    new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          writer = controller;
+        },
+      }),
+      { headers: { 'Content-Type': 'text/event-stream' } },
+    ),
+  );
+  let release = () => {};
+  if (hold) {
+    const get = vi.mocked(f.api.get).getMockImplementation()!;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    let first = true;
+    vi.mocked(f.api.get).mockImplementation(
+      async <T>(path: string, query?: Query, signal?: AbortSignal) => {
+        if (first && path.endsWith('/history')) {
+          first = false;
+          await held;
+        }
+        return (await get(path, query, signal)) as T;
+      },
+    );
+  }
+  const controller = new SessionController(
+    f.api,
+    true,
+    undefined,
+    pageSize ? () => pageSize : undefined,
+  );
+  controllers.push(controller);
+  controller.select('s');
+  const state = () => controller.getSnapshot()[0]!;
+  let cursor = 1000;
+  async function event(name: string, payload: unknown, transient = false) {
+    writer.enqueue(
+      new TextEncoder().encode(
+        `${transient ? '' : `id: ${++cursor}\n`}event: ${name}\ndata: ${JSON.stringify(payload)}\n\n`,
+      ),
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+  }
+  await vi.waitFor(() => expect(state().feed).toBe('connected'));
+  if (!hold) await vi.waitFor(() => expect(state().saved).toBeDefined());
+  return { controller, state, event, release };
+}
+const said = (index: number) => ({
+  role: index % 2 ? 'assistant' : 'user',
+  content: [{ type: 'text' as const, text: `message ${index}` }],
+});
+const texts = (messages: readonly ConversationMessage[] | undefined) =>
+  messages?.map((message) => (message.content[0] as { text: string }).text);
+
+it('reads only what came after the history it holds, keeping earlier pages', async () => {
   const f = await fixture();
-  let revision = 0;
-  let total = 250;
-  vi.spyOn(f.api, 'get').mockImplementation(async <T>(path: string, query?: Query) => {
-    if (!path.endsWith('/messages')) return f.session as T;
-    const offset = Number(query?.offset ?? 0);
-    const limit = Number(query?.limit ?? 100);
-    return {
-      session_id: 's',
-      total,
-      revision,
-      messages: Array.from({ length: Math.min(limit, Math.max(0, total - offset)) }, (_, i) => ({
-        role: 'user',
-        content: [{ type: 'text', text: String(offset + i) }],
-      })),
-    } as T;
-  });
-  // A revision establishes a fresh window rather than inheriting the initially empty fixture.
-  revision = 1;
-  await f.controller.refresh('s');
-  expect(f.state().offset).toBe(150);
-  await f.controller.earlier('s');
-  expect(f.state().offset).toBe(50);
-  expect(f.state().saved?.messages).toHaveLength(200);
-  await f.controller.refresh('s');
-  expect(f.state().offset).toBe(50);
-  expect(f.state().saved?.messages).toHaveLength(200);
-  revision = 2;
-  total = 5;
-  await f.controller.refresh('s', true);
-  expect(f.state().offset).toBe(0);
-  expect(f.state().saved?.messages).toHaveLength(5);
-  expect(f.state().saved?.revision).toBe(2);
+  f.history.sayAll(Array.from({ length: 250 }, (_, index) => said(index)));
+  const { controller, state } = await reopened(f);
+  expect(texts(state().saved?.messages)).toEqual(
+    Array.from({ length: 100 }, (_, index) => `message ${index + 150}`),
+  );
+  await controller.earlier('s');
+  expect(state().saved?.messages).toHaveLength(200);
+  f.history.sayAll([said(250), said(251)]);
+  vi.mocked(f.api.get).mockClear();
+  await controller.refresh('s');
+  const reads = vi
+    .mocked(f.api.get)
+    .mock.calls.filter(([path]) => path.endsWith('/history'))
+    .map(([, query]) => query);
+  expect(reads).toEqual([{ after: 250, limit: 1000 }]);
+  expect(texts(state().saved?.messages)).toEqual(
+    Array.from({ length: 202 }, (_, index) => `message ${index + 50}`),
+  );
+  expect(state().saved?.position).toBe(252);
 });
 
-it('reads the shown window again when old turns are deleted without a new revision', async () => {
+it.each(['refresh', 'earlier page'])(
+  'keeps both an earlier page and a refresh, the %s landing first',
+  async (first) => {
+    const f = await fixture();
+    f.history.sayAll(Array.from({ length: 150 }, (_, index) => said(index)));
+    const { controller, state } = await reopened(f);
+    const get = vi.mocked(f.api.get).getMockImplementation()!;
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    // The read that lands second waits until the first has.
+    const waits = first === 'refresh' ? 'before' : 'after';
+    vi.mocked(f.api.get).mockImplementation(async <T>(path: string, query?: Query) => {
+      const answer = (await get(path, query)) as T;
+      if (path.endsWith('/history') && query?.[waits] !== undefined) await held;
+      return answer;
+    });
+    f.history.say(said(150));
+    const reads =
+      first === 'refresh'
+        ? [controller.earlier('s'), controller.refresh('s').then(release)]
+        : [controller.earlier('s').then(release), controller.refresh('s')];
+    await Promise.all(reads);
+    expect(texts(state().saved?.messages)).toEqual(
+      Array.from({ length: 151 }, (_, index) => `message ${index}`),
+    );
+  },
+);
+
+it('reads earlier history again after a rewind took all that was shown', async () => {
   const f = await fixture();
-  let rows = Array.from({ length: 250 }, (_, i) => String(i));
-  vi.spyOn(f.api, 'get').mockImplementation(async <T>(path: string, query?: Query) => {
-    if (!path.endsWith('/messages')) return f.session as T;
-    const offset = Number(query?.offset ?? 0);
-    const limit = Number(query?.limit ?? 100);
-    return {
-      session_id: 's',
-      total: rows.length,
-      revision: 1,
-      messages: rows
-        .slice(offset, offset + limit)
-        .map((text) => ({ role: 'user', content: [{ type: 'text', text }] })),
-    } as T;
+  f.history.sayAll(
+    Array.from({ length: 150 }, (_, index) => ({ ...said(index), turn_id: `turn-${index >> 1}` })),
+  );
+  const { controller, state } = await reopened(f);
+  f.history.rewind('turn-25');
+  await controller.refresh('s');
+  expect(state().saved?.messages).toEqual([]);
+  expect(state().saved?.earlier).toBe(true);
+  await controller.earlier('s');
+  expect(texts(state().saved?.messages)).toEqual(
+    Array.from({ length: 50 }, (_, index) => `message ${index}`),
+  );
+});
+
+it('reads earlier history to rewind more turns than are loaded', async () => {
+  const f = await fixture();
+  f.history.sayAll(
+    Array.from({ length: 150 }, (_, index) => ({ ...said(index), turn_id: `turn-${index >> 1}` })),
+  );
+  const { controller } = await reopened(f, { pageSize: 10 });
+  vi.spyOn(f.api, 'getTagged').mockResolvedValue({
+    value: f.history.page({ limit: 1 }),
+    etag: 'tag',
   });
-  const shown = () =>
-    f.state().saved?.messages.map((message) => (message.content[0] as { text: string }).text);
-  await f.controller.refresh('s');
-  expect(f.state().offset).toBe(150);
-  await f.controller.earlier('s');
-  expect(shown()).toEqual(rows.slice(50));
-  // meka's turn retention sweeps the oldest turns; the revision stays, and the rest move up.
-  rows = rows.slice(30);
-  await f.controller.earlier('s');
-  expect(new Set(shown()).size).toBe(shown()?.length);
-  expect(shown()).toEqual(rows.slice(f.state().offset));
-  await f.controller.earlier('s');
-  expect(f.state().offset).toBe(0);
-  expect(shown()).toEqual(rows);
+  const mutate = vi.spyOn(f.api, 'mutate').mockResolvedValue(undefined);
+  await controller.rewindLast('s', 8);
+  expect(mutate).toHaveBeenCalledWith(
+    'POST',
+    '/v1/sessions/s/rewind',
+    { turn_id: 'turn-67' },
+    undefined,
+    'tag',
+  );
+});
+
+it('does not bring back what a rewind took, from a page read before it', async () => {
+  const f = await fixture();
+  f.history.sayAll(
+    Array.from({ length: 150 }, (_, index) => ({ ...said(index), turn_id: `turn-${index >> 1}` })),
+  );
+  const { controller, state } = await reopened(f);
+  const get = vi.mocked(f.api.get).getMockImplementation()!;
+  let release!: () => void;
+  vi.mocked(f.api.get).mockImplementation(async <T>(path: string, query?: Query) => {
+    const answer = (await get(path, query)) as T;
+    if (path.endsWith('/history') && query?.before !== undefined)
+      await new Promise<void>((resolve) => (release = resolve));
+    return answer;
+  });
+  // The page is read, then everything from turn 20 on is rewound before it is shown.
+  const reading = controller.earlier('s');
+  await vi.waitFor(() => expect(release).toBeDefined());
+  f.history.rewind('turn-20');
+  await controller.refresh('s');
+  release();
+  await reading;
+  expect(texts(state().saved?.messages)).toEqual(
+    Array.from({ length: 40 }, (_, index) => `message ${index}`),
+  );
 });
 
 it('reconciles a finished preview even when a later history fetch supersedes the terminal fetch', async () => {
   const f = await fixture();
   await f.event('turn.started', { turn_id: 'finished' });
   await f.event('assistant_text.delta', { turn_id: 'finished', text: 'old preview' });
-  let complete: (value: Schema['MessagesResponse']) => void = () => {};
+  let complete: (value: Schema['HistoryResponse']) => void = () => {};
   let reads = 0;
   vi.spyOn(f.api, 'get').mockImplementation(async <T>(path: string) => {
-    if (!path.endsWith('/messages')) return f.session as T;
+    if (!path.endsWith('/history')) return f.session as T;
     if (reads++ === 0)
-      return (await new Promise<Schema['MessagesResponse']>((resolve) => {
+      return (await new Promise<Schema['HistoryResponse']>((resolve) => {
         complete = resolve;
       })) as T;
-    return f.saved as T;
+    return f.history.page() as T;
   });
   await f.event('turn.finished', { turn_id: 'finished' });
   await f.controller.refresh('s');
   expect(f.state().blocks).toEqual([]);
-  complete(f.saved);
+  complete(f.history.page());
   await Promise.resolve();
   expect(f.state().blocks).toEqual([]);
 });
@@ -2314,96 +2544,94 @@ it.each([
   expect(f.controller.working).toBe(false);
 });
 
-it('reads only the messages after those it holds, checking the last one is still in place', async () => {
+it('reads earlier history past a compaction for the turns it kept, asking the context once', async () => {
   const f = await fixture();
-  const message = (index: number): Schema['MessageView'] => ({
-    role: index % 2 ? 'assistant' : 'user',
-    content: [{ type: 'text', text: `message ${index}` }],
-  });
-  let server = Array.from({ length: 150 }, (_, index) => message(index));
-  vi.mocked(f.api.get).mockImplementation(async <T>(path: string, query?: Query) => {
-    if (!path.endsWith('/messages')) return structuredClone(f.session) as T;
-    const offset = Number(query?.offset ?? 0);
-    const limit = Number(query?.limit ?? server.length);
-    return {
-      session_id: 's',
-      messages: structuredClone(server.slice(offset, offset + limit)),
-      total: server.length,
-      revision: 1,
-    } as T;
-  });
-  await f.controller.refresh('s');
-  expect(f.state().offset).toBe(50);
-  expect(f.state().saved?.messages).toHaveLength(100);
-  server = [...server, message(150), message(151)];
-  vi.mocked(f.api.get).mockClear();
-  await f.controller.refresh('s');
-  const reads = vi
-    .mocked(f.api.get)
-    .mock.calls.filter(([path]) => path.endsWith('/messages'))
-    .map(([, query]) => query);
-  expect(reads).toEqual([
-    { offset: 0, limit: 1 },
-    { offset: 149, limit: 3 },
-  ]);
-  expect(f.state().saved?.messages.map((m) => (m.content[0] as { text: string }).text)).toEqual(
-    Array.from({ length: 102 }, (_, index) => `message ${index + 50}`),
+  const turn = (k: number) => [
+    { role: 'user', content: [{ type: 'text' as const, text: `Q${k}` }], turn_id: `t${k}` },
+    { role: 'assistant', content: [{ type: 'text' as const, text: `A${k}` }], turn_id: `t${k}` },
+  ];
+  // Turns 0 to 9 at positions 1 to 20, a compaction that kept turns 8 and 9, then 10 and 11.
+  f.history.sayAll(Array.from({ length: 10 }, (_, k) => turn(k)).flat());
+  f.history.compact({ kept_recent: true });
+  f.history.sayAll([...turn(10), ...turn(11)]);
+  const context = [17, 18, 19, 20, 21, 22, 23, 24, 25];
+  const get = vi.mocked(f.api.get).getMockImplementation()!;
+  vi.mocked(f.api.get).mockImplementation(async <T>(path: string, query?: Query) =>
+    path.endsWith('/context/messages')
+      ? ({
+          session_id: 's',
+          position: 25,
+          messages: context.map((position) => ({
+            position,
+            created_at: '',
+            role: 'user',
+            content: [],
+          })),
+        } as T)
+      : ((await get(path, query)) as T),
   );
-  // Retention removed old turns without a new revision: everything moved up, so it reads again.
-  server = server.slice(10);
+  const { controller } = await reopened(f, { pageSize: 6 });
+  vi.spyOn(f.api, 'getTagged').mockResolvedValue({
+    value: f.history.page({ limit: 1 }),
+    etag: 'tag',
+  });
+  const mutate = vi.spyOn(f.api, 'mutate').mockResolvedValue(undefined);
+  await controller.rewindLast('s', 4);
+  expect(mutate).toHaveBeenCalledWith(
+    'POST',
+    '/v1/sessions/s/rewind',
+    { turn_id: 't8' },
+    undefined,
+    'tag',
+  );
+  expect(
+    vi.mocked(f.api.get).mock.calls.filter(([path]) => path.endsWith('/context/messages')),
+  ).toHaveLength(1);
+  // Turn 7 was summarized: no page before can hold more, so none is read for it.
+  const reads = vi.mocked(f.api.get).mock.calls.length;
+  await expect(controller.rewindLast('s', 6)).rejects.toThrow('Only the last 4 turns');
+  expect(
+    vi
+      .mocked(f.api.get)
+      .mock.calls.slice(reads)
+      .filter(([, query]) => query?.before !== undefined),
+  ).toEqual([]);
+});
+
+it('stops reading earlier history at a compaction that kept nothing', async () => {
+  const f = await fixture();
+  f.history.sayAll(
+    Array.from({ length: 40 }, (_, index) => ({ ...said(index), turn_id: `turn-${index >> 1}` })),
+  );
+  f.history.compact();
+  f.history.sayAll([
+    { role: 'user', content: [{ type: 'text', text: 'After.' }], turn_id: 'after' },
+    { role: 'assistant', content: [{ type: 'text', text: 'Done.' }], turn_id: 'after' },
+  ]);
+  const { controller } = await reopened(f, { pageSize: 5 });
   vi.mocked(f.api.get).mockClear();
-  await f.controller.refresh('s');
-  const again = vi
-    .mocked(f.api.get)
-    .mock.calls.filter(([path]) => path.endsWith('/messages'))
-    .map(([, query]) => query);
-  // From one before, in case the page opens on results whose calls that one made.
-  expect(again).toContainEqual({ offset: 49, limit: 93 });
-  expect(f.state().saved?.messages[0]).toEqual(message(60));
+  await expect(controller.rewindLast('s', 3)).rejects.toThrow('Only the last 1 turn');
+  expect(vi.mocked(f.api.get).mock.calls.filter(([path]) => path.endsWith('/history'))).toEqual([]);
+});
+
+it('shares one read of earlier history among those who ask while it is on its way', async () => {
+  const f = await fixture();
+  f.history.sayAll(Array.from({ length: 150 }, (_, index) => said(index)));
+  const { controller, state } = await reopened(f);
+  vi.mocked(f.api.get).mockClear();
+  await Promise.all([controller.earlier('s'), controller.earlier('s')]);
+  expect(
+    vi.mocked(f.api.get).mock.calls.filter(([path]) => path.endsWith('/history')),
+  ).toHaveLength(1);
+  expect(state().saved?.messages).toHaveLength(150);
 });
 
 it('opens with fewer messages on a device saving data', async () => {
-  const api = new ApiClient('https://example.org');
-  const server = Array.from({ length: 80 }, (_, index) => ({
-    role: 'user',
-    content: [{ type: 'text', text: String(index) }],
-  }));
-  vi.spyOn(api, 'get').mockImplementation(async <T>(path: string, query?: Query) => {
-    if (!path.endsWith('/messages'))
-      return {
-        id: 's',
-        created_at: '2026-09-17T00:00:00Z',
-        updated_at: '2026-09-17T00:00:00Z',
-        approvals: true,
-        profile: 'mock',
-        title: '',
-        capabilities: {
-          supports_permission_prompts: true,
-          supports_reasoning_stream: false,
-          answers_prompts_on_return: false,
-        },
-        turn_in_flight: false,
-      } as T;
-    const offset = Number(query?.offset ?? 0);
-    const limit = Number(query?.limit ?? server.length);
-    return {
-      session_id: 's',
-      messages: server.slice(offset, offset + limit),
-      total: server.length,
-      revision: 0,
-    } as T;
-  });
-  vi.spyOn(api, 'stream').mockResolvedValue(
-    new Response(new ReadableStream({ start() {} }), {
-      headers: { 'Content-Type': 'text/event-stream' },
-    }),
-  );
-  const controller = new SessionController(api, false, undefined, () => 30);
-  controllers.push(controller);
-  controller.select('s');
-  await vi.waitFor(() => expect(controller.getSnapshot()[0]?.saved).toBeDefined());
-  expect(controller.getSnapshot()[0]?.offset).toBe(50);
-  expect(controller.getSnapshot()[0]?.saved?.messages).toHaveLength(30);
+  const f = await fixture(false);
+  f.history.sayAll(Array.from({ length: 80 }, (_, index) => said(index)));
+  const { state } = await reopened(f, { pageSize: 30 });
+  expect(state().saved?.messages).toHaveLength(30);
+  expect(state().saved?.earlier).toBe(true);
 });
 
 /** A controller following the server feed, with a session `open` here on its own feed too. */
@@ -2420,8 +2648,7 @@ async function serverFixture(records: Record<string, Partial<Schema['SessionResp
     return new Response(body, { headers: { 'Content-Type': 'text/event-stream' } });
   });
   const get = vi.spyOn(api, 'get').mockImplementation(async <T>(path: string) => {
-    if (path.endsWith('/messages'))
-      return { session_id: 'open', messages: [], total: 0, revision: 0 } as T;
+    if (path.endsWith('/history')) return { session_id: 'open', position: 0, items: [] } as T;
     if (path.endsWith('/inbox')) return { session_id: 'open', items: [] } as T;
     const id = path.split('/').pop()!;
     return { id, title: '', approvals: true, profile: 'mock', project: '', ...records[id] } as T;
@@ -2435,7 +2662,7 @@ async function serverFixture(records: Record<string, Partial<Schema['SessionResp
   await vi.advanceTimersByTimeAsync(0);
   let cursor = 0;
   async function event(name: string, payload: unknown) {
-    writers['/v1/stream']!.enqueue(
+    writers['/v1/feed']!.enqueue(
       new TextEncoder().encode(
         `id: ${++cursor}\nevent: ${name}\ndata: ${JSON.stringify(payload)}\n\n`,
       ),

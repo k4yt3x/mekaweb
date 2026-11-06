@@ -15,7 +15,7 @@ describe('authenticated transport', () => {
       const report = vi.fn();
       const client = new ApiClient('https://example.org', undefined, report);
       const fetcher = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new TypeError('offline'));
-      const reads = Promise.allSettled([client.get('/v1/profiles'), client.get('/v1/memory')]);
+      const reads = Promise.allSettled([client.get('/v1/profiles'), client.get('/v1/memories')]);
       await vi.runAllTimersAsync();
       for (const result of await reads) {
         expect(result.status).toBe('rejected');
@@ -128,18 +128,25 @@ describe('authenticated transport', () => {
     client.reportConnectionError(new TypeError('late failure'));
     expect(report).not.toHaveBeenCalled();
   });
-  it.each(['https://meka.run/errors/', 'https://meka.so/errors/'])(
-    'recognizes exact meka Problem Details identifiers under %s',
+  it.each(['https://meka.bot/errors/', 'https://meka.run/errors/', 'https://meka.so/errors/'])(
+    'recognizes a meka Problem Details identifier under %s by the identifier alone',
     (prefix) => {
       const error = new ApiError(409, { type: prefix + 'turn-in-flight' });
       expect(error.is('turn-in-flight')).toBe(true);
       expect(error.is('session-locked')).toBe(false);
     },
   );
-  it('does not classify an unrelated Problem Details domain as meka', () => {
-    expect(
-      new ApiError(409, { type: 'https://example.com/errors/turn-in-flight' }).is('turn-in-flight'),
-    ).toBe(false);
+  it.each([
+    'urn:mekaweb:turn-in-flight',
+    'https://meka.bot/turn-in-flight',
+    'https://meka.bot/errors/not-turn-in-flight',
+    'https://meka.bot/errors/turn-in-flight/more',
+    '',
+  ])('does not take %j for a turn in flight', (type) => {
+    expect(new ApiError(409, { type }).is('turn-in-flight')).toBe(false);
+  });
+  it('does not classify a problem without a type', () => {
+    expect(new ApiError(409, {}).is('turn-in-flight')).toBe(false);
   });
   it('says what a Problem Detail says, with the provider’s response meka relays', () => {
     expect(
@@ -191,7 +198,7 @@ describe('authenticated transport', () => {
       'X-Mekaweb-Batch': '500',
     }));
     await client.get('/v1/info');
-    await client.stream('/v1/stream', undefined, undefined, new AbortController().signal);
+    await client.stream('/v1/feed', undefined, undefined, new AbortController().signal);
     expect(fetcher.mock.calls[0]?.[1]?.headers).not.toHaveProperty('X-Mekaweb-Batch');
     expect(fetcher.mock.calls[1]?.[1]?.headers).toHaveProperty('X-Mekaweb-Batch', '500');
   });
@@ -224,7 +231,7 @@ describe('authenticated transport', () => {
       .spyOn(globalThis, 'fetch')
       .mockResolvedValue(
         new Response(
-          JSON.stringify({ type: 'https://meka.run/errors/auth', title: 'Unauthorized' }),
+          JSON.stringify({ type: 'https://meka.bot/errors/auth', title: 'Unauthorized' }),
           { status: 401 },
         ),
       );

@@ -3,16 +3,19 @@ import { useShortcut } from '../components/use-shortcut';
 import {
   Fragment,
   useEffect,
+  useEffectEvent,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
   useSyncExternalStore,
   type ReactNode,
+  type RefObject,
 } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   ArrowDown,
+  ChevronRight,
   FoldVertical,
   GitBranch,
   MessageCircleQuestion,
@@ -38,9 +41,10 @@ import type {
   ImageAttachment,
 } from '../session/controller';
 import { compactionNote } from '../session/compaction';
+import { contextQuestion, rewindableTurns, type ConversationMessage } from '../session/history';
 import { isSessionRunning, UnsentMessage } from '../session/controller';
 import { useTextDraft } from '../session/drafts';
-import { subagentsQuery, useSessionStates } from '../session/hooks';
+import { subagentsQuery, useContextPositions, useSessionStates } from '../session/hooks';
 import { useMarkSeen } from '../session/unread';
 import { useTurnRecords } from '../session/turn-records';
 import { Button } from '../components/ui/button';
@@ -68,7 +72,7 @@ import {
   resendable,
   responseActivityIndicator,
   spawnedAgent,
-  turnIndex,
+  speakers,
   type HistoryMessage,
   type LiveGroup,
   type ToolResultBlock,
@@ -156,6 +160,8 @@ export function Conversation({ state }: { state: SessionState }) {
     held.current = undefined;
   };
   const lastScroll = useRef({ top: 0, height: 0 });
+  // Where the reader was as earlier history was asked for, to keep them there once it comes in.
+  const prepending = useRef<{ place: Position; height: number }>(undefined);
   const [showLatest, setShowLatest] = useState(false);
   const [contentBelow, setContentBelow] = useState(false);
   function jumpToLatest() {
@@ -173,9 +179,12 @@ export function Conversation({ state }: { state: SessionState }) {
     jumpToLatest();
   }
   const history = useMemo(() => groupToolResults(state.saved?.messages ?? []), [state.saved]);
+  const firstShown = state.saved?.messages[0]?.position;
   const messages = useMemo(() => groupAgentMessages(history.messages), [history.messages]);
-  // What saved history shows already is not shown again; what is left may carry on its reply.
-  const { groups: live, continued } = useMemo(
+  // Who says what, for the agent's headings and a reply's actions; see `speakers`.
+  const said = useMemo(() => speakers(messages, showTurnContext), [messages, showTurnContext]);
+  // What saved history shows already is not shown again.
+  const { groups: live } = useMemo(
     () =>
       liveAfterSaved(
         groupLiveMessages(state.blocks, state.submissions),
@@ -184,10 +193,18 @@ export function Conversation({ state }: { state: SessionState }) {
     [state.blocks, state.submissions, state.saved],
   );
   const activity = responseActivityIndicator(state, live);
+  // Live, the same: the agent's words head a block only after someone else's.
+  const liveHeaded = (index: number) =>
+    index > 0 ? live[index - 1]!.kind !== 'agent' : !said.agentLast;
+  // A compaction's own turn, run between turns, compacts until it ends; once the history holds it,
+  // its line is drawn where this one was. Its turn wrote nothing else to the history.
+  const ownTurn = state.saved?.messages.filter((message) => message.turn_id === state.turnId);
+  const landed = ownTurn?.length === 1 && Boolean(ownTurn[0]!.compaction);
   const waiting =
-    connectionIssue &&
-    activity &&
-    ['connecting', 'reconnecting', 'disconnected'].includes(activity.status)
+    (connectionIssue &&
+      activity &&
+      ['connecting', 'reconnecting', 'disconnected'].includes(activity.status)) ||
+    (activity?.status === 'compacting' && landed)
       ? undefined
       : activity;
   const problems = recoverableSubmissions(state.submissions, state.notices);
@@ -222,7 +239,11 @@ export function Conversation({ state }: { state: SessionState }) {
       onError={setFeedbackError}
     />
   );
-  const appendActivity = waiting && live[waiting.index - 1]?.kind === 'agent';
+  // Below the agent's live words, except a compaction, whose line stands across the conversation.
+  const appendActivity =
+    waiting && waiting.status !== 'compacting' && live[waiting.index - 1]?.kind === 'agent'
+      ? waiting.status
+      : undefined;
   // The turn running, whose steps fold only as the agent says more after them; one started
   // elsewhere, and named nowhere here yet, is the one saved history ends in.
   const running = isSessionRunning(state);
@@ -249,7 +270,15 @@ export function Conversation({ state }: { state: SessionState }) {
   const [editing, setEditing] = useState<number>();
   // Read once per history, not on every streamed token.
   const saved = useMemo(() => state.saved?.messages ?? [], [state.saved]);
-  const turns = useMemo(() => turnIndex(saved, state.offset), [saved, state.offset]);
+  // Which turns the context holds is the history's to say, but for those only the context knows.
+  const question = useMemo(() => contextQuestion(saved), [saved]);
+  // Read only where the actions show, and not while a turn may still take its prompt back.
+  const context = useContextPositions(state.id, canWithdraw && !running ? question : undefined);
+  const earlier = state.saved?.earlier ?? false;
+  const turns = useMemo(
+    () => rewindableTurns(saved, { earlier, context }),
+    [saved, earlier, context],
+  );
   const kinds = useMemo(() => messages.map(turnKind), [messages]);
   // Whether the agent says anything in saved history after each group.
   const savedSaysAfter = useMemo(() => {
@@ -289,10 +318,10 @@ export function Conversation({ state }: { state: SessionState }) {
     !state.loading &&
     !changes.busy;
   const run = (action: () => Promise<unknown>) => void changes.run(action);
-  const resend = (count: number, message: string, images: ImageAttachment[], skill: string) =>
+  const resend = (turnId: string, message: string, images: ImageAttachment[], skill: string) =>
     run(async () => {
       try {
-        await controller?.resend(state.id, count, message, images, skill);
+        await controller?.resend(state.id, turnId, message, images, skill);
         setEditing(undefined);
       } catch (error) {
         if (!(error instanceof UnsentMessage)) throw error;
@@ -312,24 +341,29 @@ export function Conversation({ state }: { state: SessionState }) {
   function turnActions(group: HistoryMessage[], position: number) {
     const first = group[0]!;
     const kind = kinds[position];
-    const label = first.message.turn_label;
-    const turn = label ? turns.get(label) : undefined;
+    // Only a turn the context still holds can be taken back, or branched before.
+    const opened = first.message.turn_id;
+    const turn = opened ? turns.get(opened) : undefined;
     const turnId = group.at(-1)?.message.turn_id;
     const record = turnId && turnEnds.get(turnId) === position ? records?.get(turnId) : undefined;
     const summary = record?.ended_at ? <TurnSummary turn={record} /> : undefined;
     if (!kind)
       return summary ? { actions: <TurnActions label="Turn" latest summary={summary} /> } : {};
+    // A reply that goes on past a compaction's line, or is still being written, shows its actions
+    // once, at its end.
+    if (kind === 'reply' && (said.goesOn[position] || (runningTurn && turnId === runningTurn)))
+      return {};
     const later = (turn?.turns ?? 1) - 1;
     const removed = `${later} later turn${later === 1 ? '' : 's'}`;
     const files = 'Files the agent changed stay changed.';
     if (kind === 'input') {
       const text = messageText([first.message]);
       const again = resendable(first.message);
-      const at = state.offset + first.index;
+      const at = first.message.position;
       // A steer meka folded into a tool round or a nudge is part of the turn, not its opening.
       const opens = turn?.start === first.index;
       return {
-        editor: editing === at && turn && opens && again && (
+        editor: at !== undefined && editing === at && turn && opens && again && (
           <MessageEditor
             initial={again.text}
             images={again.images.length}
@@ -344,7 +378,7 @@ export function Conversation({ state }: { state: SessionState }) {
                 : undefined
             }
             onCancel={() => setEditing(undefined)}
-            onSend={(message) => resend(turn.turns, message, again.images, again.skill)}
+            onSend={(message) => resend(opened!, message, again.images, again.skill)}
           />
         ),
         actions: (
@@ -369,7 +403,7 @@ export function Conversation({ state }: { state: SessionState }) {
                     description: `Your message${later ? ', its reply, and ' + removed : ' and its reply'} are removed. ${files}`,
                     action: 'Delete',
                   }}
-                  onRun={() => run(async () => controller?.rewind(state.id, turn.turns))}
+                  onRun={() => run(async () => controller?.rewind(state.id, opened!))}
                 />
               </>
             )}
@@ -378,11 +412,15 @@ export function Conversation({ state }: { state: SessionState }) {
       };
     }
     const text = messageText(
-      group.flatMap(({ message }) => (message.role === 'assistant' ? [message] : [])),
+      messages
+        .slice(said.runs[position] ?? position, position + 1)
+        .flat()
+        .flatMap(({ message }) => (message.role === 'assistant' ? [message] : [])),
     );
     const opening = turn && saved[turn.start];
-    // A turn that opened with a compaction summary has no message to send again.
-    const again = opening && !opening.compaction ? resendable(opening) : undefined;
+    // A turn a compaction cut in two is held from its first round after it, the agent's: its
+    // message is in the summary, and there is nothing to send again.
+    const again = opening?.role === 'user' ? resendable(opening) : undefined;
     return {
       actions: (
         <TurnActions label="Reply actions" latest={position === latestReply} summary={summary}>
@@ -402,7 +440,7 @@ export function Conversation({ state }: { state: SessionState }) {
                       }
                     : undefined
                 }
-                onRun={() => again && resend(turn.turns, again.text, again.images, again.skill)}
+                onRun={() => again && resend(opened!, again.text, again.images, again.skill)}
               />
               <HistoryAction
                 icon={<GitBranch size={15} />}
@@ -411,7 +449,7 @@ export function Conversation({ state }: { state: SessionState }) {
                 confirm={undefined}
                 onRun={() =>
                   run(async () => {
-                    const id = await controller?.branch(state.id, later);
+                    const id = await controller?.branch(state.id, turn.next);
                     if (id) location.hash = '/sessions/' + encodeURIComponent(id);
                   })
                 }
@@ -433,6 +471,19 @@ export function Conversation({ state }: { state: SessionState }) {
     if (held.current) placePosition(node, held.current);
     else node.scrollTop = node.scrollHeight;
   }, [key]);
+  // Earlier history came in above the reader: they stay where they were reading.
+  useLayoutEffect(() => {
+    const node = scroller.current;
+    const asked = prepending.current;
+    prepending.current = undefined;
+    if (!node || !asked || following.current) return;
+    // Above every message there is none to hold to, and one the page joined onto, which starts
+    // earlier now, is not where it was: what came in above is scrolled past instead.
+    const anchor = asked.place.anchor;
+    if (anchor && node.querySelector(`[data-message="${anchor.message}"]`))
+      placePosition(node, asked.place);
+    else node.scrollTop = asked.place.top + node.scrollHeight - asked.height;
+  }, [firstShown]);
   useEffect(() => {
     const node = scroller.current;
     const body = content.current;
@@ -485,6 +536,8 @@ export function Conversation({ state }: { state: SessionState }) {
                 positions.set(key, readPosition(node, following.current));
               }
               lastScroll.current = { top, height };
+              if (prepending.current)
+                prepending.current = { place: readPosition(node, false), height };
               setShowLatest(!following.current);
               setContentBelow(remaining > 1);
             }
@@ -509,21 +562,21 @@ export function Conversation({ state }: { state: SessionState }) {
                   following.current = false;
               }}
             >
-              {state.offset > 0 && (
-                <Button
-                  variant="secondary"
-                  onClick={() => {
+              {state.saved?.earlier && (
+                <HistoryStart
+                  key={state.saved.before}
+                  root={scroller}
+                  onReach={() => {
                     const node = scroller.current;
-                    const height = node?.scrollHeight ?? 0;
-                    void controller?.earlier(state.id).then(() =>
-                      requestAnimationFrame(() => {
-                        if (node) node.scrollTop += node.scrollHeight - height;
-                      }),
-                    );
+                    // Where the reader is, so what comes in above does not move them.
+                    if (node && !following.current)
+                      prepending.current = {
+                        place: readPosition(node, false),
+                        height: node.scrollHeight,
+                      };
+                    void controller?.earlier(state.id);
                   }}
-                >
-                  Load earlier messages ({state.offset})
-                </Button>
+                />
               )}
               {/* A new session's first message shows while its empty history loads; the notice
                   would only push it down for a moment. */}
@@ -538,11 +591,11 @@ export function Conversation({ state }: { state: SessionState }) {
                 !queued.length && <Empty title="Send a message to begin" />}
               {messages.map((group, position) => (
                 <Message
-                  key={`${state.saved?.revision}:${state.offset + group[0]!.index}`}
-                  index={state.offset + group[0]!.index}
+                  key={group[0]!.message.position}
+                  position={group[0]!.message.position}
+                  headed={said.heads[position] ?? true}
                   sessionId={state.id}
                   messages={group}
-                  offset={state.offset}
                   toolResults={history.results}
                   showTurnContext={showTurnContext}
                   fold={foldSteps}
@@ -556,18 +609,12 @@ export function Conversation({ state }: { state: SessionState }) {
                   {...turnActions(group, position)}
                 />
               ))}
-              {state.partial && (
-                <div className="notice replay-notice">
-                  Live replay may be incomplete. Saved conversation and live preview are shown
-                  separately until the turn is reconciled.
-                </div>
-              )}
               {(live.length > 0 || waiting) && (
                 <section className="live-preview">
                   {live.map((group, index) => (
                     <Fragment key={group.key}>
                       {waiting?.index === index && !appendActivity && (
-                        <WaitingMessage status={waiting.status} />
+                        <WaitingMessage status={waiting.status} headed={liveHeaded(index)} />
                       )}
                       {group.kind === 'user' ? (
                         sentMessage(group.submission)
@@ -575,15 +622,14 @@ export function Conversation({ state }: { state: SessionState }) {
                         <Message
                           sessionId={state.id}
                           messages={groupToolResults([group.message]).messages}
-                          offset={0}
                           toolResults={noToolResults}
                           showTurnContext={showTurnContext}
                         />
                       ) : (
                         <article
-                          className={`message message-assistant${index === 0 && continued ? ' message-continued' : ''}`}
+                          className={`message message-assistant${liveHeaded(index) ? '' : ' message-continued'}`}
                         >
-                          {!(index === 0 && continued) && (
+                          {liveHeaded(index) && (
                             <MessageHeader
                               author="Agent"
                               status={isSessionRunning(state) ? 'Live' : 'Saving…'}
@@ -597,15 +643,15 @@ export function Conversation({ state }: { state: SessionState }) {
                             ended={!running || liveSaysAfter.after[index]!}
                             hold={showLatest}
                           />
-                          {waiting?.index === index + 1 && (
-                            <AgentActivity status={waiting.status} />
+                          {appendActivity && waiting?.index === index + 1 && (
+                            <AgentActivity status={appendActivity} />
                           )}
                         </article>
                       )}
                     </Fragment>
                   ))}
                   {waiting?.index === live.length && !appendActivity && (
-                    <WaitingMessage status={waiting.status} />
+                    <WaitingMessage status={waiting.status} headed={liveHeaded(live.length)} />
                   )}
                 </section>
               )}
@@ -689,34 +735,72 @@ export function Conversation({ state }: { state: SessionState }) {
 }
 function WaitingMessage({
   status,
+  headed,
 }: {
   status: NonNullable<ReturnType<typeof responseActivityIndicator>>['status'];
+  /** Whether it heads what the agent says, rather than carrying on from it; see `said`. */
+  headed: boolean;
 }) {
+  if (status === 'compacting') return <CompactingLine />;
   return (
-    <article className="message message-assistant agent-waiting">
-      <MessageHeader author="Agent" />
+    <article
+      className={`message message-assistant agent-waiting${headed ? '' : ' message-continued'}`}
+    >
+      {headed && <MessageHeader author="Agent" />}
       <AgentActivity status={status} />
     </article>
   );
 }
+/**
+ * A compaction under way, drawn as the line it leaves across the conversation, its two halves drawn
+ * in toward the label as what is above them is.
+ */
+function CompactingLine() {
+  return (
+    <article className="message message-summary">
+      <p className="compaction-rule compaction-running">
+        <span className="compaction-label" aria-hidden="true">
+          <FoldVertical size={16} />
+          Compacting context…
+        </span>
+        {/* A status region is read out as what is in it changes, so the words come once it is
+            there rather than with it. */}
+        <span className="sr-only" role="status" ref={announceCompacting} />
+      </p>
+    </article>
+  );
+}
+/**
+ * Writes `text` into a live region a frame after it is drawn, so it is read out. One for each text,
+ * made once: a ref made again each render would be attached again, and read out again.
+ */
+function announce(text: string) {
+  return (node: HTMLElement | null) => {
+    if (!node) return;
+    const frame = requestAnimationFrame(() => (node.textContent = text));
+    return () => cancelAnimationFrame(frame);
+  };
+}
+const announceCompacting = announce('Compacting context…');
 function AgentActivity({
   status,
 }: {
-  status: NonNullable<ReturnType<typeof responseActivityIndicator>>['status'];
+  /** A compaction draws its line instead; see `CompactingLine`. */
+  status: Exclude<
+    NonNullable<ReturnType<typeof responseActivityIndicator>>['status'],
+    'compacting'
+  >;
 }) {
   const Icon =
     status === 'approval'
       ? ShieldCheck
       : status === 'question'
         ? MessageCircleQuestion
-        : status === 'compacting'
-          ? FoldVertical
-          : status === 'disconnected'
-            ? Unplug
-            : undefined;
+        : status === 'disconnected'
+          ? Unplug
+          : undefined;
   const label = {
     working: 'Agent is working',
-    compacting: 'Compacting context…',
     approval: 'Waiting for approval',
     question: 'Waiting for your answer',
     connecting: 'Connecting…',
@@ -786,8 +870,32 @@ function ScheduledFire({ job, prompt, text }: { job: string; prompt: string; tex
     </details>
   );
 }
+/** The top of the history held, which reads the page before it as it comes into view. */
+function HistoryStart({
+  root,
+  onReach,
+}: {
+  root: RefObject<HTMLElement | null>;
+  onReach: () => void;
+}) {
+  const start = useRef<HTMLDivElement>(null);
+  const reach = useEffectEvent(onReach);
+  useEffect(() => {
+    const element = start.current;
+    if (!element) return;
+    const observer = new IntersectionObserver(
+      (records) => {
+        if (records.some((record) => record.isIntersecting)) reach();
+      },
+      { root: root.current, rootMargin: '400px 0px 0px' },
+    );
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [root]);
+  return <div ref={start} className="history-start" />;
+}
 /** Who sent a message: the source its inbox items named, when every word came from that one. */
-function sender(message: Schema['MessageView']) {
+function sender(message: ConversationMessage) {
   const sources = new Set(
     message.content.flatMap((block) =>
       block.type === 'text' || block.type === 'invocation'
@@ -988,11 +1096,11 @@ function turnKind(group: HistoryMessage[]) {
 /** For a message the feed delivered whole, which answers no tool call. */
 const noToolResults: ReadonlyMap<ToolUseBlock, ToolResultBlock> = new Map();
 function Message({
-  index,
+  position,
+  headed = true,
   messages,
   sessionId,
   toolResults,
-  offset,
   showTurnContext,
   fold = false,
   ended = true,
@@ -1001,11 +1109,12 @@ function Message({
   editor,
 }: {
   /** Where a saved message sits in the history, which marks it as a place to return to. */
-  index?: number;
+  position?: number | undefined;
+  /** For the agent's: whether it heads what the agent says, rather than carrying on from it. */
+  headed?: boolean;
   messages: HistoryMessage[];
   sessionId: string;
   toolResults: ReadonlyMap<ToolUseBlock, ToolResultBlock>;
-  offset: number;
   showTurnContext: boolean;
   /** Whether an agent's finished runs of steps fold: see {@link Steps}. */
   fold?: boolean;
@@ -1031,40 +1140,46 @@ function Message({
   );
   if (message.compaction)
     return (
-      <article className="message message-summary" data-message={index}>
-        <aside className="compaction-marker" aria-label="Compaction boundary">
+      <article className="message message-summary" data-message={position}>
+        {/* A line across the conversation, as meka's screen draws it: what is above it the agent
+            now reads as the summary it opens to. */}
+        <aside aria-label="Compaction">
           <details
-            className="tool-card compaction-summary"
+            className="compaction"
             onToggle={(event) => setSummaryOpen(event.currentTarget.open)}
           >
-            <summary>
-              <span className="compaction-note">{compactionNote(message.compaction)}</span>
-              <span className="muted small">Compaction {message.compaction.generation}</span>
+            <summary className="compaction-rule">
+              <span className="compaction-label">
+                <FoldVertical size={16} aria-hidden="true" />
+                Context compacted
+                <ChevronRight className="compaction-chevron" size={14} aria-hidden="true" />
+              </span>
             </summary>
             {summaryOpen && (
               <div className="compaction-content">
-                <p className="muted small">
-                  This summary replaced {message.compaction.replaced_count} messages in the model
-                  context. Earlier history is available in transcript export.
+                <p className="compaction-note">
+                  {compactionNote(message.compaction)} Compaction {message.compaction.generation}.
                 </p>
-                {content.map(({ block, index }) => (
-                  <ContentBlock
-                    key={index}
-                    sessionId={sessionId}
-                    block={
-                      // The API marker identifies summaries; remove only its redundant display label.
-                      index === 0 && block.type === 'text'
-                        ? {
-                            ...block,
-                            text: block.text.replace(
-                              /^\[Conversation summary from session compaction\]\r?\n(?:\r?\n)?/,
-                              '',
-                            ),
-                          }
-                        : block
-                    }
-                  />
-                ))}
+                <div className="compaction-text">
+                  {content.map(({ block, index }) => (
+                    <ContentBlock
+                      key={index}
+                      sessionId={sessionId}
+                      block={
+                        // The API marker identifies summaries; remove only its redundant display label.
+                        index === 0 && block.type === 'text'
+                          ? {
+                              ...block,
+                              text: block.text.replace(
+                                /^\[Conversation summary from session compaction\]\r?\n(?:\r?\n)?/,
+                                '',
+                              ),
+                            }
+                          : block
+                      }
+                    />
+                  ))}
+                </div>
               </div>
             )}
           </details>
@@ -1074,9 +1189,11 @@ function Message({
   if (!content.length && message.content.length > 0) return null;
   const isUserInput = isInput(message);
   const turnOf = new Map(messages.map(({ index, message }) => [index, message.turn_id ?? '']));
+  // Saved messages are known by their place in the history; live ones by their place here.
+  const at = new Map(messages.map(({ index, message }) => [index, message.position ?? index]));
   const render = ({ block, index, messageIndex }: (typeof content)[number]) => (
     <ContentBlock
-      key={`${offset + messageIndex}:${index}`}
+      key={`${at.get(messageIndex)}:${index}`}
       block={block}
       sessionId={sessionId}
       result={block.type === 'tool_use' ? toolResults.get(block) : undefined}
@@ -1094,31 +1211,34 @@ function Message({
           part: ({ block }) => savedPart(block),
           step: ({ block }) =>
             savedStep(block, block.type === 'tool_use' ? toolResults.get(block) : undefined),
-          key: ({ index, messageIndex }) => `${offset + messageIndex}:${index}`,
+          key: ({ index, messageIndex }) => `${at.get(messageIndex)}:${index}`,
           call: ({ block, messageIndex }) =>
             block.type === 'tool_use' ? `${turnOf.get(messageIndex)}:${block.id}` : undefined,
           render,
         });
+  const continues = !headed && message.role === 'assistant';
   return (
     <article
-      className={`message message-${message.role}${isUserInput ? ' message-input' : ''}`}
-      data-message={index}
+      className={`message message-${message.role}${isUserInput ? ' message-input' : ''}${continues ? ' message-continued' : ''}`}
+      data-message={position}
     >
-      <MessageHeader
-        author={
-          message.content.length > 0 &&
-          message.content.every((block) => block.type === 'tool_result')
-            ? 'Tool'
-            : message.role === 'user'
-              ? isUserInput
-                ? sender(message)
-                : 'meka'
-              : message.role === 'assistant'
-                ? 'Agent'
-                : message.role
-        }
-        createdAt={message.created_at}
-      />
+      {!continues && (
+        <MessageHeader
+          author={
+            message.content.length > 0 &&
+            message.content.every((block) => block.type === 'tool_result')
+              ? 'Tool'
+              : message.role === 'user'
+                ? isUserInput
+                  ? sender(message)
+                  : 'meka'
+                : message.role === 'assistant'
+                  ? 'Agent'
+                  : message.role
+          }
+          createdAt={message.created_at}
+        />
+      )}
       {editor || body}
       {!editor && actions}
     </article>

@@ -1,6 +1,6 @@
 import type { Schema } from '../api/client';
 import { useSessionContext } from '../session/hooks';
-import { contextMetrics, contextNear } from '../session/usage';
+import { contextMetrics, contextNear, usageMetrics } from '../session/usage';
 import { Button } from '../components/ui/button';
 import { useWorkspace } from '../components/workspace';
 
@@ -41,8 +41,15 @@ export function ContextMeter({ session }: { session: string }) {
 
 const RING = 2 * Math.PI * 8;
 
-export function SessionContext({ context }: { context: Schema['ContextResponse'] }) {
+export function SessionContext({
+  context,
+  session,
+}: {
+  context: Schema['ContextResponse'];
+  session: Schema['SessionResponse'];
+}) {
   const metrics = contextMetrics(context);
+  const spent = usageMetrics(session.usage);
   return (
     <div className="context-details stack">
       <section aria-label="Context window">
@@ -67,12 +74,6 @@ export function SessionContext({ context }: { context: Schema['ContextResponse']
           )}
           <dt>Auto-compact</dt>
           <dd>{context.compact_at_percent != null ? `${context.compact_at_percent}%` : 'Off'}</dd>
-          {context.message_count != null && (
-            <>
-              <dt>Context messages</dt>
-              <dd>{context.message_count.toLocaleString()}</dd>
-            </>
-          )}
           <dt>Compactions</dt>
           <dd>{context.generation.toLocaleString()}</dd>
         </dl>
@@ -84,22 +85,22 @@ export function SessionContext({ context }: { context: Schema['ContextResponse']
             Cache hit rate
           </dt>
           <dd className="cache-hit-rate">
-            {metrics.cacheHitPercent != null
-              ? `${metrics.cacheHitPercent.toLocaleString(undefined, { maximumFractionDigits: 1 })}%`
+            {spent.cacheHitPercent != null
+              ? `${spent.cacheHitPercent.toLocaleString(undefined, { maximumFractionDigits: 1 })}%`
               : 'Not reported'}
           </dd>
           <dt>Input tokens</dt>
-          <dd>{metrics.totalInputTokens.toLocaleString()}</dd>
+          <dd>{spent.totalInputTokens.toLocaleString()}</dd>
           <dt>Uncached input</dt>
-          <dd>{context.totals.input_tokens.toLocaleString()}</dd>
+          <dd>{session.usage.input_tokens.toLocaleString()}</dd>
           <dt>Cache reads</dt>
-          <dd>{context.totals.cache_read_input_tokens.toLocaleString()}</dd>
+          <dd>{session.usage.cache_read_input_tokens.toLocaleString()}</dd>
           <dt>Cache writes</dt>
-          <dd>{context.totals.cache_creation_input_tokens.toLocaleString()}</dd>
+          <dd>{session.usage.cache_creation_input_tokens.toLocaleString()}</dd>
           <dt>Output tokens</dt>
-          <dd>{context.totals.output_tokens.toLocaleString()}</dd>
-          <dt>Turns completed</dt>
-          <dd>{context.totals.turns.toLocaleString()}</dd>
+          <dd>{session.usage.output_tokens.toLocaleString()}</dd>
+          <dt>Turns</dt>
+          <dd>{session.turn_count.toLocaleString()}</dd>
         </dl>
       </section>
     </div>

@@ -13,6 +13,16 @@ import {
 import { emptyComposerOptions } from './composer-options';
 import { parseEvent, record, SseParser, string, type EventData, type SseFrame } from './events';
 import { createId } from '../identifiers';
+import {
+  contextQuestion,
+  extendHistory,
+  prependHistory,
+  rewindableTurns,
+  startHistory,
+  type ConversationMessage,
+  type RewindableTurn,
+  type SavedHistory,
+} from './history';
 import { sessionNotice, type SessionNotice } from './notices';
 import { ServerFeed } from './server-feed';
 
@@ -36,10 +46,10 @@ export type LiveBlock =
   /** What the agent or a provider said during the turn, where it said it. */
   | { kind: 'notice'; level: SessionNotice['level']; text: string }
   /** Words that entered the conversation: a turn's opening, or a message an interrupt appended. */
-  | { kind: 'message'; message: Schema['MessageView']; opening: boolean }
+  | { kind: 'message'; message: ConversationMessage; opening: boolean }
   | { kind: 'submission'; key: string };
 /** A prompt parked for the person: a gated tool call, or an MCP server's question. meka counts
- * both in `approvals_pending` and takes both answers at the same route. */
+ * both in `requests_pending` and takes both answers at the same route. */
 export type Approval = {
   id: string;
   sessionId: string;
@@ -86,8 +96,7 @@ export interface SessionState {
    */
   feed: 'connecting' | 'connected' | 'reconnecting' | 'closed' | 'unavailable' | 'unloaded';
   error?: Error;
-  saved?: Schema['MessagesResponse'];
-  offset: number;
+  saved?: SavedHistory;
   loading: boolean;
   deleting: boolean;
   settingsPending: boolean;
@@ -96,7 +105,6 @@ export interface SessionState {
   /** A compaction is under way: a compaction's turn, or one meka opened inside a turn. */
   compacting: boolean;
   textStreaming: boolean;
-  partial: boolean;
   blocks: LiveBlock[];
   tools: Record<string, LiveTool>;
   approvals: Approval[];
@@ -159,6 +167,13 @@ interface Entry {
   openings: Set<string>;
   /** The turn meka runs a compaction as, which is compacting from start to end. */
   compactionTurn?: string | undefined;
+  /**
+   * While a compaction is under way, the generation of the latest one the history held as it began:
+   * it is under way until the history holds a later one.
+   */
+  compactionFrom?: number | undefined;
+  /** The page of earlier history on its way. */
+  loadingEarlier?: Promise<void> | undefined;
   notificationsSince: number;
   textIdleTimer?: ReturnType<typeof setTimeout>;
   preparing?: string;
@@ -170,14 +185,12 @@ function initial(id: string): SessionState {
   return {
     id,
     feed: 'connecting',
-    offset: 0,
     loading: false,
     deleting: false,
     settingsPending: false,
     running: false,
     compacting: false,
     textStreaming: false,
-    partial: false,
     blocks: [],
     tools: {},
     approvals: [],
@@ -200,7 +213,7 @@ function needsFollowing(submission: Submission) {
   );
 }
 /** A message as `message.appended` and history both type it, whatever order its keys arrive in. */
-function sameMessage(a: Schema['MessageView'], b: Schema['MessageView']) {
+function sameMessage(a: ConversationMessage, b: ConversationMessage) {
   const canonical = (value: unknown): unknown =>
     Array.isArray(value)
       ? value.map(canonical)
@@ -218,34 +231,30 @@ function sameMessage(a: Schema['MessageView'], b: Schema['MessageView']) {
   );
 }
 /**
- * Whether saved history, read from `offset`, holds a message the feed announced. An opening is
- * found by its turn alone, since an interrupt joined onto an opening nothing answered rewrites it
- * in place; a turn the history read begins inside opened in the earlier history not read yet.
+ * Whether saved history holds a message the feed announced. An opening is found by its turn alone,
+ * since an interrupt joined onto an opening nothing answered rewrites it in place; a turn the
+ * history read begins inside opened in the earlier history not read yet.
  */
-function holds(
-  saved: readonly Schema['MessageView'][],
-  offset: number,
-  message: Schema['MessageView'],
-  opening: boolean,
-) {
-  if (!opening || !message.turn_id) return saved.some((item) => sameMessage(item, message));
-  const first = saved.findIndex((item) => item.turn_id === message.turn_id);
-  return first >= 0 && (saved[first]!.role === 'user' || (first === 0 && offset > 0));
+function holds(saved: SavedHistory, message: ConversationMessage, opening: boolean) {
+  const { messages } = saved;
+  if (!opening || !message.turn_id) return messages.some((item) => sameMessage(item, message));
+  const first = messages.findIndex((item) => item.turn_id === message.turn_id);
+  return first >= 0 && (messages[first]!.role === 'user' || (first === 0 && saved.earlier));
 }
-/** Whether a message answers tool calls, which the message before it made. */
-function answersCalls(message: Schema['MessageView'] | undefined) {
-  return message?.role === 'user' && message.content.some((block) => block.type === 'tool_result');
+/** The generation of the latest compaction `saved` holds, 0 for none. */
+function latestCompaction(saved: SavedHistory | undefined) {
+  return Math.max(
+    0,
+    ...(saved?.messages ?? []).map((message) => message.compaction?.generation ?? 0),
+  );
 }
 /**
- * The messages read from `start`, one before `offset`, and where they begin: the one before is kept
- * only when the first at `offset` answers its calls, so history never opens on results whose calls
- * are not shown.
+ * Whether history before `messages` can hold a turn the context holds: any can before a compaction
+ * is loaded, and after one only those it kept, which `context` places.
  */
-function fromCalls(messages: Schema['MessageView'][], start: number, offset: number) {
-  if (start === offset) return { messages, offset };
-  return answersCalls(messages[1])
-    ? { messages, offset: start }
-    : { messages: messages.slice(1), offset };
+function mayHoldMore(messages: readonly ConversationMessage[], context?: ReadonlySet<number>) {
+  if (!messages.some((message) => message.compaction)) return true;
+  return context !== undefined && (messages[0]?.position ?? Infinity) > Math.min(...context);
 }
 function turnBody(message: string, options: ComposerOptions): Schema['TurnRequest'] {
   return {
@@ -581,11 +590,7 @@ export class SessionController {
         undefined,
         entry.abort.signal,
       );
-      this.publish(entry, {
-        session,
-        running: session.turn_in_flight,
-        partial: session.turn_in_flight,
-      });
+      this.publish(entry, { session, running: session.turn_in_flight });
       // A sub-agent has a feed only while its parent runs it; between runs, its history is all.
       if (session.parent_id && !session.turn_in_flight) {
         this.publish(entry, { feed: 'unavailable' });
@@ -602,7 +607,7 @@ export class SessionController {
       let response: Response;
       try {
         response = await this.api.stream(
-          sessionPath(entry.state.id) + '/stream',
+          sessionPath(entry.state.id) + '/feed',
           entry.cursor,
           this.attends(entry),
           entry.abort.signal,
@@ -640,8 +645,7 @@ export class SessionController {
         }
         // From meka 0.68, deleting a session ends its feed before the response arrives. The
         // deletion releases the entry; if it fails, the retry below reconnects as usual.
-        if (!entry.state.deleting)
-          this.publish(entry, { feed: 'reconnecting', partial: true, approvals: [] });
+        if (!entry.state.deleting) this.publish(entry, { feed: 'reconnecting', approvals: [] });
       }
       // Retry opening the connection without consuming the previous, already closed response.
       while (!entry.abort.signal.aborted && !this.disposed) {
@@ -653,7 +657,7 @@ export class SessionController {
             entry.abort.signal,
           );
           response = await this.api.stream(
-            sessionPath(entry.state.id) + '/stream',
+            sessionPath(entry.state.id) + '/feed',
             entry.cursor,
             this.attends(entry),
             entry.abort.signal,
@@ -713,8 +717,7 @@ export class SessionController {
         reader.releaseLock();
       }
     } catch (error) {
-      if (!entry.abort.signal.aborted)
-        this.publish(entry, { error: asError(error), partial: true });
+      if (!entry.abort.signal.aborted) this.publish(entry, { error: asError(error) });
     }
   }
   private event(entry: Entry, frame: SseFrame) {
@@ -722,7 +725,7 @@ export class SessionController {
     try {
       data = parseEvent(frame);
     } catch (error) {
-      this.publish(entry, { partial: true, error: asError(error) });
+      this.publish(entry, { error: asError(error) });
       void this.refresh(entry.state.id);
       return;
     }
@@ -732,7 +735,6 @@ export class SessionController {
         (entry.cursor && /^\d+$/.test(frame.id) && BigInt(frame.id) < BigInt(entry.cursor))
       ) {
         delete entry.cursor;
-        this.publish(entry, { partial: true });
         void this.refresh(entry.state.id);
       }
       if (/^\d+$/.test(frame.id)) {
@@ -806,14 +808,18 @@ export class SessionController {
           compacting,
           textStreaming: false,
           notices: this.pastNotices(entry),
-          partial: data.resumed === true || !entry.state.saved || entry.state.loading,
           blocks: entry.state.submissions
             .filter((submission) => submission.preview)
             .map((submission) => ({ kind: 'submission', key: submission.key })),
           tools: {},
           approvals: [],
         });
-      } else this.publish(entry, { running: true, compacting });
+      } else
+        // Resumed, as after a reconnect: a compaction under way is still under way.
+        this.publish(entry, {
+          running: true,
+          compacting: compacting || entry.compactionFrom !== undefined,
+        });
       return;
     }
     if (
@@ -823,23 +829,21 @@ export class SessionController {
         [
           'assistant_text.delta',
           'thinking.delta',
-          'permission_required',
-          'elicitation_required',
-          'progress',
+          'approval.requested',
+          'elicitation.requested',
           'turn.nudged',
           'task.reported',
           'message.appended',
         ].includes(frame.event))
     ) {
-      // A truncated replay may start in the middle of work. Its explicit turn ID is enough
-      // to target Stop safely, but never enough to claim that the preview is complete.
+      // A truncated replay may start in the middle of work. Its explicit turn ID is enough to
+      // target Stop safely; what it missed is read with the turn when it ends.
       entry.epoch++;
       this.publish(entry, {
         turnId,
         running: true,
         compacting: false,
         notices: this.pastNotices(entry),
-        partial: true,
         blocks: entry.state.blocks.filter((block) => block.kind === 'submission'),
         tools: {},
         approvals: [],
@@ -875,9 +879,9 @@ export class SessionController {
       if (textStreaming) this.noteTextStreaming(entry);
       this.publish(entry, { blocks, textStreaming });
     } else if (frame.event === 'message.appended') {
-      const message: Schema['MessageView'] = {
+      const message: ConversationMessage = {
         role: string(data, 'role'),
-        content: data.content as Schema['MessageView']['content'],
+        content: data.content as ConversationMessage['content'],
         ...(turnId ? { turn_id: turnId } : {}),
       };
       // The turn's first, before anything it did, is the message it opened with. A notice may
@@ -894,7 +898,7 @@ export class SessionController {
       // and a reconnect may hand over again one this feed already showed.
       if (
         !(seen && data.resumed === true) &&
-        (!state.saved || !holds(state.saved.messages, state.offset, message, opening))
+        (!state.saved || !holds(state.saved, message, opening))
       )
         this.publish(entry, {
           textStreaming: false,
@@ -918,8 +922,8 @@ export class SessionController {
           { kind: 'report', tasks: data.task_ids as string[], text: string(data, 'text') },
         ],
       });
-    } else if (frame.event.startsWith('tool_call.') || frame.event === 'progress') {
-      const id = string(data, 'id') || string(data, 'tool_use_id');
+    } else if (frame.event.startsWith('tool_call.')) {
+      const id = string(data, 'id');
       if (!id) return;
       let { tools, blocks } = state;
       const listed = Object.hasOwn(tools, id) ? tools[id] : undefined;
@@ -970,7 +974,7 @@ export class SessionController {
       }
       if (frame.event === 'tool_call.output_delta' && tool.state === 'executing')
         tool.output = (tool.output + string(data, 'chunk')).slice(-1_000_000);
-      if (frame.event === 'progress')
+      if (frame.event === 'tool_call.progress')
         tool.progress = [data.progress, data.total ? `/ ${String(data.total)}` : '', data.message]
           .filter((v) => v !== undefined)
           .join(' ');
@@ -980,7 +984,7 @@ export class SessionController {
         ...(!old ? { blocks: [...blocks, { kind: 'tool', id }] } : {}),
       });
     } else if (
-      (frame.event === 'permission_required' || frame.event === 'elicitation_required') &&
+      (frame.event === 'approval.requested' || frame.event === 'elicitation.requested') &&
       !state.session?.parent_id
     ) {
       // A sub-agent's feed mirrors its prompts; the parent's carries them and takes the answer.
@@ -1000,7 +1004,7 @@ export class SessionController {
       const server = string(data, 'server');
       const message = string(data, 'message');
       const approval: Approval =
-        frame.event === 'permission_required'
+        frame.event === 'approval.requested'
           ? { ...common, kind: 'permission', tool: string(data, 'tool_name'), input: data.input }
           : data.kind === 'form'
             ? { ...common, kind: 'form', server, message, schema: data.schema as EventData }
@@ -1009,7 +1013,7 @@ export class SessionController {
         textStreaming: false,
         approvals: [...state.approvals.filter((a) => a.id !== id), approval],
       });
-    } else if (frame.event === 'permission_resolved' || frame.event === 'elicitation_resolved') {
+    } else if (frame.event === 'approval.resolved' || frame.event === 'elicitation.resolved') {
       // Answered elsewhere, expired, or canceled with its turn.
       const id = string(data, 'request_id');
       this.publish(entry, { approvals: state.approvals.filter((a) => a.id !== id) });
@@ -1040,19 +1044,20 @@ export class SessionController {
         });
     } else if (frame.event === 'feed.gap') {
       // This copy of the feed has a hole, which the saved conversation fills.
-      this.publish(entry, { partial: true, textStreaming: false });
+      this.publish(entry, { textStreaming: false });
       void this.refresh(state.id);
     } else if (frame.event === 'context.compacting') {
       // meka compacts on its own inside a turn too, not only when asked.
+      entry.compactionFrom = latestCompaction(entry.state.saved);
       this.publish(entry, { compacting: true });
     } else if (frame.event === 'context.compaction_failed') {
+      entry.compactionFrom = undefined;
       this.publish(entry, { compacting: this.inCompactionTurn(entry) });
     } else if (frame.event === 'context.compacted') {
-      this.publish(entry, {
-        compacting: this.inCompactionTurn(entry),
-        partial: true,
-        textStreaming: false,
-      });
+      // The history gains the compaction where it happened and loses nothing, so the turn shown
+      // live is still whole; reading what came after puts the compaction in its place. It shows
+      // as compacting until a read holds it, so its line is drawn there without a moment between.
+      this.publish(entry, { textStreaming: false });
       void this.refresh(state.id);
     } else if (frame.event === 'conversation.rewound') {
       // Rewound here or by another client; either way the shown turns may be gone.
@@ -1135,7 +1140,11 @@ export class SessionController {
           (submission) => submission.turnId === turnId && submission.state === 'running',
         ));
     const current = !state.turnId || state.turnId === turnId;
-    if (current) entry.followed = false;
+    if (current) {
+      entry.followed = false;
+      // A compaction a turn opened ends with it, whether or not its line was read.
+      entry.compactionFrom = undefined;
+    }
     entry.outcomes.set(turnId, outcome);
     if (entry.outcomes.size > 50) entry.outcomes.delete(entry.outcomes.keys().next().value!);
     const message = sessionNotice(event, data)?.text;
@@ -1379,7 +1388,7 @@ export class SessionController {
           if (!item || item.state !== 'pending') receipts.add(submission.key);
         }
       }
-      const { saved, offset, ambiguous } = await this.loadSnapshot(entry);
+      const snapshot = await this.loadSnapshot(entry);
       const session = await this.api.get<Schema['SessionResponse']>(
         sessionPath(id),
         undefined,
@@ -1406,34 +1415,36 @@ export class SessionController {
       delete entry.state.error;
       // Completion belongs to the turn, not to whichever snapshot request happens to finish.
       const reconciled =
-        entry.reconcileEpoch === entry.epoch &&
-        epoch === entry.epoch &&
-        !session.turn_in_flight &&
-        !ambiguous;
+        entry.reconcileEpoch === entry.epoch && epoch === entry.epoch && !session.turn_in_flight;
       if (reconciled) delete entry.reconcileEpoch;
       const submissions = entry.state.submissions.map((submission) =>
-        !ambiguous && receipts.has(submission.key) ? { ...submission, preview: false } : submission,
+        receipts.has(submission.key) ? { ...submission, preview: false } : submission,
       );
       if (epoch === entry.epoch && !session.turn_in_flight && !submissions.some(needsFollowing))
         entry.followed = false;
+      // Read on what this tab holds now, which an earlier page may have grown meanwhile.
+      const saved = snapshot(entry.state.saved);
+      // A compaction under way has ended once the history holds it, though not a compaction's own
+      // turn, which compacts until it ends.
+      const compacted =
+        entry.compactionFrom !== undefined && latestCompaction(saved) > entry.compactionFrom;
+      if (compacted) entry.compactionFrom = undefined;
       const pendingPreviews = new Set(submissions.filter((s) => s.preview).map((s) => s.key));
       const blocks = entry.state.blocks.filter((block) =>
         block.kind === 'submission'
           ? pendingPreviews.has(block.key)
           : !reconciled &&
-            (block.kind !== 'message' ||
-              !holds(saved.messages, offset, block.message, block.opening)),
+            (block.kind !== 'message' || !holds(saved, block.message, block.opening)),
       );
       this.publish(entry, {
         saved,
-        offset,
-        ...(ambiguous ? { partial: true } : {}),
         session,
         loading: false,
+        ...(compacted && !this.inCompactionTurn(entry) ? { compacting: false } : {}),
         submissions,
         blocks,
         ...(epoch === entry.epoch ? { running: session.turn_in_flight } : {}),
-        ...(reconciled ? { tools: {}, partial: false } : {}),
+        ...(reconciled ? { tools: {} } : {}),
       });
       if (pendingInbox.length || wasFollowed) this.release(entry);
     } catch (error) {
@@ -1441,118 +1452,68 @@ export class SessionController {
         this.publish(entry, { loading: false, error: asError(error) });
     }
   }
+  /**
+   * Reads what the history holds past this tab's copy, or its last page when it holds none, as a
+   * change to make to the copy it holds by then.
+   */
   private async loadSnapshot(
     entry: Entry,
-  ): Promise<{ saved: Schema['MessagesResponse']; offset: number; ambiguous: boolean }> {
-    const path = sessionPath(entry.state.id) + '/messages';
-    for (let attempt = 0; attempt < 3; attempt++) {
-      const head = await this.api.get<Schema['MessagesResponse']>(
+  ): Promise<(current: SavedHistory | undefined) => SavedHistory> {
+    const path = sessionPath(entry.state.id) + '/history';
+    const held = entry.state.saved;
+    if (!held) {
+      const page = await this.api.get<Schema['HistoryResponse']>(
         path,
-        { offset: 0, limit: 1 },
+        { limit: this.pageSize() },
         entry.abort.signal,
       );
-      const previous = entry.state.saved;
-      const same = previous && previous.revision === head.revision;
-      const offset = same
-        ? Math.min(entry.state.offset, head.total)
-        : Math.max(0, head.total - this.pageSize());
-      if (head.total === 0) return { saved: head, offset: 0, ambiguous: false };
-      // What this tab holds already needs only what came after it: the last message held is read
-      // again with them, to check it is still where it was, since meka's turn retention can move
-      // every message up without changing the revision.
-      if (same && previous.messages.length && offset === entry.state.offset) {
-        const held = previous.messages;
-        const end = offset + held.length;
-        const last = held[held.length - 1];
-        if (end <= head.total) {
-          const tail: Schema['MessageView'][] = [];
-          let continuous = true;
-          let ambiguous = false;
-          for (let position = end - 1; position < head.total;) {
-            const page = await this.api.get<Schema['MessagesResponse']>(
-              path,
-              { offset: position, limit: Math.min(1000, head.total - position) },
-              entry.abort.signal,
-            );
-            if (page.revision !== head.revision || page.messages.length === 0) {
-              continuous = false;
-              break;
-            }
-            ambiguous ||= page.total !== head.total;
-            tail.push(...page.messages);
-            position += page.messages.length;
-          }
-          if (continuous && JSON.stringify(tail[0]) === JSON.stringify(last))
-            return {
-              saved: { ...head, messages: [...held, ...tail.slice(1)] },
-              offset,
-              ambiguous,
-            };
-        }
-      }
-      const messages: Schema['MessageView'][] = [];
-      let changed = false;
-      let ambiguous = false;
-      const start = Math.max(0, offset - 1);
-      for (let position = start; position < head.total;) {
-        const page = await this.api.get<Schema['MessagesResponse']>(
-          path,
-          { offset: position, limit: Math.min(1000, head.total - position) },
-          entry.abort.signal,
-        );
-        if (page.revision !== head.revision || page.messages.length === 0) {
-          changed = true;
-          break;
-        }
-        ambiguous ||= page.total !== head.total;
-        messages.push(...page.messages);
-        position += page.messages.length;
-      }
-      if (!changed) {
-        const read = fromCalls(messages, start, offset);
-        return { saved: { ...head, messages: read.messages }, offset: read.offset, ambiguous };
-      }
+      const saved = startHistory(page.items, page.position, page.next_before ?? undefined);
+      return () => saved;
     }
-    throw new Error(
-      'The conversation changed repeatedly while loading. Refresh after the current rewrite completes.',
-    );
-  }
-  async earlier(id: string) {
-    const entry = this.entries.get(id);
-    if (!entry?.state.saved || entry.state.offset === 0) return;
-    const previous = entry.state.saved;
-    const wanted = Math.max(0, entry.state.offset - this.pageSize());
-    // One message more, to check the page ends where the shown ones begin: meka's turn retention
-    // deletes old turns without moving the revision, which moves every later message up. And one
-    // before it, in case the page opens on results that answer it.
-    const first = previous.messages[0];
-    const start = Math.max(0, wanted - 1);
-    const request = ++entry.snapshotEpoch;
-    try {
-      const page = await this.api.get<Schema['MessagesResponse']>(
-        sessionPath(id) + '/messages',
-        { offset: start, limit: entry.state.offset - start + (first ? 1 : 0) },
+    // Positions are never reused, so what came after the last read is all there is to read; a
+    // rewind or a join among it says what it took back.
+    const items: Schema['HistoryItem'][] = [];
+    let after = held.position;
+    let position = held.position;
+    for (;;) {
+      const page = await this.api.get<Schema['HistoryResponse']>(
+        path,
+        { after, limit: 1000 },
         entry.abort.signal,
       );
-      if (request !== entry.snapshotEpoch) return;
-      const next = first && page.messages.pop();
-      if (
-        page.revision !== previous.revision ||
-        (first && JSON.stringify(next) !== JSON.stringify(first))
-      ) {
-        await this.refresh(id);
-        return;
-      }
-      const { messages, offset } = fromCalls(page.messages, start, wanted);
-      const saved = { ...page, messages: [...messages, ...previous.messages] };
+      items.push(...page.items);
+      position = page.position;
+      if (page.next_after == null) break;
+      after = page.next_after;
+    }
+    return (current) => extendHistory(current ?? held, items, position);
+  }
+  /** Reads the page of history before what this tab holds, or waits for the one being read. */
+  earlier(id: string): Promise<void> {
+    const entry = this.entries.get(id);
+    if (!entry?.state.saved?.earlier) return Promise.resolve();
+    entry.loadingEarlier ??= this.readEarlier(entry, entry.state.saved.before).finally(() => {
+      entry.loadingEarlier = undefined;
+    });
+    return entry.loadingEarlier;
+  }
+  private async readEarlier(entry: Entry, before: number) {
+    try {
+      const page = await this.api.get<Schema['HistoryResponse']>(
+        sessionPath(entry.state.id) + '/history',
+        { before, limit: this.pageSize() },
+        entry.abort.signal,
+      );
+      const current = entry.state.saved;
+      if (!current || current.before !== before || entry.abort.signal.aborted) return;
+      const saved = prependHistory(current, page.items, page.next_before ?? undefined);
       // What the feed showed may be in the page just read.
       const blocks = entry.state.blocks.filter(
-        (block) =>
-          block.kind !== 'message' || !holds(saved.messages, offset, block.message, block.opening),
+        (block) => block.kind !== 'message' || !holds(saved, block.message, block.opening),
       );
-      this.publish(entry, { saved, offset, blocks });
+      this.publish(entry, { saved, blocks });
     } catch (error) {
-      this.publish(entry, { error: asError(error) });
+      if (!entry.abort.signal.aborted) this.publish(entry, { error: asError(error) });
     }
   }
   async submitInitialMessage(
@@ -1563,7 +1524,7 @@ export class SessionController {
     if (this.disposed || !this.canWrite || session.parent_id)
       throw new Error('An active writable connection is required to start a conversation.');
     const existing = this.entries.get(session.id)?.state;
-    if (existing?.submissions.length || existing?.saved?.total || existing?.running)
+    if (existing?.submissions.length || existing?.saved?.messages.length || existing?.running)
       throw new Error('This session has already started.');
     const ready = this.ensure(session.id);
     const entry = this.entries.get(session.id)!;
@@ -1749,7 +1710,7 @@ export class SessionController {
         // the turn and reports its outcome, and the turn runs on if this tab goes.
         const turn = await this.api.mutate<Schema['TurnRecord']>(
           'POST',
-          sessionPath(entry.state.id) + '/turn',
+          sessionPath(entry.state.id) + '/turns',
           submission.body,
           submission.key,
         );
@@ -2013,11 +1974,11 @@ export class SessionController {
     const saved = entry.state.saved;
     if (!saved || isSessionRunning(entry.state))
       throw new Error('Wait for the agent to finish before changing the conversation.');
-    const { value: head, etag } = await this.api.getTagged<Schema['MessagesResponse']>(
-      sessionPath(entry.state.id) + '/messages',
-      { offset: 0, limit: 1 },
+    const { value: head, etag } = await this.api.getTagged<Schema['HistoryResponse']>(
+      sessionPath(entry.state.id) + '/history',
+      { limit: 1 },
     );
-    if (head.revision !== saved.revision || head.total !== saved.total) throw this.changed(entry);
+    if (head.position !== saved.position) throw this.changed(entry);
     // Without it, the edit would land on whatever the conversation has become.
     if (!etag)
       throw new Error(
@@ -2029,15 +1990,16 @@ export class SessionController {
     void this.refresh(entry.state.id, true);
     return new Error('The conversation changed since it was shown here. Check it, then try again.');
   }
-  /** Drops the last `turns` turns of the conversation as this tab shows it. */
-  async rewind(id: string, turns: number) {
+  /** Takes the conversation back to before the turn `turnId`, and every turn after it. */
+  async rewind(id: string, turnId: string) {
     const entry = this.editable(id);
     const etag = await this.shownConversation(entry);
+    let rewound: Schema['HistoryItem'];
     try {
-      await this.api.mutate(
+      rewound = await this.api.mutate<Schema['HistoryItem']>(
         'POST',
         sessionPath(id) + '/rewind',
-        { turns } satisfies Schema['RewindRequestBody'],
+        { turn_id: turnId } satisfies Schema['RewindRequestBody'],
         undefined,
         etag,
       );
@@ -2048,6 +2010,44 @@ export class SessionController {
       throw error;
     }
     await this.refresh(id, true);
+    return rewound;
+  }
+  /** Where in the history the session's context is, as `GET /context/messages` places it. */
+  async contextPositions(id: string, signal?: AbortSignal) {
+    const context = await this.api.get<Schema['ContextMessagesResponse']>(
+      sessionPath(id) + '/context/messages',
+      undefined,
+      signal,
+    );
+    return new Set(context.messages.map((message) => message.position));
+  }
+  /**
+   * Drops the last `count` turns of the conversation the context holds, reading earlier history
+   * while too few are loaded and it may hold more.
+   */
+  async rewindLast(id: string, count: number) {
+    const entry = this.editable(id);
+    // Read at most once: what the context holds does not move while earlier history is read.
+    let context: ReadonlySet<number> | undefined;
+    let turns = new Map<string, RewindableTurn>();
+    for (let page = 0; page < 50; page++) {
+      const saved = entry.state.saved;
+      const messages = saved?.messages ?? [];
+      if (!context && contextQuestion(messages)) context = await this.contextPositions(id);
+      turns = rewindableTurns(messages, { earlier: saved?.earlier ?? false, context });
+      if (turns.size >= count || !saved?.earlier || !mayHoldMore(messages, context)) break;
+      await this.earlier(id);
+      // A read that failed, or found nothing, moves nothing.
+      if (entry.state.saved?.before === saved.before) break;
+    }
+    const turn = [...turns].find(([, turn]) => turn.turns === count)?.[0];
+    if (!turn)
+      throw new Error(
+        turns.size
+          ? `Only the last ${turns.size} ${turns.size === 1 ? 'turn' : 'turns'} can be removed.`
+          : 'No turn here can be removed.',
+      );
+    return this.rewind(id, turn);
   }
   /**
    * Rewinds to before a turn and sends its message again, as it was or edited. A send that fails
@@ -2056,60 +2056,35 @@ export class SessionController {
    */
   async resend(
     id: string,
-    turns: number,
+    turnId: string,
     message: string,
     images: ImageAttachment[] = [],
     skill = '',
   ) {
-    await this.rewind(id, turns);
+    await this.rewind(id, turnId);
     try {
       return await this.submitMessage(id, message, { ...emptyComposerOptions, images, skill });
     } catch (error) {
       throw new UnsentMessage(message, images, skill, error);
     }
   }
-  /**
-   * A new session holding this one's conversation without its last `turns` turns. meka forks the
-   * whole conversation; the copy, which nothing else can run a turn on yet, then drops the rest.
-   */
-  async branch(id: string, turns: number): Promise<string> {
+  /** A new session holding this one's conversation, as it stood before `turnId` when one is named. */
+  async branch(id: string, turnId?: string): Promise<string> {
     const entry = this.editable(id);
     const etag = await this.shownConversation(entry);
-    let fork: Schema['SessionResponse'];
     try {
-      fork = await this.api.mutate<Schema['SessionResponse']>(
+      const fork = await this.api.mutate<Schema['SessionResponse']>(
         'POST',
         sessionPath(id) + '/fork',
-        {},
+        (turnId ? { turn_id: turnId } : {}) satisfies Schema['ForkSessionBody'],
         undefined,
         etag,
       );
+      return fork.id;
     } catch (error) {
       if (error instanceof ApiError && error.status === 412) throw this.changed(entry);
       throw error;
     }
-    if (turns > 0) {
-      try {
-        await this.api.mutate('POST', sessionPath(fork.id) + '/rewind', {
-          turns,
-        } satisfies Schema['RewindRequestBody']);
-      } catch (error) {
-        // A whole copy is not the branch that was asked for, so it goes.
-        const reason = errorMessage(error);
-        try {
-          await this.api.mutate('DELETE', sessionPath(fork.id));
-        } catch (removal) {
-          throw new Error(
-            `The branch could not be trimmed (${reason}), nor its copy removed. Delete the session ${fork.id.slice(0, 8)} by hand.`,
-            { cause: removal },
-          );
-        }
-        throw new Error(`The branch could not be trimmed, so its copy was removed: ${reason}`, {
-          cause: error,
-        });
-      }
-    }
-    return fork.id;
   }
   /** Reads a sub-agent's feed while it runs, for the call in its parent that runs it. */
   watch(id: string) {

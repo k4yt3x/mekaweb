@@ -52,10 +52,10 @@ const approval = {
   input: {},
   expires: 0,
 };
-const lastTurn = (status: string, ended = true) => ({
+const lastTurn = (status: string, ended = true, source = 'client') => ({
   last_turn: {
     id: 't',
-    source: 'client',
+    source,
     started_at: '2026-09-26T10:59:00Z',
     permission: 'workspace',
     ...(ended ? { ended_at: '2026-09-26T11:00:00Z', status } : {}),
@@ -70,8 +70,8 @@ const lastTurn = (status: string, ended = true) => ({
 
 it('puts a pending approval ahead of running, and running ahead of unread', () => {
   expect(status({ live: { approvals: [approval] }, running: true })).toBe('approval');
-  expect(status({ record: { approvals_pending: 1 }, running: true })).toBe('approval');
-  expect(status({ record: { approvals_pending: 0 }, running: true })).toBe('running');
+  expect(status({ record: { requests_pending: 1 }, running: true })).toBe('approval');
+  expect(status({ record: { requests_pending: 0 }, running: true })).toBe('running');
   expect(status({ running: true })).toBe('running');
 });
 it('colours unread sessions by how their last turn ended', () => {
@@ -79,6 +79,10 @@ it('colours unread sessions by how their last turn ended', () => {
   expect(status({ record: lastTurn('failed') })).toBe('failed');
   expect(status({ record: lastTurn('canceled') })).toBe('unread');
   expect(status()).toBe('unread');
+});
+it('does not report a compaction run between turns as the agent’s work', () => {
+  expect(status({ record: lastTurn('succeeded', true, 'compaction') })).toBe('unread');
+  expect(status({ record: lastTurn('failed', true, 'compaction') })).toBe('unread');
 });
 it('leaves an unfinished turn that is not running without an outcome', () => {
   expect(status({ record: lastTurn('succeeded', false) })).toBe('unread');
