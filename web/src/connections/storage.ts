@@ -7,6 +7,7 @@ export const CONVERSATION_WIDTH = { default: 850, step: 100 } as const;
 export const CONVERSATION_OFFSET = { default: 0, step: 10, limit: 10_000 } as const;
 export const TERMINAL_FONT = { default: 13, min: 8, max: 32 } as const;
 export const EDITOR_FONT = { default: 13, min: 8, max: 32 } as const;
+export const FILES_FONT = { default: 13, min: 8, max: 32 } as const;
 /** The side panel's width, in pixels. */
 export const PANEL_WIDTH = { default: 300, min: 280, max: 900 } as const;
 /** The conversation's width beside the terminal, in pixels. */
@@ -110,6 +111,8 @@ export interface Settings {
   terminalFontSize: number;
   /** The editor's font size, in pixels; Ctrl with the wheel or keys changes it for a while. */
   editorFontSize: number;
+  /** Files' tree's font size, in pixels; Ctrl with the wheel or keys changes it for a while. */
+  filesFontSize: number;
   /** Whether the editor wraps long lines, as Alt+Z switches. */
   editorWordWrap: boolean;
   showTurnContext: boolean;
@@ -211,6 +214,7 @@ const defaults = (): Settings => ({
   conversationOffset: CONVERSATION_OFFSET.default,
   terminalFontSize: TERMINAL_FONT.default,
   editorFontSize: EDITOR_FONT.default,
+  filesFontSize: FILES_FONT.default,
   editorWordWrap: false,
   showTurnContext: false,
   foldSteps: true,
@@ -271,6 +275,7 @@ function normalizeSettings(value: unknown): Settings {
     conversationOffset: normalizeConversationOffset(value.conversationOffset),
     terminalFontSize: normalizeTerminalFontSize(value.terminalFontSize),
     editorFontSize: normalizeEditorFontSize(value.editorFontSize),
+    filesFontSize: fontSizeWithin(value.filesFontSize, FILES_FONT),
     editorWordWrap: value.editorWordWrap === true,
     showTurnContext: value.showTurnContext === true,
     foldSteps: value.foldSteps !== false,
@@ -433,6 +438,9 @@ export class BrowserStorage {
   }
   editorFontSize(value: number) {
     this.save({ ...this.readSettings(), editorFontSize: normalizeEditorFontSize(value) });
+  }
+  filesFontSize(value: number) {
+    this.save({ ...this.readSettings(), filesFontSize: fontSizeWithin(value, FILES_FONT) });
   }
   editorWordWrap(editorWordWrap: boolean) {
     this.save({ ...this.readSettings(), editorWordWrap });

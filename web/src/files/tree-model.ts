@@ -18,8 +18,12 @@ export function sortEntries(entries: readonly Entry[], hidden: boolean): Entry[]
     });
 }
 
-/** A folder's entries as the tree has them: listed, failed, or on their way. */
-export type Listed = { entries: readonly Entry[] } | { error: unknown } | undefined;
+/**
+ * A folder's entries as the tree has them, with the git repository it is in if any: listed, failed,
+ * or on their way.
+ */
+export type Listed =
+  { entries: readonly Entry[]; repo?: string | null | undefined } | { error: unknown } | undefined;
 
 /** Each folder's entries, as the tree has them. */
 export interface Listings {

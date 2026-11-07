@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useEffectEvent,
   useRef,
   useState,
   useSyncExternalStore,
@@ -8,6 +9,7 @@ import {
 } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
+import * as Popover from '@radix-ui/react-popover';
 import {
   AtSign,
   ChevronsDownUp,
@@ -20,6 +22,8 @@ import {
   Folder,
   FolderInput,
   FolderPlus,
+  FolderRoot,
+  GitBranch,
   House,
   LocateFixed,
   MessageSquarePlus,
@@ -28,6 +32,7 @@ import {
   RefreshCw,
   SquareTerminal,
   Trash2,
+  TriangleAlert,
   Upload,
   X,
 } from 'lucide-react';
@@ -38,7 +43,9 @@ import {
   useGateway,
   useGatewayAll,
   useRuntime,
+  useSettings,
 } from '../connections/context';
+import { FILES_FONT } from '../connections/storage';
 import { useAction } from '../components/actions';
 import { Button } from '../components/ui/button';
 import { Dialog } from '../components/ui/dialog';
@@ -65,6 +72,8 @@ import { pending, Uploads, type UploadBatch, type UploadItem } from '../files/up
 import { droppedItems, pickedFolder, readDropped } from '../files/dropped';
 import { editorStore } from '../editor/use-editor';
 import { useFolderWatches } from '../files/watch';
+import { gitMarks, stronger, type GitMark } from '../files/git';
+import { useToolsFinished } from '../session/hooks';
 import {
   entryRows,
   isFolder,
@@ -79,8 +88,12 @@ import { DRAGGED_PATHS, FileTree, type Choosing, type MenuParts } from './file-t
 
 type Entry = Gateway['Entry'];
 type Listing = Gateway['Listing'];
+type GitStatus = Gateway['GitStatus'];
 
 const LIST = '/api/files/list';
+const GIT_STATUS = '/api/git/status';
+/** How long git is waited on after a change, so a burst of them reads its status once. */
+const GIT_REFRESH_MS = 500;
 
 /** A request from elsewhere to show a folder, and maybe a file in it. */
 export interface FilesTarget {
@@ -185,6 +198,15 @@ export function FileBrowser({
     () => fresh?.path ?? lastFolders.get(place) ?? saved?.folder ?? start,
   );
   const [hidden, setHidden] = useState(false);
+  // A size set with Ctrl and the wheel or keys lasts until Files closes; Settings keeps the size.
+  const { filesFontSize } = useSettings();
+  const [zoom, setZoom] = useState<number>();
+  const zoomBy = (step: -1 | 0 | 1) =>
+    setZoom((size) =>
+      step === 0
+        ? undefined
+        : Math.max(FILES_FONT.min, Math.min(FILES_FONT.max, (size ?? filesFontSize) + step)),
+    );
   const [open, setOpenState] = useState<ReadonlySet<string>>(() => {
     const known = openFolders.get(place);
     if (known) return known;
@@ -255,13 +277,13 @@ export function FileBrowser({
     get: (path) => {
       if (path === folder)
         return listing.data
-          ? { entries: listing.data.entries }
+          ? { entries: listing.data.entries, repo: listing.data.repo }
           : listing.error
             ? { error: listing.error }
             : undefined;
       const state = queries.getQueryState<Listing>(gatewayKey(device, LIST, { path }));
       return state?.data
-        ? { entries: state.data.entries }
+        ? { entries: state.data.entries, repo: state.data.repo }
         : state?.error
           ? { error: state.error }
           : undefined;
@@ -277,10 +299,85 @@ export function FileBrowser({
     if (path === folder) void listing.refetch();
     else void queries.invalidateQueries({ queryKey: gatewayKey(device, LIST, { path }) });
   }
-  useFolderWatches(folders, refetch);
+  /** The git repository the folder `path` is in, as its listing says. */
+  function repoOf(path: string) {
+    const listed = listings.get(path);
+    return listed && 'entries' in listed ? (listed.repo ?? undefined) : undefined;
+  }
+  // Each repository the folders shown are in says how it stands.
+  const repos = [...new Set(folders.map(repoOf).filter((repo) => repo !== undefined))];
+  const statuses = useGatewayAll<GitStatus>(
+    GIT_STATUS,
+    repos.map((repo) => ({ repo })),
+  );
+  const marksOf = new Map(
+    repos.map((repo, index) => {
+      const status = statuses[index]?.data;
+      return [repo, status && gitMarks(status)] as const;
+    }),
+  );
+  // Staging, committing and switching branches change a repository's git folder.
+  const gitFolders = new Map<string, string>();
+  repos.forEach((repo, index) => {
+    const gitDir = statuses[index]?.data?.git_dir;
+    if (gitDir) gitFolders.set(gitDir, repo);
+  });
+  const gitRefresh = useRef<{
+    timer?: ReturnType<typeof setTimeout> | undefined;
+    repos: Set<string>;
+  }>({
+    repos: new Set(),
+  });
+  useEffect(() => {
+    const pending = gitRefresh.current;
+    return () => clearTimeout(pending.timer);
+  }, []);
+  /** Reads the status of `repo` again in a moment, or of every repository shown without one. */
+  function refreshGit(repo?: string) {
+    const pending = gitRefresh.current;
+    pending.repos.add(repo ?? '');
+    if (pending.timer !== undefined) return;
+    pending.timer = setTimeout(() => {
+      pending.timer = undefined;
+      const asked = [...pending.repos];
+      pending.repos.clear();
+      for (const each of asked)
+        void queries.invalidateQueries({
+          queryKey: each
+            ? gatewayKey(device, GIT_STATUS, { repo: each })
+            : ['gateway', device, GIT_STATUS],
+        });
+    }, GIT_REFRESH_MS);
+  }
+  useFolderWatches([...folders, ...gitFolders.keys()], (path) => {
+    const repo = gitFolders.get(path);
+    if (repo !== undefined) refreshGit(repo);
+    if (!folders.includes(path)) return;
+    refetch(path);
+    const holding = repoOf(path);
+    if (holding !== undefined) refreshGit(holding);
+  });
+  // As the agent's tool calls finish, it may have changed files in folders not shown.
+  const finished = useToolsFinished(place);
+  const lastFinished = useRef(finished);
+  const toolsFinished = useEffectEvent(() => refreshGit());
+  useEffect(() => {
+    if (finished === lastFinished.current) return;
+    lastFinished.current = finished;
+    if (finished !== undefined) toolsFinished();
+  }, [finished]);
   const refresh = () => void queries.invalidateQueries({ queryKey: ['gateway'] });
   const rows = listed ? treeRows({ root: folder, listings, open, hidden, creating }) : [];
   const shownEntries = entryRows(rows);
+  // Each entry is marked as git says of it; a repository's own folder, open, for what it holds.
+  const marks = new Map<string, GitMark>();
+  for (const row of shownEntries) {
+    let mark = marksOf.get(repoOf(row.parent) ?? '')?.get(row.path, row.folder);
+    if (row.folder) mark = stronger(mark, marksOf.get(row.path)?.get(row.path, true));
+    if (mark) marks.set(row.path, mark);
+  }
+  const rootRepo = listing.data?.repo ?? undefined;
+  const rootStatus = rootRepo === undefined ? undefined : statuses[repos.indexOf(rootRepo)]?.data;
   const byPath = new Map(shownEntries.map((row) => [row.path, row]));
   // Only what shows counts as chosen.
   const selected = shownEntries.filter((row) => chosen.paths.has(row.path));
@@ -382,6 +479,7 @@ export function FileBrowser({
     onDone: (left) =>
       setChosen(left.length ? { paths: new Set(left), anchor: left[0], held: true } : nothing),
     onChanged: refresh,
+    onShowFrom: go,
     onRename: (path) => {
       setCreating(undefined);
       setRenaming(path);
@@ -484,7 +582,7 @@ export function FileBrowser({
           }
         />
       ) : (
-        <div className="file-toolbar">
+        <div className="file-toolbar" role="toolbar" aria-label="Files">
           <Button
             variant="ghost"
             size="icon"
@@ -512,16 +610,6 @@ export function FileBrowser({
           >
             <Upload size={16} />
           </Button>
-          <span className="file-toolbar-gap" />
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label="Refresh"
-            title="Refresh"
-            onClick={refresh}
-          >
-            <RefreshCw size={16} />
-          </Button>
           <Button
             variant="ghost"
             size="icon"
@@ -532,24 +620,18 @@ export function FileBrowser({
           >
             <ChevronsDownUp size={16} />
           </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label={hidden ? 'Hide hidden files' : 'Show hidden files'}
-            title={hidden ? 'Hide hidden files' : 'Show hidden files'}
-            aria-pressed={hidden}
-            onClick={() => setHidden(!hidden)}
-          >
-            {hidden ? <Eye size={16} /> : <EyeOff size={16} />}
-          </Button>
           <FolderMenu
             path={folder}
             home={homeFolder}
             start={start}
             startFolder={startFolder}
+            hidden={hidden}
             onGo={go}
             onUploadFolder={coarse ? undefined : () => folderInput.current?.click()}
+            onToggleHidden={() => setHidden(!hidden)}
+            onRefresh={refresh}
           />
+          {rootStatus && <Branch status={rootStatus} />}
         </div>
       )}
       <input
@@ -585,6 +667,9 @@ export function FileBrowser({
       {listed && (
         <FileTree
           rows={rows}
+          marks={marks}
+          fontSize={zoom ?? filesFontSize}
+          onZoom={zoomBy}
           root={folder}
           rootName={basename(folder) || folder}
           selected={selectedPaths}
@@ -669,10 +754,19 @@ function PathBar({ path, onGo }: { path: string; onGo: (path: string) => void })
       pencil.current?.focus();
     }
   }, [isEditing]);
-  // The deepest folder stays in sight.
+  // The deepest folder stays in sight, as the path changes and the panel resizes; the end cut off
+  // fades.
   useEffect(() => {
     const element = trail.current;
-    if (element) element.scrollLeft = element.scrollWidth;
+    if (!element) return;
+    const settle = () => {
+      element.scrollLeft = element.scrollWidth;
+      clip(element);
+    };
+    settle();
+    const observer = new ResizeObserver(settle);
+    observer.observe(element);
+    return () => observer.disconnect();
   }, [path, isEditing]);
   function submit(event: FormEvent) {
     event.preventDefault();
@@ -710,6 +804,7 @@ function PathBar({ path, onGo }: { path: string; onGo: (path: string) => void })
         className="path-trail"
         aria-label="Folder"
         role="navigation"
+        onScroll={(event) => clip(event.currentTarget)}
         onClick={(event) => {
           if (event.target === event.currentTarget) setEditing(path);
         }}
@@ -740,6 +835,80 @@ function PathBar({ path, onGo }: { path: string; onGo: (path: string) => void })
       </Button>
     </div>
   );
+}
+
+/**
+ * The branch of the repository Files shows, with the commits it is ahead of its upstream and
+ * behind; it opens to say all git says of it, as a touch screen shows no tooltip.
+ */
+function Branch({ status }: { status: GitStatus }) {
+  const collisionPadding = useOverlayPadding();
+  const name = status.branch ?? status.commit?.slice(0, 7);
+  if (!name) return null;
+  const ahead = status.ahead ?? 0;
+  const behind = status.behind ?? 0;
+  const counts = [ahead ? `↑${ahead}` : '', behind ? `↓${behind}` : ''].filter(Boolean).join(' ');
+  const upstream = !status.upstream
+    ? 'No upstream'
+    : status.ahead == null
+      ? `${status.upstream} is gone`
+      : ahead && behind
+        ? `${ahead} ahead of ${status.upstream}, ${behind} behind`
+        : ahead
+          ? `${ahead} ahead of ${status.upstream}`
+          : behind
+            ? `${behind} behind ${status.upstream}`
+            : `Up to date with ${status.upstream}`;
+  // A commit checked out on its own follows no branch.
+  const said = [
+    status.branch ? `Branch ${name}` : `Detached at ${name}`,
+    status.branch ? upstream : '',
+    status.too_many ? 'Too many changes to mark' : '',
+  ].filter(Boolean);
+  return (
+    <span className="file-branch-slot">
+      <Popover.Root>
+        <Popover.Trigger asChild>
+          <button type="button" className="file-branch" aria-label={said.join(', ')}>
+            <GitBranch size={14} aria-hidden="true" />
+            <span className="file-branch-name">{name}</span>
+            {counts && <span className="file-branch-counts">{counts}</span>}
+            {status.too_many && (
+              <TriangleAlert size={13} className="file-branch-warning" aria-hidden="true" />
+            )}
+          </button>
+        </Popover.Trigger>
+        <Popover.Portal>
+          <Popover.Content
+            className="menu-panel branch-details"
+            align="end"
+            sideOffset={4}
+            collisionPadding={collisionPadding}
+          >
+            <p className="branch-details-name">
+              <GitBranch size={14} aria-hidden="true" />
+              <span>{status.branch ?? `Detached at ${name}`}</span>
+            </p>
+            {status.branch && <p>{upstream}</p>}
+            {status.branch && status.commit && (
+              <p className="muted">At commit {status.commit.slice(0, 7)}</p>
+            )}
+            {status.too_many && (
+              <p className="branch-details-warning">
+                <TriangleAlert size={13} aria-hidden="true" />
+                <span>Too many changes to mark</span>
+              </p>
+            )}
+          </Popover.Content>
+        </Popover.Portal>
+      </Popover.Root>
+    </span>
+  );
+}
+
+/** Marks the path `trail` as cut off at its start, which then fades, when it is. */
+function clip(trail: HTMLElement) {
+  trail.toggleAttribute('data-clipped', trail.scrollLeft > 0);
 }
 
 /** Those of `paths` not within another of them. */
@@ -774,6 +943,7 @@ function useSelectionActions({
   selected,
   onDone,
   onChanged,
+  onShowFrom,
   onRename,
 }: {
   /** Every entry the tree shows, which menus and keys may act on before it is chosen. */
@@ -782,6 +952,8 @@ function useSelectionActions({
   /** Called once an action changing them is done, with the paths it failed on. */
   onDone: (left: string[]) => void;
   onChanged: () => void;
+  /** Shows the tree from the folder `path`. */
+  onShowFrom: (path: string) => void;
   onRename: (path: string) => void;
 }) {
   const runtime = useRuntime();
@@ -873,6 +1045,12 @@ function useSelectionActions({
       const single = items.length === 1 ? items[0] : undefined;
       return (
         <>
+          {single && isFolder(single.entry) && (
+            <Item className="menu-item" onSelect={() => onShowFrom(single.path)}>
+              <FolderRoot size={14} />
+              Show from here
+            </Item>
+          )}
           {workspace && (
             <Item className="menu-item" onSelect={() => mention(paths)}>
               <AtSign size={14} />
@@ -1156,15 +1334,22 @@ function FolderMenu({
   home,
   start,
   startFolder,
+  hidden,
   onGo,
   onUploadFolder,
+  onToggleHidden,
+  onRefresh,
 }: {
   path: string;
   home: string | undefined;
   start: string;
   startFolder: string;
+  /** Whether hidden files show. */
+  hidden: boolean;
   onGo: (path: string) => void;
   onUploadFolder: (() => void) | undefined;
+  onToggleHidden: () => void;
+  onRefresh: () => void;
 }) {
   const collisionPadding = useOverlayPadding();
   return (
@@ -1201,6 +1386,15 @@ function FolderMenu({
           </DropdownMenu.Item>
           <DropdownMenu.Separator className="menu-separator" />
           <FolderItems Item={DropdownMenu.Item} path={path} onUploadFolder={onUploadFolder} />
+          <DropdownMenu.Separator className="menu-separator" />
+          <DropdownMenu.Item className="menu-item" onSelect={onToggleHidden}>
+            {hidden ? <EyeOff size={14} /> : <Eye size={14} />}
+            {hidden ? 'Hide hidden files' : 'Show hidden files'}
+          </DropdownMenu.Item>
+          <DropdownMenu.Item className="menu-item" onSelect={onRefresh}>
+            <RefreshCw size={14} />
+            Refresh
+          </DropdownMenu.Item>
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
     </DropdownMenu.Root>

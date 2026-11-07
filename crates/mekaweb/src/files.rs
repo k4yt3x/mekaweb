@@ -327,6 +327,9 @@ pub(crate) struct Listing {
     pub(crate) entries: Vec<Entry>,
     /// The home folder, absolute, which `~` names; none where it is not known.
     pub(crate) home: Option<String>,
+    /// The folder of the git repository the folder is in, absolute; none where it is in none, or
+    /// git is not installed.
+    pub(crate) repo: Option<String>,
 }
 
 /// A text file's contents, for a preview or to edit.
@@ -476,6 +479,7 @@ impl Files {
                 path: shown(&path),
                 entries,
                 home: resolve("~").ok().map(|home| shown(&home)),
+                repo: None,
             })
         })
         .await

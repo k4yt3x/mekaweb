@@ -15,6 +15,7 @@ import {
   CONVERSATION_OFFSET,
   CONVERSATION_WIDTH,
   EDITOR_FONT,
+  FILES_FONT,
   TERMINAL_FONT,
 } from '../connections/storage';
 import type { Schema } from '../api/client';
@@ -107,7 +108,10 @@ export function NotificationsSection() {
   );
 }
 
-/** How mekaweb looks in this browser: its theme, the conversation, and the editor's text. */
+/**
+ * How mekaweb looks in this browser: its theme, the conversation, and the text of Files, the editor
+ * and the terminal.
+ */
 export function AppearanceSettings() {
   const settings = useSettings();
   const runtime = useRuntime();
@@ -124,13 +128,15 @@ export function AppearanceSettings() {
             settings.conversationAnchor === 'page' &&
             settings.conversationOffset === CONVERSATION_OFFSET.default &&
             settings.terminalFontSize === TERMINAL_FONT.default &&
-            settings.editorFontSize === EDITOR_FONT.default
+            settings.editorFontSize === EDITOR_FONT.default &&
+            settings.filesFontSize === FILES_FONT.default
           }
           title="Reset the font sizes, width, and position; the color theme is kept"
           onClick={() => {
             runtime.storage.resetConversationAppearance();
             runtime.storage.terminalFontSize(TERMINAL_FONT.default);
             runtime.storage.editorFontSize(EDITOR_FONT.default);
+            runtime.storage.filesFontSize(FILES_FONT.default);
           }}
         >
           <RotateCcw size={16} />
@@ -203,8 +209,26 @@ export function AppearanceSettings() {
         </div>
       </section>
       <section className="panel appearance-panel">
-        <h2>{status.data?.features.terminal ? 'Editor and terminal' : 'Editor'}</h2>
+        <h2>
+          {status.data?.features.terminal ? 'Files, editor and terminal' : 'Files and editor'}
+        </h2>
         <div className="appearance-fields">
+          <Field label="Files font size">
+            <PixelInput
+              label="Files font size"
+              value={settings.filesFontSize}
+              step={1}
+              min={FILES_FONT.min}
+              hint={
+                appleKeyboard()
+                  ? 'Cmd with =, - or 0, or a pinch, changes it until Files closes.'
+                  : 'Ctrl with the wheel, =, - or 0 changes it until Files closes.'
+              }
+              onCommit={(size) => {
+                if (typeof size === 'number') runtime.storage.filesFontSize(size);
+              }}
+            />
+          </Field>
           <Field label="Editor font size">
             <PixelInput
               label="Editor font size"

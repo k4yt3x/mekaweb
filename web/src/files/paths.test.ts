@@ -8,6 +8,7 @@ import {
   language,
   movedTo,
   parent,
+  relative,
   toolPath,
   within,
 } from './paths';
@@ -90,4 +91,14 @@ it('follows a path to where it, or a folder holding it, moved', () => {
   expect(movedTo('/work/a.ts', '/work/a.ts', '/work/b.ts')).toBe('/work/b.ts');
   expect(movedTo('/work/src/a.ts', '/work/src', '/work/lib')).toBe('/work/lib/a.ts');
   expect(movedTo('/work/srcs/a.ts', '/work/src', '/work/lib')).toBe('/work/srcs/a.ts');
+});
+
+it('says where a path is within a folder as git writes it', () => {
+  expect(relative('/r/src/a.rs', '/r')).toBe('src/a.rs');
+  expect(relative('/r/src/a.rs', '/r/')).toBe('src/a.rs');
+  expect(relative('/r', '/r')).toBe('');
+  expect(relative('/a.rs', '/')).toBe('a.rs');
+  expect(relative('/r2/a.rs', '/r')).toBeUndefined();
+  expect(relative('C:\\r\\src\\a.rs', 'C:\\r')).toBe('src/a.rs');
+  expect(relative('C:\\a.rs', 'C:\\')).toBe('a.rs');
 });

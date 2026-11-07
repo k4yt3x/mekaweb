@@ -63,6 +63,22 @@ export function useMeasured(id: string) {
 }
 
 /**
+ * What has changed as the session `id`'s tool calls finish and its turns end, while its feed is
+ * open: a value that changes with each, as files the agent changes may have.
+ */
+export function useToolsFinished(id: string | undefined) {
+  const { controller } = useConnection();
+  return useSyncExternalStore(controller?.subscribe ?? noopSubscribe, () => {
+    const state = id ? controller?.getSnapshot().find((each) => each.id === id) : undefined;
+    if (!state) return undefined;
+    let finished = 0;
+    for (const tool of Object.values(state.tools))
+      if (tool.state === 'completed' || tool.state === 'error') finished++;
+    return `${state.turnId ?? ''}:${state.running}:${finished}`;
+  });
+}
+
+/**
  * Where in the history the context of the session `id` is, read only for a `question` the history
  * cannot answer; see `contextQuestion`. Read again when the question changes.
  */

@@ -16,8 +16,10 @@ import { Button } from '../components/ui/button';
 import { useMediaQuery } from '../components/media-query';
 import { useOverlayPadding } from '../components/visual-viewport';
 import { useDarkTheme } from '../components/theme';
+import { useTextZoom } from '../components/text-zoom';
 import { fileIconName, folderIconName, iconUrl } from '../files/icons';
 import { findByName, type Row } from '../files/tree-model';
+import { LETTERS, markWords, type GitMark } from '../files/git';
 import { formatSize, within } from '../files/paths';
 
 /** The parts menu items are made of, a dropdown menu's or a context menu's. */
@@ -33,9 +35,17 @@ export interface Choosing {
   touch?: boolean;
 }
 
-/** Rows this tall, in pixels, so where each is follows from its place. */
+/**
+ * Rows this tall, in pixels, at the default font size, so where each is follows from its place;
+ * on a touch screen they are at least as tall as a finger needs.
+ */
 const ROW_HEIGHT = 22;
 const TOUCH_ROW_HEIGHT = 36;
+/** The font size the tree's measures are given at, which others scale. */
+const BASE_FONT_SIZE = 13;
+/** An icon's size, and how far each level is indented, at the default font size. */
+const ICON_SIZE = 16;
+const INDENT = 14;
 /** Past this many rows, only those in sight, and a few around them, are drawn. */
 const WINDOW_FROM = 300;
 const OVERSCAN = 20;
@@ -57,6 +67,9 @@ export const DRAGGED_PATHS = 'application/x-mekaweb-paths';
  */
 export function FileTree({
   rows,
+  marks,
+  fontSize,
+  onZoom,
   root,
   rootName,
   selected,
@@ -86,6 +99,12 @@ export function FileTree({
   empty,
 }: {
   rows: readonly Row[];
+  /** What git says of each entry, by its path. */
+  marks: ReadonlyMap<string, GitMark>;
+  /** The size of its text, in pixels, which its rows, icons and indents follow. */
+  fontSize: number;
+  /** Asks for its text a step larger or smaller, or `0` for the saved size. */
+  onZoom: (step: -1 | 0 | 1) => void;
   root: string;
   rootName: string;
   selected: ReadonlySet<string>;
@@ -124,8 +143,12 @@ export function FileTree({
   const coarse = useMediaQuery('(pointer: coarse)');
   const dark = useDarkTheme();
   const collisionPadding = useOverlayPadding();
-  const rowHeight = coarse ? TOUCH_ROW_HEIGHT : ROW_HEIGHT;
+  // Measured in whole pixels, so the guides between levels stay sharp.
+  const scaled = (pixels: number) => Math.round((pixels * fontSize) / BASE_FONT_SIZE);
+  const rowHeight = Math.max(coarse ? TOUCH_ROW_HEIGHT : 0, scaled(ROW_HEIGHT));
   const scroller = useRef<HTMLDivElement>(null);
+  // A tree is pointed at more than typed in: its keys work while the pointer is over it.
+  useTextZoom(scroller, onZoom, { whileOver: true });
   const elements = useRef(new Map<string, HTMLElement>());
   const [view, setView] = useState({ top: 0, height: 600 });
   useLayoutEffect(() => {
@@ -319,10 +342,18 @@ export function FileTree({
         <div
           ref={scroller}
           className="file-tree"
+          data-scrolled={view.top > 0 || undefined}
           role="tree"
           aria-label={`Files in ${rootName}`}
           aria-multiselectable="true"
-          style={{ '--row-height': `${rowHeight}px` } as CSSProperties}
+          style={
+            {
+              '--row-height': `${rowHeight}px`,
+              '--icon': `${scaled(ICON_SIZE)}px`,
+              '--indent': `${scaled(INDENT)}px`,
+              fontSize: `${fontSize}px`,
+            } as CSSProperties
+          }
           onScroll={(event) =>
             setView({
               top: event.currentTarget.scrollTop,
@@ -424,6 +455,8 @@ export function FileTree({
                 />
               );
             const isSelected = selected.has(row.path);
+            const mark = marks.get(row.path);
+            const markSaid = mark && markWords(mark, row.folder);
             // The folder a drop would land in is marked with all it shows; the root's is the tree.
             const inDrop =
               dropTarget !== undefined && dropTarget !== root && within(row.path, dropTarget);
@@ -445,12 +478,14 @@ export function FileTree({
                 tabIndex={row.path === current ? 0 : -1}
                 data-hidden={row.entry.hidden || undefined}
                 data-symlink={row.entry.kind === 'symlink' || undefined}
+                data-git={mark?.kind}
                 data-dropping={inDrop || undefined}
                 style={indent(row.depth)}
                 title={[
                   row.entry.target ? `${name} → ${row.entry.target}` : name,
                   row.folder ? '' : formatSize(row.entry.size),
                   row.entry.modified ? new Date(row.entry.modified).toLocaleString() : '',
+                  markSaid ?? '',
                 ]
                   .filter(Boolean)
                   .join('\n')}
@@ -535,6 +570,12 @@ export function FileTree({
                   draggable={false}
                 />
                 <span className="file-tree-name">{name}</span>
+                {mark && mark.kind !== 'ignored' && (
+                  <span className="file-tree-git" aria-hidden="true">
+                    {row.folder && !mark.own ? '•' : LETTERS[mark.kind]}
+                  </span>
+                )}
+                {markSaid && <span className="sr-only">, {markSaid}</span>}
                 <DropdownMenu.Root
                   modal={false}
                   onOpenChange={(open) =>

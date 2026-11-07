@@ -6,7 +6,7 @@
     "license": {
       "name": "AGPL-3.0-or-later"
     },
-    "version": "0.39.0"
+    "version": "0.40.0"
   },
   "paths": {
     "/api/account/devices": {
@@ -1318,6 +1318,61 @@
         }
       }
     },
+    "/api/git/status": {
+      "get": {
+        "tags": ["git"],
+        "summary": "How the repository whose folder is `repo` stands: its branch, and the entries changed, new or\nignored since its last commit. Read again for each request, by running git, which runs no\nprogram the repository's own config names.",
+        "operationId": "status",
+        "parameters": [
+          {
+            "name": "repo",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/preferences": {
       "get": {
         "tags": ["account"],
@@ -1607,6 +1662,29 @@
   },
   "components": {
     "schemas": {
+      "Change": {
+        "type": "object",
+        "description": "An entry that differs from the last commit, or that git ignores.",
+        "required": ["path", "kind"],
+        "properties": {
+          "from": {
+            "type": ["string", "null"],
+            "description": "Where a renamed entry was."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ChangeKind"
+          },
+          "path": {
+            "type": "string",
+            "description": "Where it is in the repository, its names separated by `/`. A folder git tells of as a\nwhole, new or ignored with all it holds, ends with `/`."
+          }
+        }
+      },
+      "ChangeKind": {
+        "type": "string",
+        "description": "How an entry differs from the last commit, as Files marks it.",
+        "enum": ["modified", "added", "deleted", "renamed", "untracked", "ignored", "conflicted"]
+      },
       "Confirmation": {
         "type": "object",
         "description": "Confirming who you are: a passkey's answer, or the password where there is no passkey.",
@@ -1764,6 +1842,54 @@
           }
         }
       },
+      "GitStatus": {
+        "type": "object",
+        "description": "How a repository stands.",
+        "required": ["repo", "changes", "too_many"],
+        "properties": {
+          "ahead": {
+            "type": ["integer", "null"],
+            "format": "int32",
+            "description": "How many commits it has that its upstream does not, and the other way around; none where\nthe upstream is not there.",
+            "minimum": 0
+          },
+          "behind": {
+            "type": ["integer", "null"],
+            "format": "int32",
+            "minimum": 0
+          },
+          "branch": {
+            "type": ["string", "null"],
+            "description": "The branch checked out; none when a commit is checked out on its own."
+          },
+          "changes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Change"
+            }
+          },
+          "commit": {
+            "type": ["string", "null"],
+            "description": "The commit checked out; none before the first."
+          },
+          "git_dir": {
+            "type": ["string", "null"],
+            "description": "Its git folder, absolute, which staging, committing and switching branches change."
+          },
+          "repo": {
+            "type": "string",
+            "description": "The repository's folder, absolute."
+          },
+          "too_many": {
+            "type": "boolean",
+            "description": "Whether more changed than are told: past 10,000, none are."
+          },
+          "upstream": {
+            "type": ["string", "null"],
+            "description": "The branch it follows, if any."
+          }
+        }
+      },
       "Kind": {
         "type": "string",
         "description": "What an entry is.",
@@ -1787,6 +1913,10 @@
           "path": {
             "type": "string",
             "description": "The folder, absolute."
+          },
+          "repo": {
+            "type": ["string", "null"],
+            "description": "The folder of the git repository the folder is in, absolute; none where it is in none, or\ngit is not installed."
           }
         }
       },

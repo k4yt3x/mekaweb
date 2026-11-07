@@ -24,6 +24,7 @@ use crate::{
     config::Config,
     error::ApiError,
     files::Files,
+    git::Git,
     meka::Meka,
     proxy::{self, Watching},
     push::Push,
@@ -46,6 +47,7 @@ pub(crate) struct AppInner {
     pub(crate) meka: Arc<Meka>,
     pub(crate) watching: Arc<Watching>,
     pub(crate) files: Files,
+    pub(crate) git: Git,
     pub(crate) terminals: Arc<Terminals>,
     pub(crate) push: Arc<Push>,
 }
@@ -86,6 +88,7 @@ impl App {
             meka,
             watching,
             files,
+            git: Git::new(),
             terminals,
             push,
         })))

@@ -1,10 +1,11 @@
 //! mekaweb's own API, under `/api/`: signing in, the account and its devices, synced preferences,
-//! how meka stands, Files, terminals and push notifications. Its OpenAPI document is what
+//! how meka stands, Files and git, terminals and push notifications. Its OpenAPI document is what
 //! `mekaweb openapi` prints, from which the interface's types are generated.
 
 pub(crate) mod account;
 pub(crate) mod auth;
 pub(crate) mod files;
+pub(crate) mod git;
 pub(crate) mod push;
 pub(crate) mod status;
 pub(crate) mod terminal;
@@ -68,6 +69,7 @@ pub(crate) fn routes() -> OpenApiRouter<App> {
         .routes(routes!(files::start_upload))
         .routes(routes!(files::upload_status, files::cancel_upload))
         .routes(routes!(files::finish_upload))
+        .routes(routes!(git::status))
         .routes(routes!(terminal::terminals, terminal::open_terminal))
         .routes(routes!(terminal::close_terminal))
         .routes(routes!(push::push_state))

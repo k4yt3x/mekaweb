@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.40.0] - 2026-11-07
+
+### Added
+
+- Files marks git's changes: a letter and colour for each file, a dot for folders holding changes.
+- Files dims what git ignores, and shows the branch under the path, with commits ahead and behind.
+- The marks follow edits, staging, commits and each tool call the agent finishes.
+- Showing a repository in Files runs no program its own git config names, such as a filter.
+- Show from here, in a folder's menu in Files, shows the tree from that folder.
+- Files has its own font size in Settings → Appearance; Ctrl with the wheel resizes it for a while.
+
+### Changed
+
+- Files' top takes two rows instead of four: the path, then the buttons and the branch.
+- Refresh and Show hidden files moved into Files' … menu.
+- The side panels lose their heading; a panel's button at the right edge closes it.
+
 ## [0.39.0] - 2026-11-06
 
 ### Changed
@@ -700,7 +717,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Light and dark themes, narrow layouts, and collapsible, resizable session panels.
 - Hosting at the root or a subpath, with GitHub Pages deployment on version tags.
 
-[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.39.0...HEAD
+[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.40.0...HEAD
+[0.40.0]: https://github.com/k4yt3x/mekaweb/compare/0.39.0...0.40.0
 [0.39.0]: https://github.com/k4yt3x/mekaweb/compare/0.38.0...0.39.0
 [0.38.0]: https://github.com/k4yt3x/mekaweb/compare/0.37.0...0.38.0
 [0.37.0]: https://github.com/k4yt3x/mekaweb/compare/0.36.1...0.37.0

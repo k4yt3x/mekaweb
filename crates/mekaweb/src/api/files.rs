@@ -197,7 +197,13 @@ pub(crate) async fn list(
     _signed: Signed,
     Query(query): Query<Location>,
 ) -> ApiResult<Json<Listing>> {
-    Ok(Json(app.files.list(path(&query.path)?).await?))
+    let mut listing = app.files.list(path(&query.path)?).await?;
+    listing.repo = app
+        .git
+        .repository_of(listing.path.clone().into())
+        .await
+        .map(|repo| repo.display().to_string());
+    Ok(Json(listing))
 }
 
 /// Changes to folders, as an event stream: a `change` event, its data the folder as asked for,

@@ -72,6 +72,17 @@ export function within(path: string, folder: string): boolean {
   );
 }
 
+/**
+ * Where `path` is within `folder`, both absolute, its names separated by `/` as git writes them:
+ * empty for `folder` itself, none for a path outside it.
+ */
+export function relative(path: string, folder: string): string | undefined {
+  if (!within(path, folder)) return undefined;
+  const rest = path.slice(trimmed(folder, root(folder)).length);
+  const names = rest.replace(isWindows(path) ? /^[\\/]+/ : /^\/+/, '');
+  return isWindows(path) ? names.replaceAll('\\', '/') : names;
+}
+
 /** Where `path` is once `from`, it or a folder holding it, moved to `to`; else `path` itself. */
 export function movedTo(path: string, from: string, to: string): string {
   return within(path, from) ? to + path.slice(from.length) : path;

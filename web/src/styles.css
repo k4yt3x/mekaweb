@@ -1602,25 +1602,6 @@ pre.bounded {
   border-left: 1px solid var(--border);
   background: var(--bg);
 }
-.details-panel-heading {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  min-height: 36px;
-  padding: 2px 4px 2px 14px;
-  border-bottom: 1px solid var(--border);
-}
-.details-panel-heading h2 {
-  font-size: 0.78rem;
-}
-.details-panel-heading .button-icon {
-  width: 30px;
-  height: 30px;
-  min-height: 30px;
-  padding: 6px;
-}
 /* The column of the panels' buttons, under the session's heading. */
 .session-rail {
   min-height: 0;
@@ -5254,11 +5235,26 @@ details > summary:has(.inline-heading) {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding-top: 12px;
+  gap: 2px;
+  padding-top: 6px;
 }
 .file-browser > * {
   margin-inline: 12px;
+}
+.file-browser > :is(.path-bar, .file-toolbar) {
+  margin-inline: 6px;
+}
+/* A rule under the path, across the panel, sets the folder apart from what acts on it. */
+.file-browser > .path-bar {
+  margin-inline: 0;
+  padding: 0 6px 6px;
+  border-bottom: 1px solid var(--border);
+}
+.file-browser > .path-bar + * {
+  margin-top: 2px;
+}
+.file-browser > :is(.upload-list, .notice) {
+  margin-block: 4px;
 }
 .file-browser > .file-tree {
   margin-inline: 0;
@@ -5292,20 +5288,24 @@ details > summary:has(.inline-heading) {
 .path-bar {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
   min-width: 0;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 2px 2px 2px 6px;
+  min-height: 30px;
   font-size: 0.8rem;
-}
-.path-bar.editing {
-  padding: 0;
-  border: 0;
 }
 .path-bar.editing input {
   width: 100%;
+  height: 30px;
+  min-height: 30px;
   font-size: 0.8rem;
+}
+.path-bar .button-icon {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  min-height: 28px;
+  padding: 7px;
+  color: var(--muted);
 }
 .path-trail {
   flex: 1;
@@ -5316,6 +5316,10 @@ details > summary:has(.inline-heading) {
   scrollbar-width: none;
   cursor: text;
   white-space: nowrap;
+}
+/* A path too long for the line keeps its deepest folder in sight and fades where it is cut. */
+.path-trail[data-clipped] {
+  mask-image: linear-gradient(to right, transparent, #000 28px);
 }
 .crumb-part {
   display: inline-flex;
@@ -5330,26 +5334,99 @@ details > summary:has(.inline-heading) {
   background: none;
   padding: 3px 4px;
   border-radius: 5px;
-  color: var(--text);
+  color: var(--muted);
   font-weight: 500;
   cursor: pointer;
 }
 .crumb:hover {
   background: var(--surface);
+  color: var(--text);
 }
 .crumb[aria-current='page'] {
+  color: var(--text);
   font-weight: 650;
 }
 .file-toolbar {
   display: flex;
   align-items: center;
   gap: 2px;
+  min-height: 30px;
 }
 .file-toolbar-gap {
   flex: 1;
 }
+/* The branch of the repository shown, after the buttons, opening to say all git says of it. */
+.file-branch-slot {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  justify-content: flex-end;
+}
+.file-branch {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+  height: 26px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  font-size: 0.78rem;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.file-branch:hover,
+.file-branch[data-state='open'] {
+  background: var(--surface);
+  color: var(--text);
+}
+.file-branch > svg {
+  flex-shrink: 0;
+}
+.file-branch-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text);
+}
+.file-branch-counts {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+.file-branch-warning {
+  color: var(--warning);
+}
+.branch-details {
+  max-width: min(320px, calc(100vw - 24px));
+  padding: 8px 10px;
+  font-size: 0.8rem;
+}
+.branch-details p {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+.branch-details p + p {
+  margin-top: 4px;
+}
+.branch-details svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.branch-details-name {
+  font-weight: 600;
+}
+.branch-details-warning {
+  color: var(--warning);
+}
 .file-selection {
-  min-height: 36px;
+  min-height: 30px;
 }
 .file-selection-count {
   margin-left: 9px;
@@ -5360,7 +5437,7 @@ details > summary:has(.inline-heading) {
   flex-shrink: 0;
   width: 15px;
   height: 15px;
-  margin: 0 0 0 12px;
+  margin: 0 0 0 6px;
   accent-color: var(--accent);
   cursor: pointer;
 }
@@ -5374,18 +5451,20 @@ details > summary:has(.inline-heading) {
 .file-tree {
   flex: 1;
   min-height: 0;
+  border-top: 1px solid transparent;
   overflow: auto;
   overscroll-behavior: contain;
   /* Rows drawn as it scrolls are not to move it: only what is in sight is drawn. */
   overflow-anchor: none;
   padding-bottom: 12px;
-  font-size: 0.8rem;
+}
+.file-tree[data-scrolled] {
+  border-top-color: var(--border);
 }
 .file-tree[data-dropping] {
   background: color-mix(in srgb, var(--accent) 7%, transparent);
 }
 .file-tree-row {
-  --indent: 14px;
   position: relative;
   display: flex;
   align-items: center;
@@ -5405,7 +5484,8 @@ details > summary:has(.inline-heading) {
   position: absolute;
   top: 0;
   bottom: 0;
-  left: 15px;
+  /* Under the middle of the arrow above. */
+  left: calc(7px + var(--icon) / 2);
   width: calc(var(--depth) * var(--indent));
   background: repeating-linear-gradient(
     to right,
@@ -5427,7 +5507,7 @@ details > summary:has(.inline-heading) {
   box-shadow: inset 0 0 0 1px var(--accent);
 }
 .file-tree-twisty {
-  flex: 0 0 16px;
+  flex: 0 0 var(--icon);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -5436,10 +5516,14 @@ details > summary:has(.inline-heading) {
 .file-tree-row[aria-expanded='true'] .file-tree-twisty svg {
   transform: rotate(90deg);
 }
+.file-tree-twisty svg {
+  width: calc(var(--icon) - 2px);
+  height: calc(var(--icon) - 2px);
+}
 .file-tree-icon {
-  flex: 0 0 16px;
-  width: 16px;
-  height: 16px;
+  flex: 0 0 var(--icon);
+  width: var(--icon);
+  height: var(--icon);
 }
 .file-tree-name {
   flex: 1;
@@ -5453,6 +5537,30 @@ details > summary:has(.inline-heading) {
 }
 .file-tree-row[data-symlink] .file-tree-name {
   font-style: italic;
+}
+/* What git says of an entry: its name in the colour of the change, with a letter, or a dot for a
+   folder holding changes; an ignored one dimmed, as a hidden one is. */
+.file-tree-row[data-git='modified'] {
+  --git: var(--warning);
+}
+.file-tree-row:is([data-git='added'], [data-git='untracked'], [data-git='renamed']) {
+  --git: var(--success);
+}
+.file-tree-row:is([data-git='deleted'], [data-git='conflicted']) {
+  --git: var(--danger);
+}
+.file-tree-row[data-git]:not([data-git='ignored']) .file-tree-name,
+.file-tree-git {
+  color: var(--git);
+}
+.file-tree-row[data-git='ignored'] .file-tree-name {
+  opacity: 0.6;
+}
+.file-tree-git {
+  flex: 0 0 calc(var(--icon) - 2px);
+  text-align: center;
+  font-size: 0.9em;
+  font-weight: 650;
 }
 .file-tree-row .file-tree-more {
   flex-shrink: 0;
@@ -5480,14 +5588,14 @@ details > summary:has(.inline-heading) {
   min-height: 0;
   padding: 0 4px;
   border-radius: 3px;
-  font-size: 0.8rem;
+  font-size: inherit;
 }
 .file-tree-note {
   display: flex;
   align-items: center;
   gap: 4px;
   height: var(--row-height);
-  padding: 0 4px 0 calc(28px + var(--depth) * 14px);
+  padding: 0 4px 0 calc(12px + var(--icon) + var(--depth) * var(--indent));
 }
 .file-tree-error {
   color: var(--danger);

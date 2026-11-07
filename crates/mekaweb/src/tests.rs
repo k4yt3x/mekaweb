@@ -636,6 +636,81 @@ async fn files_list_and_uploads_land_through_the_api() {
 }
 
 #[tokio::test]
+async fn a_listing_names_its_repository_and_git_says_how_that_stands() {
+    let (app, router, _, dir) = mekaweb().await;
+    if !app.git.available().await {
+        return;
+    }
+    let cookie = sign_in(&router).await;
+    let work = dir.path().join("work");
+    let global = dir.path().join("gitconfig");
+    std::fs::write(&global, "").unwrap();
+    let made = std::process::Command::new("git")
+        .args(["init", "-q", "-b", "main"])
+        .current_dir(&work)
+        .env("GIT_CONFIG_GLOBAL", &global)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .output()
+        .unwrap();
+    assert!(made.status.success());
+    std::fs::create_dir(work.join("inner")).unwrap();
+    std::fs::write(work.join("inner/new.txt"), "").unwrap();
+    let encoded = |path: &std::path::Path| {
+        percent_encoding::utf8_percent_encode(
+            &path.display().to_string(),
+            percent_encoding::NON_ALPHANUMERIC,
+        )
+        .to_string()
+    };
+    let get = |path: String| {
+        request("GET", &path)
+            .header(header::COOKIE, &cookie)
+            .body(Body::empty())
+            .unwrap()
+    };
+    let listing = json(
+        send(
+            &router,
+            get(format!(
+                "/api/files/list?path={}",
+                encoded(&work.join("inner"))
+            )),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(listing["repo"], work.display().to_string());
+    let outside = json(
+        send(
+            &router,
+            get(format!("/api/files/list?path={}", encoded(dir.path()))),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(outside["repo"], serde_json::Value::Null);
+    let status = send(
+        &router,
+        get(format!("/api/git/status?repo={}", encoded(&work))),
+    )
+    .await;
+    assert_eq!(status.status(), StatusCode::OK);
+    let status = json(status).await;
+    assert_eq!(status["branch"], "main");
+    assert_eq!(status["changes"][0]["path"], "inner/");
+    assert_eq!(status["changes"][0]["kind"], "untracked");
+    let not_one = send(
+        &router,
+        get(format!(
+            "/api/git/status?repo={}",
+            encoded(&work.join("inner"))
+        )),
+    )
+    .await;
+    assert_eq!(not_one.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
 async fn folders_watched_tell_of_their_changes_until_the_sign_in_ends() {
     let (_app, router, _, dir) = mekaweb().await;
     let cookie = sign_in(&router).await;

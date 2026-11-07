@@ -21,7 +21,6 @@ import {
   LogOut,
   Settings,
   SquareTerminal,
-  X,
   RefreshCw,
   Share as Export,
 } from 'lucide-react';
@@ -728,20 +727,6 @@ export function SessionsPage({
                   onCommit={(width) => commitWidth('panel', width)}
                   onCancel={() => setResizing(undefined)}
                 />
-                <header className="details-panel-heading">
-                  <h2>{PANEL_TITLES[shownPanel]}</h2>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    aria-label={`Close ${PANEL_TITLES[shownPanel]}`}
-                    onClick={() => {
-                      showPanel(undefined);
-                      panelButtons.current.get(shownPanel)?.focus();
-                    }}
-                  >
-                    <X size={18} />
-                  </Button>
-                </header>
                 {shownPanel === 'files' ? (
                   <div className="details-panel-body files-panel-body">
                     <FileBrowser

@@ -454,6 +454,27 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/git/status': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * How the repository whose folder is `repo` stands: its branch, and the entries changed, new or
+     *     ignored since its last commit. Read again for each request, by running git, which runs no
+     *     program the repository's own config names.
+     */
+    get: operations['status'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/preferences': {
     parameters: {
       query?: never;
@@ -570,6 +591,23 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
+    /** @description An entry that differs from the last commit, or that git ignores. */
+    Change: {
+      /** @description Where a renamed entry was. */
+      from?: string | null;
+      kind: components['schemas']['ChangeKind'];
+      /**
+       * @description Where it is in the repository, its names separated by `/`. A folder git tells of as a
+       *     whole, new or ignored with all it holds, ends with `/`.
+       */
+      path: string;
+    };
+    /**
+     * @description How an entry differs from the last commit, as Files marks it.
+     * @enum {string}
+     */
+    ChangeKind:
+      'modified' | 'added' | 'deleted' | 'renamed' | 'untracked' | 'ignored' | 'conflicted';
     /** @description Confirming who you are: a passkey's answer, or the password where there is no passkey. */
     Confirmation: {
       challenge?: string | null;
@@ -634,6 +672,30 @@ export interface components {
       /** @description Whether to replace a file of the same name. */
       replace?: boolean;
     };
+    /** @description How a repository stands. */
+    GitStatus: {
+      /**
+       * Format: int32
+       * @description How many commits it has that its upstream does not, and the other way around; none where
+       *     the upstream is not there.
+       */
+      ahead?: number | null;
+      /** Format: int32 */
+      behind?: number | null;
+      /** @description The branch checked out; none when a commit is checked out on its own. */
+      branch?: string | null;
+      changes: components['schemas']['Change'][];
+      /** @description The commit checked out; none before the first. */
+      commit?: string | null;
+      /** @description Its git folder, absolute, which staging, committing and switching branches change. */
+      git_dir?: string | null;
+      /** @description The repository's folder, absolute. */
+      repo: string;
+      /** @description Whether more changed than are told: past 10,000, none are. */
+      too_many: boolean;
+      /** @description The branch it follows, if any. */
+      upstream?: string | null;
+    };
     /**
      * @description What an entry is.
      * @enum {string}
@@ -646,6 +708,11 @@ export interface components {
       home?: string | null;
       /** @description The folder, absolute. */
       path: string;
+      /**
+       * @description The folder of the git repository the folder is in, absolute; none where it is in none, or
+       *     git is not installed.
+       */
+      repo?: string | null;
     };
     /** @description A sign-in attempt. */
     LogEntryView: {
@@ -2122,6 +2189,51 @@ export interface operations {
         };
       };
       403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  status: {
+    parameters: {
+      query: {
+        repo: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['GitStatus'];
+        };
+      };
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Problem'];
+        };
+      };
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Problem'];
+        };
+      };
+      422: {
         headers: {
           [name: string]: unknown;
         };
