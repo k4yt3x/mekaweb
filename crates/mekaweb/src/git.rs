@@ -769,19 +769,16 @@ mod tests {
             Some(repo.join("inner"))
         );
         assert_eq!(git_for_tests.repository_of(dir.path().into()).await, None);
-        // A linked worktree's git folder is in the repository's.
+        // A linked worktree's git folder is in the repository's. git names it by its real path,
+        // which on macOS is under `/private/var` where the temporary folder's is under `/var`.
         let linked = git_for_tests
             .status(dir.path().join("linked"))
             .await
             .unwrap();
+        let linked_dir = linked.git_dir.as_deref().map(std::fs::canonicalize);
         assert_eq!(
-            linked.git_dir.as_deref(),
-            Some(
-                repo.join(".git/worktrees/linked")
-                    .display()
-                    .to_string()
-                    .as_str()
-            )
+            linked_dir.transpose().unwrap(),
+            Some(std::fs::canonicalize(repo.join(".git/worktrees/linked")).unwrap())
         );
         assert!(matches!(
             git_for_tests.status(repo.join("build")).await,
