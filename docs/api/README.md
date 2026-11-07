@@ -1,8 +1,8 @@
 # API schema maintenance
 
-`meka-0.89.0.json` was captured from meka `0.89.0`, commit `250a5ee7b66464097240ca9c208c00ad9415b83e`, through `/v1/openapi.json` with `[serve].docs = true`. The generated REST types are committed in `web/src/api/schema.d.ts`; runtime connections do not require schema access.
+`meka-0.90.0.json` was captured from meka `0.90.0`, commit `abfd25a8a60ea3f1a7661075ee03b55cd0c65a9f`, through `/v1/openapi.json` with `[serve].docs = true`. The generated REST types are committed in `web/src/api/schema.d.ts`; runtime connections do not require schema access.
 
-mekaweb requires meka 0.89.0 or newer and refuses older servers when it connects. Compared with 0.68.0, the 0.70.0 and 0.71.0 APIs change these shapes the client used:
+mekaweb requires meka 0.90.0 or newer and refuses older servers when it connects. Compared with 0.68.0, the 0.70.0 and 0.71.0 APIs change these shapes the client used:
 
 - `/v1/info` no longer reports `vision`; each `/v1/profiles` entry does.
 - `/v1/sessions/{id}/context` no longer reports `used_percent`. The client divides `used` by `window`, rounding down as meka did.
@@ -106,16 +106,21 @@ mekaweb requires meka 0.89.0 or newer and refuses older servers when it connects
 - `GET /export` answers the JSON archive alone; the client no longer offers a Markdown transcript. The archive is format 22, and 0.89.0 reads a 0.88 archive as it is.
 - Problem `type` URIs moved to `https://meka.bot/errors/`. The client reads the identifier after `/errors/` alone, so the move needed no change to what it recognizes.
 
+0.90.0 adds two profile fields, which the profile form offers and therefore requires it for; nothing else in the schema changes:
+
+- `parameters`: request fields sent as written, such as `temperature`, read by `anthropic-messages`, `openai-chat-completions` and `openai-responses`. A `PATCH` replaces them whole, and `null` removes them. meka refuses a field it writes itself, naming the profile setting to use instead.
+- `cyber_access_program`: the cyber access program a `chatgpt-subscription` profile asks for, such as `daybreak_blue`; unset leaves it to the server.
+
 A shell command may print 64 MiB, all of which `tool_call.completed` carries, while the saved result stays a bounded preview. The SSE parser therefore skips data past 2,000,000 characters and keeps the frame's id, so a reconnect cannot replay it. A skipped tool completion keeps its call, outcome, and correlation from the ends of its JSON, and other skipped events become a notice.
 
 The feed's 409 covers `session-not-loaded`: a token with only `sessions:r` does not load a session by attaching. The client then shows the saved conversation and retries the feed until the server loads the session. `POST /compact` runs as a turn on the feed, with `source: "compaction"` on `turn.started`; the client shows it as compacting and does not notify when it ends.
 
-Schema capture is a manual maintenance step. Choose a disposable meka instance with `[serve].docs = true`, confirm its version, and download its schema. For a 0.89.0 instance listening on port 8081:
+Schema capture is a manual maintenance step. Choose a disposable meka instance with `[serve].docs = true`, confirm its version, and download its schema. For a 0.90.0 instance listening on port 8081:
 
 ```sh
-curl --fail --silent --show-error http://127.0.0.1:8081/v1/openapi.json --output docs/api/meka-0.89.0.json
+curl --fail --silent --show-error http://127.0.0.1:8081/v1/openapi.json --output docs/api/meka-0.90.0.json
 cd web
-npx prettier --write ../docs/api/meka-0.89.0.json
+npx prettier --write ../docs/api/meka-0.90.0.json
 npm run api:generate
 ```
 

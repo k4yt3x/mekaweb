@@ -13,7 +13,7 @@ Besides meka's sessions, memory, skills, schedules, MCP servers, accounts and pr
 - **Push notifications** when a turn finishes, fails, or waits for your approval or answer, even with the app closed.
 - **Data saver** for mobile data, and preferences shared by every device.
 
-This release supports **meka 0.89.0** and newer.
+This release supports **meka 0.90.0** and newer.
 
 web.meka.run, the static site that reached meka straight from the browser, is retired; its last release was mekaweb 0.23.1.
 

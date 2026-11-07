@@ -935,6 +935,9 @@ pre.bounded {
   grid-template-columns: 1fr 1fr;
   gap: 16px;
 }
+.form-grid-wide {
+  grid-column: 1 / -1;
+}
 /* A profile's fallbacks, in the order they are tried, under the field that adds one. */
 .fallback-list {
   display: flex;

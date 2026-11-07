@@ -4,7 +4,7 @@
     "title": "meka HTTP API",
     "description": "Service-to-service API for driving meka agent turns programmatically. Mirrors the wire format described in the HTTP API docs. A field that has no value is omitted from every response and event, never sent as `null`.",
     "license": { "name": "AGPL-3.0-or-later" },
-    "version": "0.89.0"
+    "version": "0.90.0"
   },
   "paths": {
     "/v1/accounts": {
@@ -4862,6 +4862,7 @@
           },
           "cache_control": { "type": ["boolean", "null"] },
           "context_window": { "type": ["integer", "null"], "format": "int64", "minimum": 0 },
+          "cyber_access_program": { "type": ["string", "null"] },
           "default": {
             "type": "boolean",
             "description": "Make the profile the one a session gets when it names none."
@@ -4878,6 +4879,10 @@
           "max_request_bytes": { "type": ["integer", "null"], "format": "int64", "minimum": 0 },
           "model": { "type": "string" },
           "name": { "type": "string" },
+          "parameters": {
+            "type": ["object", "null"],
+            "description": "Request fields sent as written, each a top-level field of the request body."
+          },
           "reasoning_summary": { "type": ["boolean", "null"] },
           "thinking": { "type": ["string", "null"] },
           "thinking_budget": { "type": ["integer", "null"], "format": "int64", "minimum": 0 },
@@ -5808,6 +5813,7 @@
         "properties": {
           "cache_control": { "type": ["boolean", "null"] },
           "context_window": { "type": ["integer", "null"], "format": "int64", "minimum": 0 },
+          "cyber_access_program": { "type": ["string", "null"] },
           "default": {
             "type": ["boolean", "null"],
             "description": "`true` makes the profile the one a session gets when it names none. `false` is refused:\nthe default is unset by removing the profile or choosing another."
@@ -5822,6 +5828,10 @@
           "name": {
             "type": ["string", "null"],
             "description": "The name the profile moves to, taking every session recorded on it along. Sent on its\nown: a rename moves rows in the store, and is not combined with a change to the file."
+          },
+          "parameters": {
+            "type": ["object", "null"],
+            "description": "The request fields sent as written, replaced whole; `null` removes them all."
           },
           "reasoning_summary": { "type": ["boolean", "null"] },
           "thinking": { "type": ["string", "null"] },
@@ -5923,6 +5933,7 @@
           },
           "cache_control": { "type": ["boolean", "null"] },
           "context_window": { "type": ["integer", "null"], "format": "int64", "minimum": 0 },
+          "cyber_access_program": { "type": ["string", "null"] },
           "default": {
             "type": "boolean",
             "description": "Whether this is the profile a session gets when it names none."
@@ -5935,6 +5946,10 @@
           "max_request_bytes": { "type": ["integer", "null"], "format": "int64", "minimum": 0 },
           "model": { "type": ["string", "null"] },
           "name": { "type": "string" },
+          "parameters": {
+            "type": ["object", "null"],
+            "description": "The request fields sent as written, as the file states them. Load holds every profile's to\nvalues JSON can carry, on a backend that sends them or not."
+          },
           "reasoning_summary": { "type": ["boolean", "null"] },
           "thinking": { "type": ["string", "null"] },
           "thinking_budget": { "type": ["integer", "null"], "format": "int64", "minimum": 0 },

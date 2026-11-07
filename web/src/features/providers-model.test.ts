@@ -2,6 +2,7 @@ import { expect, it } from 'vitest';
 import {
   createAccountBody,
   createProfileBody,
+  parametersProblem,
   patchProfileBody,
   profileDraft,
   providerGroups,
@@ -19,6 +20,61 @@ it('offers each profile setting only where meka sends it', () => {
   expect(readsProfileKey('openai-chat-completions', 'effort')).toBe(true);
   expect(readsProfileKey('openai-responses', 'encrypted_reasoning')).toBe(true);
   expect(readsProfileKey('chatgpt-subscription', 'reasoning_summary')).toBe(false);
+  expect(readsProfileKey('chatgpt-subscription', 'cyber_access_program')).toBe(true);
+  expect(readsProfileKey('openai-responses', 'cyber_access_program')).toBe(false);
+  expect(readsProfileKey('openai-chat-completions', 'parameters')).toBe(true);
+  expect(readsProfileKey('claude-subscription', 'parameters')).toBe(false);
+  expect(readsProfileKey('chatgpt-subscription', 'parameters')).toBe(false);
+});
+
+it('sends request parameters as the JSON object typed, and Daybreak where it is read', () => {
+  const draft = {
+    ...profileDraft(),
+    name: 'qwen',
+    account: 'openrouter',
+    model: 'qwen/qwen3-235b-a22b',
+    parameters: '{"temperature": 0.6, "provider": {"order": ["deepinfra"]}}',
+    cyber_access_program: 'daybreak_blue',
+  };
+  expect(createProfileBody(draft, 'openai-chat-completions')).toMatchObject({
+    parameters: { temperature: 0.6, provider: { order: ['deepinfra'] } },
+  });
+  expect(createProfileBody(draft, 'openai-chat-completions')).not.toHaveProperty(
+    'cyber_access_program',
+  );
+  // A subscription reads no parameters, and ChatGPT's takes its program.
+  expect(createProfileBody(draft, 'chatgpt-subscription')).toMatchObject({
+    cyber_access_program: 'daybreak_blue',
+  });
+  expect(createProfileBody(draft, 'chatgpt-subscription')).not.toHaveProperty('parameters');
+  for (const text of ['[1]', '0.6', 'null', '{temperature: 0.6}'])
+    expect(() => createProfileBody({ ...draft, parameters: text }, 'openai-responses')).toThrow(
+      'Request parameters: Write a JSON object',
+    );
+  expect(parametersProblem('  ')).toBeUndefined();
+  expect(parametersProblem('{}')).toBeUndefined();
+  expect(parametersProblem('{')).toBe('Write a JSON object, such as {"temperature": 0.6}.');
+});
+
+it('patches request parameters whole when what they say changes, and clears them with null', () => {
+  const start = profileDraft({
+    name: 'qwen',
+    account: 'openrouter',
+    model: 'qwen/qwen3-235b-a22b',
+    default: false,
+    parameters: { temperature: 0.6 },
+  });
+  expect(start.parameters).toBe('{\n  "temperature": 0.6\n}');
+  const backend = 'openai-chat-completions';
+  expect(patchProfileBody(start, { ...start, parameters: '{"temperature":0.6}' }, backend)).toEqual(
+    {},
+  );
+  expect(
+    patchProfileBody(start, { ...start, parameters: '{"temperature": 0.6, "top_p": 1}' }, backend),
+  ).toEqual({ parameters: { temperature: 0.6, top_p: 1 } });
+  expect(patchProfileBody(start, { ...start, parameters: '' }, backend)).toEqual({
+    parameters: null,
+  });
 });
 
 it('adds a profile with what it states, typed, and drops what its backend never sends', () => {

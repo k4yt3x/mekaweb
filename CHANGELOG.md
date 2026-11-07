@@ -17,12 +17,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Showing a repository in Files runs no program its own git config names, such as a filter.
 - Show from here, in a folder's menu in Files, shows the tree from that folder.
 - Files has its own font size in Settings → Appearance; Ctrl with the wheel resizes it for a while.
+- A profile's Advanced settings take request parameters, such as temperature, as JSON.
+- A ChatGPT subscription's profile can ask for a Daybreak cyber access program.
 
 ### Changed
 
+- **Breaking:** mekaweb requires meka 0.90.0 or newer.
 - Files' top takes two rows instead of four: the path, then the buttons and the branch.
 - Refresh and Show hidden files moved into Files' … menu.
 - The side panels lose their heading; a panel's button at the right edge closes it.
+
+### Fixed
+
+- A profile opened again right after a save shows what was saved, not the settings before it.
 
 ## [0.39.0] - 2026-11-06
 

@@ -24,6 +24,7 @@ import {
   createAccountBody,
   createProfileBody,
   isSubscription,
+  parametersProblem,
   patchProfileBody,
   profileDraft,
   providerGroups,
@@ -619,7 +620,9 @@ function EditProfile({
     false,
   );
   if (detail.error) return <ErrorNotice error={detail.error} />;
-  if (!detail.data) return <Loading />;
+  // The form takes the settings once, as it opens: a copy kept from before a save is read again
+  // first, or it would show what the save changed.
+  if (!detail.data || (detail.isStale && !detail.isFetchedAfterMount)) return <Loading />;
   return <ProfileForm initial={detail.data} {...props} />;
 }
 
@@ -836,9 +839,42 @@ function ProfileForm({
             {reads('cache_control') && tristate('cache_control', 'Cache breakpoint')}
             {reads('encrypted_reasoning') && tristate('encrypted_reasoning', 'Encrypted reasoning')}
             {reads('reasoning_summary') && tristate('reasoning_summary', 'Reasoning summary')}
+            {reads('cyber_access_program') && (
+              <Field label="Cyber access program">
+                <input
+                  list="profile-cyber-access"
+                  spellCheck={false}
+                  placeholder="Default"
+                  value={draft.cyber_access_program}
+                  onChange={(event) => set({ cyber_access_program: event.target.value })}
+                />
+              </Field>
+            )}
+            {reads('parameters') && (
+              <div className="form-grid-wide">
+                <Field
+                  label="Request parameters"
+                  hint="Fields sent with every request as written, as JSON."
+                  error={parametersProblem(draft.parameters)}
+                >
+                  <textarea
+                    spellCheck={false}
+                    rows={4}
+                    placeholder='{"temperature": 0.6}'
+                    value={draft.parameters}
+                    onChange={(event) => set({ parameters: event.target.value })}
+                  />
+                </Field>
+              </div>
+            )}
           </div>
           <datalist id="profile-effort">
             {['low', 'medium', 'high', 'xhigh', 'max'].map((value) => (
+              <option key={value} value={value} />
+            ))}
+          </datalist>
+          <datalist id="profile-cyber-access">
+            {['standard', 'daybreak_blue', 'daybreak_red'].map((value) => (
               <option key={value} value={value} />
             ))}
           </datalist>

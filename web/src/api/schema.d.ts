@@ -1552,6 +1552,7 @@ export interface components {
       cache_control?: boolean | null;
       /** Format: int64 */
       context_window?: number | null;
+      cyber_access_program?: string | null;
       /** @description Make the profile the one a session gets when it names none. */
       default?: boolean;
       deferred_tools?: string | null;
@@ -1565,6 +1566,8 @@ export interface components {
       max_request_bytes?: number | null;
       model: string;
       name: string;
+      /** @description Request fields sent as written, each a top-level field of the request body. */
+      parameters?: Record<string, unknown> | null;
       reasoning_summary?: boolean | null;
       thinking?: string | null;
       /** Format: int64 */
@@ -2320,6 +2323,7 @@ export interface components {
       cache_control?: boolean | null;
       /** Format: int64 */
       context_window?: number | null;
+      cyber_access_program?: string | null;
       /**
        * @description `true` makes the profile the one a session gets when it names none. `false` is refused:
        *     the default is unset by removing the profile or choosing another.
@@ -2339,6 +2343,8 @@ export interface components {
        *     own: a rename moves rows in the store, and is not combined with a change to the file.
        */
       name?: string | null;
+      /** @description The request fields sent as written, replaced whole; `null` removes them all. */
+      parameters?: Record<string, unknown> | null;
       reasoning_summary?: boolean | null;
       thinking?: string | null;
       /** Format: int64 */
@@ -2430,6 +2436,7 @@ export interface components {
       cache_control?: boolean | null;
       /** Format: int64 */
       context_window?: number | null;
+      cyber_access_program?: string | null;
       /** @description Whether this is the profile a session gets when it names none. */
       default: boolean;
       deferred_tools?: string | null;
@@ -2442,6 +2449,11 @@ export interface components {
       max_request_bytes?: number | null;
       model?: string | null;
       name: string;
+      /**
+       * @description The request fields sent as written, as the file states them. Load holds every profile's to
+       *     values JSON can carry, on a backend that sends them or not.
+       */
+      parameters?: Record<string, unknown> | null;
       reasoning_summary?: boolean | null;
       thinking?: string | null;
       /** Format: int64 */

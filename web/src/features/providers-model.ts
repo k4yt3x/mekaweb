@@ -17,7 +17,7 @@ export function isSubscription(backend: string | null | undefined) {
   return BACKENDS.some((entry) => entry.id === backend && entry.subscription);
 }
 
-// meka 0.87.0: src/config.rs::Backend::reads_account_key and reads_profile_key. meka refuses a
+// meka 0.90.0: src/config.rs::Backend::reads_account_key and reads_profile_key. meka refuses a
 // key the backend never reads, so the forms offer only these.
 export function readsAccountKey(backend: string, key: string) {
   if (key === 'client_id' || key === 'oauth_token_url') return isSubscription(backend);
@@ -34,8 +34,23 @@ export function readsProfileKey(backend: string | null | undefined, key: string)
   if (key === 'cache_control') return backend === 'anthropic-messages';
   if (key === 'encrypted_reasoning' || key === 'reasoning_summary')
     return backend === 'openai-responses';
+  if (key === 'cyber_access_program') return backend === 'chatgpt-subscription';
   if (key === 'deferred_tools') return backend !== 'openai-chat-completions';
+  // The subscriptions send their official client's request, which takes no fields of the user's.
+  if (key === 'parameters') return !isSubscription(backend);
   return true;
+}
+
+/** What is wrong with request parameters typed as `text`, if anything: they are a JSON object. */
+export function parametersProblem(text: string): string | undefined {
+  if (!text.trim()) return undefined;
+  try {
+    const value: unknown = JSON.parse(text);
+    if (value && typeof value === 'object' && !Array.isArray(value)) return undefined;
+  } catch {
+    // Said below.
+  }
+  return 'Write a JSON object, such as {"temperature": 0.6}.';
 }
 
 /** A profile as its form holds it: every setting as entered, blank for one left to its default. */
@@ -57,6 +72,9 @@ export interface ProfileDraft {
   thinking_display: string;
   encrypted_reasoning: string;
   reasoning_summary: string;
+  cyber_access_program: string;
+  /** The fields sent with every request as written, as the JSON object typed. */
+  parameters: string;
 }
 const counts = [
   'context_window',
@@ -64,11 +82,17 @@ const counts = [
   'max_request_bytes',
   'thinking_budget',
 ] as const;
-const words = ['effort', 'deferred_tools', 'thinking', 'thinking_display'] as const;
+const words = [
+  'effort',
+  'deferred_tools',
+  'thinking',
+  'thinking_display',
+  'cyber_access_program',
+] as const;
 const switches = ['vision', 'cache_control', 'encrypted_reasoning', 'reasoning_summary'] as const;
 type Settings = Pick<
   Schema['PatchProfileRequest'],
-  (typeof counts)[number] | (typeof words)[number] | (typeof switches)[number]
+  (typeof counts)[number] | (typeof words)[number] | (typeof switches)[number] | 'parameters'
 >;
 
 export function profileDraft(profile?: Schema['ProfileDetailView']): ProfileDraft {
@@ -92,6 +116,8 @@ export function profileDraft(profile?: Schema['ProfileDetailView']): ProfileDraf
     thinking_display: text(profile?.thinking_display),
     encrypted_reasoning: text(profile?.encrypted_reasoning),
     reasoning_summary: text(profile?.reasoning_summary),
+    cyber_access_program: text(profile?.cyber_access_program),
+    parameters: profile?.parameters ? JSON.stringify(profile.parameters, null, 2) : '',
   };
 }
 
@@ -105,6 +131,11 @@ function settings(draft: ProfileDraft, backend: string | null | undefined): Sett
     if (draft[key].trim() && readsProfileKey(backend, key)) stated[key] = draft[key].trim();
   for (const key of switches)
     if (draft[key] && readsProfileKey(backend, key)) stated[key] = draft[key] === 'true';
+  if (draft.parameters.trim() && readsProfileKey(backend, 'parameters')) {
+    const problem = parametersProblem(draft.parameters);
+    if (problem) throw new Error(`Request parameters: ${problem}`);
+    stated.parameters = JSON.parse(draft.parameters) as Record<string, unknown>;
+  }
   return stated;
 }
 
@@ -134,6 +165,9 @@ export function patchProfileBody(
   const patch: Record<string, unknown> = {};
   for (const key of [...counts, ...words, ...switches])
     if (before[key] !== after[key]) patch[key] = after[key] ?? null;
+  // Sent whole, as meka replaces them whole: only when what they say changed, not their spacing.
+  if (JSON.stringify(before.parameters) !== JSON.stringify(after.parameters))
+    patch.parameters = after.parameters ?? null;
   if (draft.model.trim() !== initial.model.trim()) patch.model = draft.model.trim();
   if (draft.fallbacks.join('\n') !== initial.fallbacks.join('\n'))
     patch.fallbacks = draft.fallbacks.length ? draft.fallbacks : null;
