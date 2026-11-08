@@ -123,9 +123,10 @@ jobs:
             found { print }
           ' CHANGELOG.md > notes.md
           test -s notes.md
-      - name: Publish the release
+      # A draft, which goes out once someone has looked it over and published it on GitHub.
+      - name: Create the draft release
         env:
           GH_TOKEN: ${{ github.token }}
         run: >
           gh release create "$GITHUB_REF_NAME" release/*
-          --title "mekaweb $GITHUB_REF_NAME" --notes-file notes.md --verify-tag
+          --draft --title "mekaweb $GITHUB_REF_NAME" --notes-file notes.md --verify-tag
