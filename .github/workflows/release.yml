@@ -113,10 +113,9 @@ jobs:
           pattern: meka-studio-*
           merge-multiple: true
           path: release
-      - name: Write checksums and notes
+      - name: Write the notes
         run: |
           chmod +x release/meka-studio-*
-          (cd release && sha256sum meka-studio-* > SHA256SUMS)
           awk -v version="$GITHUB_REF_NAME" '
             $0 ~ "^## \\[" version "\\]" { found = 1; next }
             found && /^## \[/ { exit }
@@ -129,4 +128,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: >
           gh release create "$GITHUB_REF_NAME" release/*
-          --draft --title "Meka Studio $GITHUB_REF_NAME" --notes-file notes.md --verify-tag
+          --draft --title "$GITHUB_REF_NAME" --notes-file notes.md --verify-tag

@@ -10,7 +10,7 @@ Meka Studio runs on Linux, macOS and Windows. Each release states which Meka ver
 
 ## 1. Get Meka Studio
 
-Download the binary for your machine from the [releases](https://github.com/k4yt3x/meka-studio/releases): `meka-studio-x86_64-linux`, `meka-studio-aarch64-linux`, `meka-studio-aarch64-macos` for Apple silicon, or `meka-studio-x86_64-windows.exe`. Check its checksum against `SHA256SUMS`, and put it where the service you choose in step 5 runs it from: `/usr/local/bin` for a system unit or on macOS, `~/.local/bin` for a user unit.
+Download the binary for your machine from the [releases](https://github.com/k4yt3x/meka-studio/releases): `meka-studio-x86_64-linux`, `meka-studio-aarch64-linux`, `meka-studio-aarch64-macos` for Apple silicon, or `meka-studio-x86_64-windows.exe`. Check its checksum against the SHA-256 the release page shows beside it, and put it where the service you choose in step 5 runs it from: `/usr/local/bin` for a system unit or on macOS, `~/.local/bin` for a user unit.
 
 ```sh
 sudo install -m 755 meka-studio-x86_64-linux /usr/local/bin/meka-studio
