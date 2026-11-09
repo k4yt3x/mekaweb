@@ -17,7 +17,7 @@ import {
   type McpDraft,
 } from './mcp-model';
 
-/** Adds an MCP server, or edits one by the keys meka reports of it. */
+/** Adds an MCP server, or edits one by the keys Meka reports of it. */
 export function McpServerForm({
   initial,
   onSaved,
@@ -164,7 +164,7 @@ export function McpServerForm({
                     required: !initial,
                   })}
                 {draft.auth === 'client_credentials_jwt' &&
-                  text('signing_key_path', 'Signing key path', 'A PEM file on meka’s machine.', {
+                  text('signing_key_path', 'Signing key path', 'A PEM file on Meka’s machine.', {
                     required: true,
                   })}
                 {draft.auth === 'client_credentials_jwt' &&
@@ -182,7 +182,7 @@ export function McpServerForm({
           </>
         ) : (
           <>
-            {text('command', 'Command', 'Runs on meka’s machine, as meka’s user.', {
+            {text('command', 'Command', 'Runs on Meka’s machine, as Meka’s user.', {
               required: true,
             })}
             {area('args', 'Arguments', 'One per line.')}

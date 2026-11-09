@@ -1,12 +1,12 @@
-import type { components } from './mekaweb-schema';
+import type { components } from './meka-studio-schema';
 import { ApiError, ConnectionError, retryDelay, type Query, type Schema } from './client';
 
-/** mekaweb's own API types, generated from its OpenAPI document. */
+/** Meka Studio's own API types, generated from its OpenAPI document. */
 export type Gateway = components['schemas'];
 
-/** mekaweb's problem types, as `ApiError.problem.type` carries them. */
+/** Meka Studio's problem types, as `ApiError.problem.type` carries them. */
 export function isProblem(error: unknown, kind: string): error is ApiError {
-  return error instanceof ApiError && error.problem.type === `urn:mekaweb:${kind}`;
+  return error instanceof ApiError && error.problem.type === `urn:meka-studio:${kind}`;
 }
 
 /** Whether `path` has a `.` or `..` segment, however written, which a URL would resolve away. */
@@ -23,7 +23,7 @@ function hasDotSegment(path: string): boolean {
 }
 
 /**
- * mekaweb's own API, under `/api/`: signing in, the account, Files, terminals, push and status.
+ * Meka Studio's own API, under `/api/`: signing in, the account, Files, terminals, push and status.
  * Requests are same-origin, signed in by the cookie; a 401 means the sign-in ended.
  */
 export class GatewayClient {
@@ -77,7 +77,7 @@ export class GatewayClient {
       const value: unknown = await response.json();
       if (value && typeof value === 'object') problem = value as Partial<Schema['ProblemDetail']>;
     } catch {
-      // A proxy in front of mekaweb may answer with HTML.
+      // A proxy in front of Meka Studio may answer with HTML.
     }
     const error = new ApiError(
       response.status,

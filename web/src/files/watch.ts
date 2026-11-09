@@ -7,8 +7,8 @@ import { useRuntime } from '../connections/context';
 const RETRY_MS = 1000;
 const MAX_RETRY_MS = 30_000;
 /**
- * The most folders one stream follows, as mekaweb takes: those followed first. The rest are told
- * nothing, until some of those are let go and the stream next opens.
+ * The most folders one stream follows, as Meka Studio takes: those followed first. The rest are
+ * told nothing, until some of those are let go and the stream next opens.
  */
 const MAX_FOLDERS = 64;
 /** How long new folders to follow are gathered before the stream is opened again for them. */

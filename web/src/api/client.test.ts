@@ -129,7 +129,7 @@ describe('authenticated transport', () => {
     expect(report).not.toHaveBeenCalled();
   });
   it.each(['https://meka.bot/errors/', 'https://meka.run/errors/', 'https://meka.so/errors/'])(
-    'recognizes a meka Problem Details identifier under %s by the identifier alone',
+    'recognizes a Meka Problem Details identifier under %s by the identifier alone',
     (prefix) => {
       const error = new ApiError(409, { type: prefix + 'turn-in-flight' });
       expect(error.is('turn-in-flight')).toBe(true);
@@ -137,7 +137,7 @@ describe('authenticated transport', () => {
     },
   );
   it.each([
-    'urn:mekaweb:turn-in-flight',
+    'urn:meka-studio:turn-in-flight',
     'https://meka.bot/turn-in-flight',
     'https://meka.bot/errors/not-turn-in-flight',
     'https://meka.bot/errors/turn-in-flight/more',
@@ -148,7 +148,7 @@ describe('authenticated transport', () => {
   it('does not classify a problem without a type', () => {
     expect(new ApiError(409, {}).is('turn-in-flight')).toBe(false);
   });
-  it('says what a Problem Detail says, with the provider’s response meka relays', () => {
+  it('says what a Problem Detail says, with the provider’s response Meka relays', () => {
     expect(
       new ApiError(502, {
         title: 'Provider error',
@@ -184,32 +184,35 @@ describe('authenticated transport', () => {
       credentials: 'same-origin',
     });
   });
-  it('sends no token of its own: mekaweb signs requests in and adds meka’s', async () => {
+  it('sends no token of its own: Meka Studio signs requests in and adds Meka’s', async () => {
     const fetcher = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({}));
-    await new ApiClient('https://mekaweb.example/meka/').get('/v1/info');
+    await new ApiClient('https://meka-studio.example/meka/').get('/v1/info');
     const init = fetcher.mock.calls[0]?.[1];
-    expect(fetcher.mock.calls[0]?.[0]).toBe('https://mekaweb.example/meka/v1/info');
+    expect(fetcher.mock.calls[0]?.[0]).toBe('https://meka-studio.example/meka/v1/info');
     expect(init?.headers).not.toHaveProperty('Authorization');
     expect(init?.credentials).toBe('same-origin');
   });
   it('adds a saving device’s headers to event streams alone', async () => {
     const fetcher = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({}));
     const client = new ApiClient('https://example.org', undefined, undefined, () => ({
-      'X-Mekaweb-Batch': '500',
+      'X-Meka-Studio-Batch': '500',
     }));
     await client.get('/v1/info');
     await client.stream('/v1/feed', undefined, undefined, new AbortController().signal);
-    expect(fetcher.mock.calls[0]?.[1]?.headers).not.toHaveProperty('X-Mekaweb-Batch');
-    expect(fetcher.mock.calls[1]?.[1]?.headers).toHaveProperty('X-Mekaweb-Batch', '500');
+    expect(fetcher.mock.calls[0]?.[1]?.headers).not.toHaveProperty('X-Meka-Studio-Batch');
+    expect(fetcher.mock.calls[1]?.[1]?.headers).toHaveProperty('X-Meka-Studio-Batch', '500');
   });
-  it('reports meka being unavailable behind mekaweb as a lost connection', async () => {
+  it('reports Meka being unavailable behind Meka Studio as a lost connection', async () => {
     vi.useFakeTimers();
     try {
       const report = vi.fn();
       vi.spyOn(globalThis, 'fetch').mockImplementation(() =>
         Promise.resolve(
           Response.json(
-            { type: 'urn:mekaweb:meka-unavailable', detail: 'mekaweb could not reach meka.' },
+            {
+              type: 'urn:meka-studio:meka-unavailable',
+              detail: 'Meka Studio could not reach Meka.',
+            },
             { status: 502 },
           ),
         ),
@@ -220,7 +223,7 @@ describe('authenticated transport', () => {
       await vi.runAllTimersAsync();
       const error = await read;
       expect(error).toBeInstanceOf(ConnectionError);
-      expect((error as ConnectionError).message).toBe('mekaweb could not reach meka.');
+      expect((error as ConnectionError).message).toBe('Meka Studio could not reach Meka.');
       expect(report).toHaveBeenCalledWith(false);
     } finally {
       vi.useRealTimers();

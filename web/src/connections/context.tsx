@@ -18,7 +18,7 @@ export function useSettings() {
   return useSyncExternalStore(storage.subscribe, storage.getSnapshot);
 }
 /**
- * A meka resource. meka's change feed covers sessions only, so other resources are read again now
+ * A Meka resource. Meka's change feed covers sessions only, so other resources are read again now
  * and then: every two minutes, and when the window comes back into focus.
  */
 export function useResource<T>(
@@ -31,7 +31,7 @@ export function useResource<T>(
   return useQuery({
     queryKey: [connection?.id, connection?.authority, path, query],
     queryFn: ({ signal }) => {
-      if (!api) throw new Error('meka is not connected.');
+      if (!api) throw new Error('Meka is not connected.');
       return api.get<T>(path, query, signal);
     },
     enabled: Boolean(api) && enabled,
@@ -44,7 +44,7 @@ export function useResource<T>(
 type Interval = number | false | ((query: { state: { status: string } }) => number | false);
 /** Reads again every 10 seconds while the read fails, and not otherwise. */
 export const whileFailing: Interval = (query) => (query.state.status === 'error' ? 10_000 : false);
-/** A resource of mekaweb's own API. */
+/** A resource of Meka Studio's own API. */
 export function useGateway<T>(
   path: string,
   query?: Query,
@@ -62,11 +62,11 @@ export function useGateway<T>(
     retry: false,
   });
 }
-/** Where a resource of mekaweb's own API is kept, for this device. */
+/** Where a resource of Meka Studio's own API is kept, for this device. */
 export function gatewayKey(device: string | undefined, path: string, query?: Query) {
   return ['gateway', device, path, query] as const;
 }
-/** The same resource of mekaweb's own API, for each of `queries`, in their order. */
+/** The same resource of Meka Studio's own API, for each of `queries`, in their order. */
 export function useGatewayAll<T>(path: string, queries: readonly Query[]) {
   const runtime = useRuntime();
   const { account } = useConnection();

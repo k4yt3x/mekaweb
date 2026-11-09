@@ -5,7 +5,7 @@ import { Uploads, UPLOADS_AT_ONCE } from './uploader';
 
 afterEach(() => vi.useRealTimers());
 
-/** A stand-in mekaweb that keeps an upload's bytes, losing the connection when told to. */
+/** A stand-in Meka Studio that keeps an upload's bytes, losing the connection when told to. */
 function server({ dropFirstChunk = false, exists = false } = {}) {
   let stored = new Uint8Array(0);
   let dropped = !dropFirstChunk;
@@ -44,7 +44,7 @@ function server({ dropFirstChunk = false, exists = false } = {}) {
   return { gateway: gateway as unknown as GatewayClient, calls, stored: () => stored };
 }
 
-it('sends a file in pieces and carries on from where mekaweb stands after a dropped connection', async () => {
+it('sends a file in pieces and carries on from where Meka Studio stands after a dropped connection', async () => {
   vi.useFakeTimers();
   const s = server({ dropFirstChunk: true });
   const landed = vi.fn();
@@ -116,7 +116,7 @@ it('keeps what is picked together as one batch, dismissed at once', async () => 
   expect(uploads.getSnapshot()).toEqual([notes]);
 });
 
-/** A stand-in mekaweb where empty files land at once, but for the names in `there`. */
+/** A stand-in Meka Studio where empty files land at once, but for the names in `there`. */
 function landing({ there = [] as string[], hold = false } = {}) {
   const calls: string[] = [];
   const held: (() => void)[] = [];

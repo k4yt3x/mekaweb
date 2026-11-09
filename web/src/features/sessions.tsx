@@ -406,7 +406,7 @@ export function SessionsPage({
     whileFailing,
   );
   const sessionId = selected?.session ? selected.id : undefined;
-  // The session's terminals still running, once known: none where mekaweb runs none. Not known
+  // The session's terminals still running, once known: none where Meka Studio runs none. Not known
   // while either list fails, which a later read may settle.
   const live =
     !sessionId || !status.data ? undefined : !terminalEnabled ? NO_TERMINALS : shells.data;
@@ -1084,7 +1084,7 @@ function SessionActions({
                 </Field>
                 <Field label="Keep recent turns">
                   <select value={keep} onChange={(event) => setKeep(event.target.value)}>
-                    <option value="">Let meka decide</option>
+                    <option value="">Let Meka decide</option>
                     <option value="true">Keep recent turns</option>
                     <option value="false">Do not keep recent turns</option>
                   </select>
@@ -1220,7 +1220,7 @@ function SessionDetails({ session, tab }: { session: Schema['SessionResponse']; 
   const { api } = useConnection();
   const canWrite = useCan('sessions:w');
   const action = useAction();
-  // The message box's meter reads it again whenever meka measures it.
+  // The message box's meter reads it again whenever Meka measures it.
   const context = useSessionContext(session.id, { enabled: tab === 'context' });
   const tasks = useResource<Schema['BackgroundTasksResponse']>(
     '/v1/tasks',

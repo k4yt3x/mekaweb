@@ -5187,7 +5187,7 @@ body:has(.panel-resize-handle[data-resizing='true']) {
   font-size: 1em;
 }
 
-/* The account, Files and the terminal: what mekaweb adds around meka. */
+/* The account, Files and the terminal: what Meka Studio adds around Meka. */
 .badge.danger {
   color: var(--danger);
   border-color: color-mix(in srgb, var(--danger) 35%, var(--border));

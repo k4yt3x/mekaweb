@@ -22,12 +22,12 @@ it('suppresses routine cancellation and empty notices without hiding other inter
   expect(sessionNotice('notice', { text: ' \n ' })).toBeUndefined();
   expect(sessionNotice('turn.canceled', { reason: 'server_shutdown' })).toMatchObject({
     level: 'warning',
-    text: 'The turn stopped because the meka server shut down.',
+    text: 'The turn stopped because the Meka server shut down.',
   });
   expect(sessionNotice('turn.canceled', { reason: 'sse_lag' })?.text).toContain(
     'reader fell behind',
   );
-  // meka 0.78 stops a held turn whose request left with nobody else following it.
+  // Meka 0.78 stops a held turn whose request left with nobody else following it.
   expect(sessionNotice('turn.canceled', { reason: 'abandoned' })?.text).toContain(
     'nobody was following it',
   );
@@ -44,7 +44,7 @@ it('presents terminal failures and refusals while leaving tool errors in their o
     'Provider unavailable',
   );
   expect(sessionNotice('turn.failed', {})?.text).toBe('The turn failed.');
-  // meka relays the provider's own response, which says why, beside its sentence.
+  // Meka relays the provider's own response, which says why, beside its sentence.
   const provider = {
     type: 'https://meka.bot/errors/provider',
     status: 502,
@@ -55,7 +55,7 @@ it('presents terminal failures and refusals while leaving tool errors in their o
     'the provider rejected or failed this turn: API returned status 408 Request Timeout',
   );
   expect(sessionNotice('inbox.failed', { error: provider })?.text).toBe(
-    'meka gave up on a queued message: the provider rejected or failed this turn: API returned status 408 Request Timeout',
+    'Meka gave up on a queued message: the provider rejected or failed this turn: API returned status 408 Request Timeout',
   );
   expect(sessionNotice('turn.finished', { refusal_text: 'Request declined' })).toMatchObject({
     level: 'warning',

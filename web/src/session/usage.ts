@@ -3,7 +3,7 @@ import type { Schema } from '../api/client';
 export function contextMetrics(context: Schema['ContextResponse']) {
   const known = context.used != null && context.window != null && context.window > 0;
   return {
-    // Rounded down, as meka reported it before leaving the division to clients.
+    // Rounded down, as Meka reported it before leaving the division to clients.
     usedPercent: known ? Math.floor((context.used! * 100) / context.window!) : null,
     remainingTokens: known ? Math.max(0, context.window! - context.used!) : null,
   };
@@ -22,7 +22,7 @@ export function usageMetrics(usage: Schema['TurnUsage']) {
 }
 
 /**
- * Whether `used`, a share of the context window in percent, is near where meka compacts it, at
+ * Whether `used`, a share of the context window in percent, is near where Meka compacts it, at
  * `compactAt` percent, or near full where it does not.
  */
 export function contextNear(used: number, compactAt: number | null | undefined) {

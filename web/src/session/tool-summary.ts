@@ -1,7 +1,7 @@
 import { record } from './events';
 
-// meka 0.88.0: src/tools.rs::resolve_primary_param. History carries inputs, but not the
-// display summaries meka resolves from them.
+// Meka 0.88.0: src/tools.rs::resolve_primary_param. History carries inputs, but not the
+// display summaries Meka resolves from them.
 const primaryKeys: Readonly<Record<string, string>> = {
   agent_delete: 'id',
   agent_followup: 'id',
@@ -62,8 +62,8 @@ function displayValue(value: unknown): string | undefined {
   return value.flatMap((item) => scalar(item) ?? []).join(', ') || undefined;
 }
 
-// What meka puts among an MCP call's arguments, which are no argument of the call's: the reason
-// its arguments did not parse, and the keys meka adds to every MCP tool.
+// What Meka puts among an MCP call's arguments, which are no argument of the call's: the reason
+// its arguments did not parse, and the keys Meka adds to every MCP tool.
 function mekaArgument(key: string, value: unknown) {
   return (
     key === '_meka_invalid_arguments' ||
@@ -85,7 +85,7 @@ function mcpSummary(input: Record<string, unknown>): string | undefined {
 
 function primarySummary(name: string, input: unknown): string | undefined {
   if (!record(input)) return undefined;
-  // meka's src/tools/registry.rs::server_of_tool.
+  // Meka's src/tools/registry.rs::server_of_tool.
   if (name.startsWith('mcp__') && name.slice(5).includes('__')) return mcpSummary(input);
   const get = (key: string) => (Object.hasOwn(input, key) ? input[key] : undefined);
   if (name === 'image_render') {

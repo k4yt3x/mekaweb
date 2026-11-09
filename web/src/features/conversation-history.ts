@@ -114,7 +114,7 @@ function spoken(block: Schema['ContentBlockView']) {
   return block.type === 'text' || block.type === 'inbox' || block.type === 'invocation';
 }
 
-/** A message someone sent, rather than one meka or a tool wrote into the conversation. */
+/** A message someone sent, rather than one Meka or a tool wrote into the conversation. */
 export function isInput(message: ConversationMessage) {
   return (
     message.role === 'user' &&
@@ -126,7 +126,7 @@ export function isInput(message: ConversationMessage) {
 
 /**
  * The blocks with each file an editor attached among someone's words joined into them as its
- * mention, `@name`, as meka shows it: the editor sends the words around a mention as blocks of
+ * mention, `@name`, as Meka shows it: the editor sends the words around a mention as blocks of
  * their own.
  */
 export function mentionsInline<T extends { block: Schema['ContentBlockView'] }>(
@@ -159,7 +159,7 @@ export function groupAgentMessages(messages: HistoryMessage[]) {
       group?.[0]?.message.role === 'assistant' &&
       !group[0].message.compaction &&
       !message.message.compaction &&
-      // What meka writes into a turn stays in it, a nudge or the report of background work
+      // What Meka writes into a turn stays in it, a nudge or the report of background work
       // behind a round's results, unless a steer rides it and so speaks for someone. Context and
       // a scheduled fire only open a turn.
       (message.message.role === 'assistant' ||
@@ -168,7 +168,7 @@ export function groupAgentMessages(messages: HistoryMessage[]) {
           message.blocks.every(
             ({ block }) => block.type === 'nudge' || block.type === 'background_report',
           ))) &&
-      // Every message a turn added names it, results included. Rows saved before meka recorded
+      // Every message a turn added names it, results included. Rows saved before Meka recorded
       // turns name none; adjacent ones still belong together, with only matched results between.
       previous?.message.turn_id === message.message.turn_id
     )
@@ -181,7 +181,7 @@ export function groupAgentMessages(messages: HistoryMessage[]) {
 /**
  * What the messages say, as written: their text with the files attached among it by name, the
  * inbox items someone sent, the words sent with a skill or an MCP prompt, and a scheduled job's
- * words, without thinking, tools, or what meka wrote around them.
+ * words, without thinking, tools, or what Meka wrote around them.
  */
 export function messageText(messages: readonly ConversationMessage[]) {
   return messages
@@ -221,7 +221,7 @@ export function resendable(message: ConversationMessage) {
   };
 }
 
-/** The sub-agent a spawn's result names: `Agent: <id>`, or `agent: <id>` before meka 0.76.0. */
+/** The sub-agent a spawn's result names: `Agent: <id>`, or `agent: <id>` before Meka 0.76.0. */
 export function spawnedAgent(result: string) {
   return /^agent: (\S+)/i.exec(result)?.[1];
 }
@@ -239,7 +239,7 @@ export function groupLiveMessages(blocks: LiveBlock[], submissions: Submission[]
   const ownItems = new Set(submissions.flatMap((s) => (s.preview && s.itemId ? [s.itemId] : [])));
   const unadmitted = submissions.filter((s) => s.kind === 'turn' && !s.turnId && s.preview);
   const admitting = unadmitted.some((s) => s.state === 'sending');
-  // meka writes no words for an empty message. Before 0.87.0 it put a skill's body after them,
+  // Meka writes no words for an empty message. Before 0.87.0 it put a skill's body after them,
   // where it now sends the words with the skill.
   const unresolved = unadmitted.flatMap((s) =>
     s.state === 'uncertain' && s.body.message.trim()
@@ -349,7 +349,7 @@ export function liveAfterSaved(
 /**
  * The submissions whose outcome the user must see: any whose outcome is unknown, and the latest if
  * it failed, unless its turn's failure is reported below and its words stay in history. A queued
- * message meka gave up on stays, since meka took its words back out of the conversation.
+ * message Meka gave up on stays, since Meka took its words back out of the conversation.
  */
 export function recoverableSubmissions(
   submissions: readonly Submission[],

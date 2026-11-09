@@ -29,7 +29,7 @@ function storage(): Storage {
 it('defaults to saving no data and reads older settings without their connections', () => {
   const local = storage();
   local.setItem(
-    'mekaweb:v1:settings',
+    'meka-studio:v1:settings',
     JSON.stringify({
       version: 1,
       connections: [{ id: 'old', name: 'Old', endpoint: 'https://old.example/', authority: 'a' }],
@@ -44,7 +44,7 @@ it('defaults to saving no data and reads older settings without their connection
   expect(snapshot).not.toHaveProperty('turnNotifications');
 });
 
-it('takes shared preferences from mekaweb, checked, and leaves this device’s own alone', () => {
+it('takes shared preferences from Meka Studio, checked, and leaves this device’s own alone', () => {
   const local = storage();
   const adapter = new BrowserStorage(local);
   adapter.dataSaver(true);
@@ -97,7 +97,7 @@ it('takes shared preferences from mekaweb, checked, and leaves this device’s o
 it('merges preference changes across tabs without replacing other settings or drafts', () => {
   const local = storage();
   const first = new BrowserStorage(local);
-  const draft = first.saveDraft('mekaweb', 's', 'Keep this draft');
+  const draft = first.saveDraft('meka-studio', 's', 'Keep this draft');
   const other = new BrowserStorage(local);
   first.conversationMaxWidth(1250);
   other.conversationFontSize(18);
@@ -108,20 +108,20 @@ it('merges preference changes across tabs without replacing other settings or dr
     conversationFontSize: 18,
     layout: { panel: 'tasks' },
   });
-  expect(other.draft('mekaweb', 's')).toEqual(draft);
+  expect(other.draft('meka-studio', 's')).toEqual(draft);
 });
 
 it('detects conflicting drafts and clears an accepted one while keeping newer edits', () => {
   const adapter = new BrowserStorage(storage());
-  const submitted = adapter.saveDraft('mekaweb', 's', 'submitted');
-  expect(adapter.saveDraft('mekaweb', 's', 'stale edit', 'other-revision')).toBeUndefined();
-  adapter.clearSubmittedDraft('mekaweb', 's', 'submitted');
-  const cleared = adapter.draft('mekaweb', 's');
+  const submitted = adapter.saveDraft('meka-studio', 's', 'submitted');
+  expect(adapter.saveDraft('meka-studio', 's', 'stale edit', 'other-revision')).toBeUndefined();
+  adapter.clearSubmittedDraft('meka-studio', 's', 'submitted');
+  const cleared = adapter.draft('meka-studio', 's');
   expect(cleared?.text).toBe('');
   expect(cleared?.clearedRevision).toBe(submitted?.revision);
-  adapter.saveDraft('mekaweb', 's', 'newer edit', cleared?.revision);
-  adapter.clearSubmittedDraft('mekaweb', 's', 'submitted');
-  expect(adapter.draft('mekaweb', 's')?.text).toBe('newer edit');
+  adapter.saveDraft('meka-studio', 's', 'newer edit', cleared?.revision);
+  adapter.clearSubmittedDraft('meka-studio', 's', 'submitted');
+  expect(adapter.draft('meka-studio', 's')?.text).toBe('newer edit');
 });
 
 it('keeps working in memory when storage is unavailable, and says so', () => {
@@ -129,13 +129,13 @@ it('keeps working in memory when storage is unavailable, and says so', () => {
   adapter.theme('dark');
   expect(adapter.getSnapshot().theme).toBe('dark');
   expect(adapter.warning).toMatch(/Could not save/);
-  expect(adapter.saveDraft('mekaweb', 's', 'text')?.text).toBe('text');
+  expect(adapter.saveDraft('meka-studio', 's', 'text')?.text).toBe('text');
 });
 
 it('bounds stored panel widths, fonts, widths and offsets', () => {
   const local = storage();
   local.setItem(
-    'mekaweb:v1:settings',
+    'meka-studio:v1:settings',
     JSON.stringify({
       version: 1,
       layout: { sessionsWidth: -100, panelWidth: 90000, conversationWidth: 1 },
@@ -170,7 +170,7 @@ it('bounds stored panel widths, fonts, widths and offsets', () => {
 it('opens the panel that was open before one showed at a time, at its width', () => {
   const saved = (layout: Record<string, unknown>) => {
     const local = storage();
-    local.setItem('mekaweb:v1:settings', JSON.stringify({ version: 1, layout }));
+    local.setItem('meka-studio:v1:settings', JSON.stringify({ version: 1, layout }));
     return new BrowserStorage(local).getSnapshot().layout;
   };
   expect(saved({ filesOpen: true, detailsOpen: true, filesWidth: 520, detailsWidth: 300 })).toEqual(
@@ -208,23 +208,23 @@ it('tracks seen sessions only forward, shares them across tabs, and bounds them'
   const local = storage();
   const a = new BrowserStorage(local);
   const b = new BrowserStorage(local);
-  expect(a.seen('mekaweb')).toEqual({ sessions: {} });
-  a.seenBaseline('mekaweb', '2026-09-26T10:00:00Z');
-  a.seenBaseline('mekaweb', '2026-09-27T10:00:00Z');
-  a.markSeen('mekaweb', 's', '2026-09-26T12:00:00Z');
-  a.markSeen('mekaweb', 's', '2026-09-26T11:00:00Z');
-  a.markSeen('mekaweb', 't', 'not a time');
-  const seen = a.seen('mekaweb');
+  expect(a.seen('meka-studio')).toEqual({ sessions: {} });
+  a.seenBaseline('meka-studio', '2026-09-26T10:00:00Z');
+  a.seenBaseline('meka-studio', '2026-09-27T10:00:00Z');
+  a.markSeen('meka-studio', 's', '2026-09-26T12:00:00Z');
+  a.markSeen('meka-studio', 's', '2026-09-26T11:00:00Z');
+  a.markSeen('meka-studio', 't', 'not a time');
+  const seen = a.seen('meka-studio');
   expect(seen).toEqual({
     baseline: '2026-09-26T10:00:00Z',
     sessions: { s: '2026-09-26T12:00:00Z' },
   });
   // Stable until it changes, as useSyncExternalStore requires.
-  expect(a.seen('mekaweb')).toBe(seen);
-  expect(b.seen('mekaweb')).toEqual(seen);
+  expect(a.seen('meka-studio')).toBe(seen);
+  expect(b.seen('meka-studio')).toEqual(seen);
   const at = (minute: number) => new Date(Date.UTC(2026, 9, 1, 0, minute)).toISOString();
-  for (let index = 0; index < 502; index++) a.markSeen('mekaweb', `s${index}`, at(index));
-  const bounded = a.seen('mekaweb');
+  for (let index = 0; index < 502; index++) a.markSeen('meka-studio', `s${index}`, at(index));
+  const bounded = a.seen('meka-studio');
   expect(Object.keys(bounded.sessions)).toHaveLength(500);
   expect(bounded.sessions.s0).toBeUndefined();
   expect(bounded.baseline).toBe(at(1));
@@ -234,37 +234,37 @@ it('forgets the account’s drafts and seen sessions, keeping this device’s se
   const local = storage();
   const store = new BrowserStorage(local);
   store.dataSaver(true);
-  store.saveDraft('mekaweb', 's1', 'draft');
-  store.markSeen('mekaweb', 's1', '2026-10-21T00:00:00Z');
+  store.saveDraft('meka-studio', 's1', 'draft');
+  store.markSeen('meka-studio', 's1', '2026-10-21T00:00:00Z');
   store.saveWorkspace('s1', { tabs: ['/a.ts'] });
   store.saveEditorView('/a.ts', { line: 3 });
-  store.saveFoldedGroups('mekaweb', ['pinned']);
+  store.saveFoldedGroups('meka-studio', ['pinned']);
   store.forgetAccount();
   const kept = [...Array(local.length).keys()].map((index) => local.key(index));
-  expect(kept).toEqual(['mekaweb:v1:settings']);
+  expect(kept).toEqual(['meka-studio:v1:settings']);
   expect(new BrowserStorage(local).getSnapshot().dataSaver).toBe(true);
-  store.saveDraft('mekaweb', 's1', 'late');
+  store.saveDraft('meka-studio', 's1', 'late');
   store.saveWorkspace('s1', { tabs: ['/late.ts'] });
   expect(local.length).toBe(1);
   store.keepAccount();
-  store.saveDraft('mekaweb', 's1', 'kept again');
-  expect(store.draft('mekaweb', 's1')?.text).toBe('kept again');
+  store.saveDraft('meka-studio', 's1', 'kept again');
+  expect(store.draft('meka-studio', 's1')?.text).toBe('kept again');
 });
 
 it('keeps the session list’s groups folded for each connection, stable between changes', () => {
   const local = storage();
   const a = new BrowserStorage(local);
-  expect(a.foldedGroups('mekaweb')).toEqual([]);
-  a.saveFoldedGroups('mekaweb', ['pinned', 'project:web']);
-  const folded = a.foldedGroups('mekaweb');
+  expect(a.foldedGroups('meka-studio')).toEqual([]);
+  a.saveFoldedGroups('meka-studio', ['pinned', 'project:web']);
+  const folded = a.foldedGroups('meka-studio');
   expect(folded).toEqual(['pinned', 'project:web']);
-  expect(a.foldedGroups('mekaweb')).toBe(folded);
-  expect(new BrowserStorage(local).foldedGroups('mekaweb')).toEqual(folded);
+  expect(a.foldedGroups('meka-studio')).toBe(folded);
+  expect(new BrowserStorage(local).foldedGroups('meka-studio')).toEqual(folded);
   expect(a.foldedGroups('other')).toEqual([]);
-  a.saveFoldedGroups('mekaweb', []);
-  expect(local.getItem('mekaweb:v1:folded-groups:mekaweb')).toBeNull();
-  local.setItem('mekaweb:v1:folded-groups:mekaweb', '{"not":"a list"}');
-  expect(a.foldedGroups('mekaweb')).toEqual([]);
+  a.saveFoldedGroups('meka-studio', []);
+  expect(local.getItem('meka-studio:v1:folded-groups:meka-studio')).toBeNull();
+  local.setItem('meka-studio:v1:folded-groups:meka-studio', '{"not":"a list"}');
+  expect(a.foldedGroups('meka-studio')).toEqual([]);
 });
 
 it('keeps what each place has open, checked, the most recent places only', () => {
@@ -284,7 +284,7 @@ it('keeps what each place has open, checked, the most recent places only', () =>
   store.saveWorkspace('s2', { tabs: [] });
   expect(store.workspace('s2')).toBeUndefined();
   local.setItem(
-    'mekaweb:v1:workspaces',
+    'meka-studio:v1:workspaces',
     JSON.stringify({ odd: { tabs: ['/b.ts', 4], active: '/elsewhere', open: 'no', at: 1 } }),
   );
   expect(store.workspace('odd')).toEqual({ tabs: ['/b.ts'], open: [] });

@@ -10,7 +10,7 @@ import {
   renameInOrder,
 } from './providers-model';
 
-it('offers each profile setting only where meka sends it', () => {
+it('offers each profile setting only where Meka sends it', () => {
   expect(readsProfileKey('claude-subscription', 'thinking_display')).toBe(true);
   expect(readsProfileKey('anthropic-messages', 'thinking_display')).toBe(false);
   expect(readsProfileKey('anthropic-messages', 'cache_control')).toBe(true);

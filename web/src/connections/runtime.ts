@@ -14,7 +14,7 @@ import { BrowserStorage, type Connection } from './storage';
 import { BrowserNotifications } from '../notifications/client';
 
 export interface RuntimeState {
-  /** Whether someone is signed in to mekaweb, as far as this page knows. */
+  /** Whether someone is signed in to Meka Studio, as far as this page knows. */
   auth: 'checking' | 'signed-out' | 'signed-in';
   /** Who is signed in, and on which device. */
   account?: Gateway['SessionView'];
@@ -23,7 +23,7 @@ export interface RuntimeState {
   controller?: SessionController;
   info?: Schema['InfoResponse'];
   busy: boolean;
-  /** Why meka could not be reached, while it cannot. */
+  /** Why Meka could not be reached, while it cannot. */
   error?: string;
   /** Why this page was signed out, for the sign-in page to say. */
   notice?: string;
@@ -37,9 +37,9 @@ const DATA_SAVER_PAGE = 30;
 const PREFERENCE_SYNC_DELAY = 800;
 
 /**
- * The page's link to mekaweb and, through it, to meka: who is signed in, the meka client and its
- * session controller, recovering when either stops answering, and preferences kept in step with
- * mekaweb's copy.
+ * The page's link to Meka Studio and, through it, to Meka: who is signed in, the Meka client and
+ * its session controller, recovering when either stops answering, and preferences kept in step
+ * with Meka Studio's copy.
  */
 export class ConnectionRuntime {
   readonly notifications: BrowserNotifications;
@@ -74,7 +74,7 @@ export class ConnectionRuntime {
     this.state = state;
     for (const listener of this.listeners) listener();
   }
-  /** Retires the meka client and its controller. */
+  /** Retires the Meka client and its controller. */
   private release() {
     this.generation++;
     clearTimeout(this.recoveryTimer);
@@ -168,7 +168,7 @@ export class ConnectionRuntime {
       this.release();
     };
   }
-  /** Asks mekaweb who is signed in, and connects to meka if someone is. */
+  /** Asks Meka Studio who is signed in, and connects to Meka if someone is. */
   async check() {
     try {
       const account = await this.gateway.get<Gateway['SessionView']>('/api/auth/session');
@@ -193,7 +193,7 @@ export class ConnectionRuntime {
     });
     return account;
   }
-  /** Takes a sign-in mekaweb answered with, and connects to meka. */
+  /** Takes a sign-in Meka Studio answered with, and connects to Meka. */
   async signedIn(account: Gateway['SessionView']) {
     this.release();
     this.storage.keepAccount();
@@ -203,7 +203,7 @@ export class ConnectionRuntime {
   }
   /**
    * Signs this device out, and forgets what this browser kept of the account: drafts, which
-   * sessions were seen, the files and folders open, uploads under way. Until mekaweb says the sign-in has ended, it has not,
+   * sessions were seen, the files and folders open, uploads under way. Until Meka Studio says the sign-in has ended, it has not,
    * so a failure is thrown and the device stays signed in.
    */
   async signOut() {
@@ -215,7 +215,7 @@ export class ConnectionRuntime {
     try {
       await this.gateway.send('POST', '/api/auth/sign-out');
     } catch (error) {
-      // Signed out already, as far as mekaweb knows.
+      // Signed out already, as far as Meka Studio knows.
       if (!(error instanceof ApiError && error.status === 401)) throw error;
     }
     this.storage.forgetAccount();
@@ -237,7 +237,7 @@ export class ConnectionRuntime {
   guardSignOut(guard: () => string | undefined) {
     this.guards.add(guard);
   }
-  /** Connects to meka again, as after it was unavailable. */
+  /** Connects to Meka again, as after it was unavailable. */
   reconnect() {
     if (this.state.auth !== 'signed-in' || this.state.busy) return Promise.resolve(false);
     return this.establish();
@@ -280,11 +280,11 @@ export class ConnectionRuntime {
     this.publish(state);
     const abort = new AbortController();
     const timeout = setTimeout(() => {
-      abort.abort(new Error('meka did not answer within 10 seconds.'));
+      abort.abort(new Error('Meka did not answer within 10 seconds.'));
     }, 10_000);
     const streamHeaders = (): Record<string, string> =>
       this.storage.getSnapshot().dataSaver
-        ? { 'X-Mekaweb-Batch': String(DATA_SAVER_BATCH), 'X-Mekaweb-Data-Saver': '1' }
+        ? { 'X-Meka-Studio-Batch': String(DATA_SAVER_BATCH), 'X-Meka-Studio-Data-Saver': '1' }
         : {};
     const api: ApiClient = new ApiClient(
       mekaEndpoint(),
@@ -309,17 +309,17 @@ export class ConnectionRuntime {
         !Array.isArray(info.enabled_permissions) ||
         !info.enabled_permissions.every((permission) => typeof permission === 'string')
       )
-        throw new Error('meka did not answer with a supported discovery response.');
+        throw new Error('Meka did not answer with a supported discovery response.');
       if (!supportsVersion(info.version))
         throw new Error(
-          `This server runs meka ${info.version}. This mekaweb needs meka ${minimumVersion} or newer.`,
+          `This server runs Meka ${info.version}. This Meka Studio needs Meka ${minimumVersion} or newer.`,
         );
       if (generation !== this.generation) {
         api.dispose();
         return false;
       }
       const connection: Connection = {
-        id: 'mekaweb',
+        id: 'meka-studio',
         name: account.device_name,
         endpoint: api.base,
         authority: account.device_id,

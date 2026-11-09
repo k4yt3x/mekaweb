@@ -26,7 +26,7 @@ const rootRoute = createRootRoute({
   notFoundComponent: () => (
     <div className="page">
       <h1>Page not found</h1>
-      <a href="#/">Return to meka</a>
+      <a href="#/">Return to Meka Studio</a>
     </div>
   ),
 });
@@ -83,7 +83,7 @@ declare module '@tanstack/react-router' {
 // new one instead, at most once a minute so a part missing from the new build cannot loop.
 window.addEventListener('vite:preloadError', (event) => {
   try {
-    const key = 'mekaweb:reloaded-for-update';
+    const key = 'meka-studio:reloaded-for-update';
     if (Date.now() - Number(sessionStorage.getItem(key) ?? 0) < 60_000) return;
     sessionStorage.setItem(key, String(Date.now()));
   } catch {

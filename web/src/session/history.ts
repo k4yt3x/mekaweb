@@ -94,7 +94,7 @@ export function prependHistory(
 }
 
 /**
- * How far a page read with the conversation at `position` reaches: meka reads the position ahead
+ * How far a page read with the conversation at `position` reaches: Meka reads the position ahead
  * of the page, so a row written meanwhile can be in the page and past it.
  */
 function reach(items: readonly Item[], position: number) {
@@ -167,7 +167,7 @@ function answeredSince(messages: readonly ConversationMessage[], since: number) 
 /**
  * What only the context can say of `messages`, as a key that changes when the answer may: whether
  * it holds turns the last compaction kept, which the history shows before it, and turns after it
- * that said nothing past their opening, which meka takes back out of the context when they were to
+ * that said nothing past their opening, which Meka takes back out of the context when they were to
  * be withdrawn. Undefined when the history says enough.
  */
 export function contextQuestion(messages: readonly ConversationMessage[]) {
@@ -185,7 +185,7 @@ export function contextQuestion(messages: readonly ConversationMessage[]) {
 }
 
 /**
- * The turns of `messages` a rewind or a branch can name, by id. meka names a turn the context
+ * The turns of `messages` a rewind or a branch can name, by id. Meka names a turn the context
  * holds: one the agent answered in after the last compaction, and when `context` says so, the
  * positions of the history it shows, one the compaction kept or one that said nothing more. A turn
  * that may open in history not loaded, when there is `earlier` history, is left out, since what it

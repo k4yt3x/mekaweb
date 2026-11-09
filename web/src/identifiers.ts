@@ -3,7 +3,7 @@ export function createId(): string {
   if (typeof source?.randomUUID === 'function') return source.randomUUID();
   if (typeof source?.getRandomValues !== 'function') {
     throw new Error(
-      'This browser cannot generate secure identifiers. Use a current browser or open mekaweb over HTTPS.',
+      'This browser cannot generate secure identifiers. Use a current browser or open Meka Studio over HTTPS.',
     );
   }
 

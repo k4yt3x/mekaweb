@@ -3,19 +3,19 @@ import { useConnection, useRuntime } from '../connections/context';
 import { useAction } from '../components/actions';
 import { Button } from '../components/ui/button';
 import { ErrorNotice, Loading } from '../components/common';
-import { MekawebLink } from '../components/layout';
+import { MekaStudioLink } from '../components/layout';
 
-/** What a signed-in page shows while meka cannot be reached: why, and ways to try again. */
+/** What a signed-in page shows while Meka cannot be reached: why, and ways to try again. */
 export function Unavailable() {
   const runtime = useRuntime();
   const state = useConnection();
   const action = useAction();
   return (
     <main className="welcome unavailable">
-      <section className="connection-card" aria-label="meka is unavailable">
-        <h1>meka</h1>
+      <section className="connection-card" aria-label="Meka is unavailable">
+        <h1>Meka Studio</h1>
         {state.busy ? (
-          <Loading label="Connecting to meka…" />
+          <Loading label="Connecting to Meka…" />
         ) : (
           <>
             <ErrorNotice error={state.error ? new Error(state.error) : undefined} />
@@ -38,7 +38,7 @@ export function Unavailable() {
         )}
       </section>
       <footer className="app-version">
-        <MekawebLink /> version {__MEKAWEB_VERSION__}
+        <MekaStudioLink /> version {__MEKA_STUDIO_VERSION__}
       </footer>
     </main>
   );

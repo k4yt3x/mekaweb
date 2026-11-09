@@ -28,8 +28,8 @@ import {
 import { useConnection } from '../connections/context';
 
 /**
- * The sections: mekaweb's own first, then how meka is set up, the keys, and what is running. The
- * standing instructions are read with `sessions:r`, as meka asks.
+ * The sections: Meka Studio's own first, then how Meka is set up, the keys, and what is running.
+ * The standing instructions are read with `sessions:r`, as Meka asks.
  */
 const SECTIONS: { id: SettingsSection; name: string; icon: LucideIcon; scope?: string }[] = [
   { id: 'general', name: 'General', icon: Settings },
@@ -76,9 +76,9 @@ function content(section: SettingsSection): ReactNode {
 }
 
 /**
- * Settings, over whatever is shown, so changing one never leaves the session: mekaweb's own, the
- * account, meka's providers, MCP servers and instructions, the keyboard's shortcuts, and what is
- * running. Escape in a field it is typed in leaves Settings open, so what is typed is not lost.
+ * Settings, over whatever is shown, so changing one never leaves the session: Meka Studio's own,
+ * the account, Meka's providers, MCP servers and instructions, the keyboard's shortcuts, and what
+ * is running. Escape in a field it is typed in leaves Settings open, so what is typed is not lost.
  */
 export function SettingsDialog({
   section,

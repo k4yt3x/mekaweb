@@ -1,8 +1,8 @@
 {
   "id": "./",
-  "name": "meka",
-  "short_name": "meka",
-  "description": "The web interface for meka",
+  "name": "Meka Studio",
+  "short_name": "Meka Studio",
+  "description": "The web interface for Meka",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

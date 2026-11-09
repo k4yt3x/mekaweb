@@ -53,7 +53,7 @@ export function useSessionStates() {
     controller?.getSnapshot ?? emptySnapshot,
   );
 }
-/** What meka last measured in one session's context, while its feed is open. */
+/** What Meka last measured in one session's context, while its feed is open. */
 export function useMeasured(id: string) {
   const { controller } = useConnection();
   return useSyncExternalStore(
@@ -87,7 +87,7 @@ export function useContextPositions(id: string, question: string | undefined) {
   return useQuery({
     queryKey: [connection?.id, connection?.authority, 'context-positions', id, question],
     queryFn: ({ signal }) => {
-      if (!controller) throw new Error('meka is not connected.');
+      if (!controller) throw new Error('Meka is not connected.');
       return controller.contextPositions(id, signal);
     },
     enabled: Boolean(controller) && question !== undefined,
@@ -97,7 +97,7 @@ export function useContextPositions(id: string, question: string | undefined) {
 }
 /**
  * A session's context: what fills it, and how near it is to compacting. With `follow`, it is read
- * again each time meka measures it, after every provider round; the message box's meter follows
+ * again each time Meka measures it, after every provider round; the message box's meter follows
  * it, so whatever else shows it is kept up to date too.
  */
 export function useSessionContext(session: string, { follow = false, enabled = true } = {}) {

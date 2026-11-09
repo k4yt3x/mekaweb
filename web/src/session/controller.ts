@@ -39,16 +39,16 @@ export interface LiveTool {
 export type LiveBlock =
   | { kind: 'text' | 'thinking'; text: string }
   | { kind: 'tool'; id: string }
-  /** What meka wrote to send the model back to work, of the `nudge` kind it names. */
+  /** What Meka wrote to send the model back to work, of the `nudge` kind it names. */
   | { kind: 'nudge'; nudge: string; text: string }
-  /** Background work that finished, which meka wrote into the turn at a round boundary. */
+  /** Background work that finished, which Meka wrote into the turn at a round boundary. */
   | { kind: 'report'; tasks: string[]; text: string }
   /** What the agent or a provider said during the turn, where it said it. */
   | { kind: 'notice'; level: SessionNotice['level']; text: string }
   /** Words that entered the conversation: a turn's opening, or a message an interrupt appended. */
   | { kind: 'message'; message: ConversationMessage; opening: boolean }
   | { kind: 'submission'; key: string };
-/** A prompt parked for the person: a gated tool call, or an MCP server's question. meka counts
+/** A prompt parked for the person: a gated tool call, or an MCP server's question. Meka counts
  * both in `requests_pending` and takes both answers at the same route. */
 export type Approval = {
   id: string;
@@ -91,7 +91,7 @@ export interface SessionState {
   id: string;
   session?: Schema['SessionResponse'];
   /**
-   * `unloaded`: the server has not loaded the session, and from meka 0.68 a token that can only
+   * `unloaded`: the server has not loaded the session, and from Meka 0.68 a token that can only
    * read cannot load it. The saved conversation is shown and the feed is retried.
    */
   feed: 'connecting' | 'connected' | 'reconnecting' | 'closed' | 'unavailable' | 'unloaded';
@@ -102,13 +102,13 @@ export interface SessionState {
   settingsPending: boolean;
   turnId?: string;
   running: boolean;
-  /** A compaction is under way: a compaction's turn, or one meka opened inside a turn. */
+  /** A compaction is under way: a compaction's turn, or one Meka opened inside a turn. */
   compacting: boolean;
   textStreaming: boolean;
   blocks: LiveBlock[];
   tools: Record<string, LiveTool>;
   approvals: Approval[];
-  /** What meka last measured in context, which moves the context view on. */
+  /** What Meka last measured in context, which moves the context view on. */
   measured?: { used: number; window?: number };
   notices: SessionNotice[];
   submissions: Submission[];
@@ -161,11 +161,11 @@ interface Entry {
   outcomes: Map<string, Submission['state']>;
   notificationTurns: Set<string>;
   notifiedTurns: Set<string>;
-  /** Turns the inbox opened, with the items they opened on, whose failed attempts meka may retry. */
+  /** Turns the inbox opened, with the items they opened on, whose failed attempts Meka may retry. */
   inboxTurns: Map<string, string[]>;
   /** Turns whose opening this feed has announced. */
   openings: Set<string>;
-  /** The turn meka runs a compaction as, which is compacting from start to end. */
+  /** The turn Meka runs a compaction as, which is compacting from start to end. */
   compactionTurn?: string | undefined;
   /**
    * While a compaction is under way, the generation of the latest one the history held as it began:
@@ -321,7 +321,7 @@ export class SessionController {
   private compactions = new Set<string>();
   private serverAlerted = new Set<string>();
   /**
-   * Follows meka's server feed until the returned function is called: for the session list, and
+   * Follows Meka's server feed until the returned function is called: for the session list, and
    * so a turn ending in any session alerts, not only one this page follows.
    */
   followServer() {
@@ -407,7 +407,7 @@ export class SessionController {
     let known = session
       ? { title: session.title, parent: Boolean(session.parent_id) }
       : this.known.get(sessionId);
-    // A title meka took from the first message is in the record alone: the feed's is older.
+    // A title Meka took from the first message is in the record alone: the feed's is older.
     if (!known?.title.trim())
       known = await this.api
         .get<Schema['SessionResponse']>(sessionPath(sessionId), undefined, this.lifetime.signal)
@@ -643,7 +643,7 @@ export class SessionController {
           this.release(entry);
           return;
         }
-        // From meka 0.68, deleting a session ends its feed before the response arrives. The
+        // From Meka 0.68, deleting a session ends its feed before the response arrives. The
         // deletion releases the entry; if it fails, the retry below reconnects as usual.
         if (!entry.state.deleting) this.publish(entry, { feed: 'reconnecting', approvals: [] });
       }
@@ -670,7 +670,7 @@ export class SessionController {
           if (subagentStopped(error)) return this.subagentStopped(entry);
           if (isUnloaded(error)) {
             // A turn this feed followed may have ended unseen, as when the server restarts.
-            // meka reports no turn in flight for a session it has not loaded, so reconcile.
+            // Meka reports no turn in flight for a session it has not loaded, so reconcile.
             if (entry.state.feed !== 'unloaded') void this.refresh(entry.state.id, true);
             this.publish(entry, { feed: 'unloaded' });
             continue;
@@ -1047,7 +1047,7 @@ export class SessionController {
       this.publish(entry, { textStreaming: false });
       void this.refresh(state.id);
     } else if (frame.event === 'context.compacting') {
-      // meka compacts on its own inside a turn too, not only when asked.
+      // Meka compacts on its own inside a turn too, not only when asked.
       entry.compactionFrom = latestCompaction(entry.state.saved);
       this.publish(entry, { compacting: true });
     } else if (frame.event === 'context.compaction_failed') {
@@ -1112,7 +1112,7 @@ export class SessionController {
                   ? { preview: false }
                   : {}),
                 ...(frame.event === 'inbox.failed'
-                  ? { error: `meka gave up on this message${problem ? `: ${problem}` : '.'}` }
+                  ? { error: `Meka gave up on this message${problem ? `: ${problem}` : '.'}` }
                   : {}),
               }
             : s,
@@ -1664,7 +1664,7 @@ export class SessionController {
         entry = current;
         const delivery = entry.deliveries.get(result.item_id);
         const outcome = delivery?.turnId ? entry.outcomes.get(delivery.turnId) : undefined;
-        // A replayed key answers what became of the item: withdrawn by meka, it names why,
+        // A replayed key answers what became of the item: withdrawn by Meka, it names why,
         // which a canceled turn does as well as a give-up, so the words do not say which.
         const failure = result.failure ? problemText(result.last_error) || result.failure : '';
         const failed = !outcome && (delivery ? delivery.state === 'failed' : Boolean(failure));
@@ -1684,7 +1684,7 @@ export class SessionController {
           ...(delivery?.turnId ? { turnId: delivery.turnId } : {}),
           ...(failed
             ? {
-                error: `meka withdrew this message${failure ? `: ${failure}` : '.'}`,
+                error: `Meka withdrew this message${failure ? `: ${failure}` : '.'}`,
                 preview: false,
               }
             : {}),
@@ -1759,7 +1759,7 @@ export class SessionController {
       return false;
     }
   }
-  /** Settles this tab's turns whose terminal never reached it, by the records meka keeps. */
+  /** Settles this tab's turns whose terminal never reached it, by the records Meka keeps. */
   private async settleTurns(entry: Entry) {
     const id = entry.state.id;
     const turns = entry.state.submissions.flatMap((submission) =>
@@ -1858,7 +1858,7 @@ export class SessionController {
     if (entry.snapshotDeferred) void this.refresh(entry.state.id);
   }
   /**
-   * Sends an uncertain submission again under its key, for which meka answers with what the first
+   * Sends an uncertain submission again under its key, for which Meka answers with what the first
    * request did. It holds a turn's key in memory for a day, so a turn known to have started is not
    * sent again: a restart that lost the key would run it twice.
    */
@@ -1968,7 +1968,7 @@ export class SessionController {
   }
   /**
    * Confirms the conversation is still the one this tab shows, answering its `ETag`. An edit sends
-   * that back, so meka refuses it if the conversation moves on before the edit lands.
+   * that back, so Meka refuses it if the conversation moves on before the edit lands.
    */
   private async shownConversation(entry: Entry) {
     const saved = entry.state.saved;
@@ -1982,7 +1982,7 @@ export class SessionController {
     // Without it, the edit would land on whatever the conversation has become.
     if (!etag)
       throw new Error(
-        'meka did not say which version of the conversation this is, so it was not changed. A proxy between them may be hiding the ETag header.',
+        'Meka did not say which version of the conversation this is, so it was not changed. A proxy between them may be hiding the ETag header.',
       );
     return etag;
   }

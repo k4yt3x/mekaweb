@@ -1,6 +1,6 @@
 import { createId } from '../identifiers';
 
-const PREFIX = 'mekaweb:v1:';
+const PREFIX = 'meka-studio:v1:';
 const SETTINGS = PREFIX + 'settings';
 export const CONVERSATION_FONT = { default: 14, step: 1 } as const;
 export const CONVERSATION_WIDTH = { default: 850, step: 100 } as const;
@@ -76,7 +76,7 @@ export function normalizeProviderOrder(value: unknown): ProviderOrder {
   };
 }
 /**
- * The meka this page reaches, through the mekaweb that served it. There is one; `authority` is
+ * The Meka this page reaches, through the Meka Studio that served it. There is one; `authority` is
  * the sign-in it is reached under, so a new sign-in starts its queries afresh.
  */
 export interface Connection {
@@ -86,7 +86,7 @@ export interface Connection {
   authority: string;
 }
 /**
- * Preferences every device shares, kept by mekaweb; appearance, layout, Data saver and
+ * Preferences every device shares, kept by Meka Studio; appearance, layout, Data saver and
  * notification permission stay with each browser, since screens differ.
  */
 export const PORTABLE_PREFERENCES = [
@@ -401,7 +401,7 @@ export class BrowserStorage {
       PORTABLE_PREFERENCES.map((key) => [key, settings[key]]),
     ) as PortablePreferences;
   }
-  /** Takes the shared preferences mekaweb kept, each checked as if read from storage. */
+  /** Takes the shared preferences Meka Studio kept, each checked as if read from storage. */
   applyPreferences(preferences: Readonly<Record<string, unknown>>) {
     const settings = this.readSettings();
     const next = normalizeSettings({

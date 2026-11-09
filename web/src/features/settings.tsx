@@ -53,7 +53,7 @@ function SectionPage({
   );
 }
 
-/** How mekaweb behaves: what a conversation shows, and the data this device uses. */
+/** How Meka Studio behaves: what a conversation shows, and the data this device uses. */
 export function GeneralSettings() {
   const settings = useSettings();
   const runtime = useRuntime();
@@ -73,7 +73,7 @@ export function GeneralSettings() {
             onCheckedChange={(checked) => runtime.storage.expandThinking(checked)}
           />
           <SwitchField
-            label="Show context added by meka"
+            label="Show context added by Meka"
             checked={settings.showTurnContext}
             onCheckedChange={(checked) => runtime.storage.showTurnContext(checked)}
           />
@@ -109,8 +109,8 @@ export function NotificationsSection() {
 }
 
 /**
- * How mekaweb looks in this browser: its theme, the conversation, and the text of Files, the editor
- * and the terminal.
+ * How Meka Studio looks in this browser: its theme, the conversation, and the text of Files, the
+ * editor and the terminal.
  */
 export function AppearanceSettings() {
   const settings = useSettings();
@@ -269,7 +269,7 @@ export function AppearanceSettings() {
   );
 }
 
-/** What is running: meka and mekaweb, their versions and health, and meka's config. */
+/** What is running: Meka and Meka Studio, their versions and health, and Meka's config. */
 export function AboutSettings() {
   const runtime = useRuntime();
   const state = useConnection();
@@ -287,7 +287,7 @@ export function AboutSettings() {
   return (
     <SectionPage title="About">
       <section className="panel">
-        <h2>meka</h2>
+        <h2>Meka</h2>
         <dl className="facts">
           <dt>State</dt>
           <dd>
@@ -302,24 +302,25 @@ export function AboutSettings() {
               </>
             )}
           </dd>
-          <dt>meka version</dt>
+          <dt>Meka version</dt>
           <dd>
             {meka?.version ?? state.info?.version}
             {meka?.version && meka.reachable && !meka.supported && status.data && (
               <span className="muted">
                 {' '}
-                · Too old: this mekaweb needs meka {status.data.versions.minimum} or newer.
+                · Too old: this Meka Studio needs Meka {status.data.versions.minimum} or newer.
               </span>
             )}
             {meka?.version && meka.reachable && meka.supported && !meka.verified && status.data && (
               <span className="muted">
                 {' '}
-                · Untested with this mekaweb (tested: {status.data.versions.verified.join(', ')}).
+                · Untested with this Meka Studio (tested: {status.data.versions.verified.join(', ')}
+                ).
               </span>
             )}
           </dd>
-          <dt>mekaweb version</dt>
-          <dd>{status.data?.version ?? __MEKAWEB_VERSION__}</dd>
+          <dt>Meka Studio version</dt>
+          <dd>{status.data?.version ?? __MEKA_STUDIO_VERSION__}</dd>
           <dt>Liveness</dt>
           <dd>{live.isPending ? 'Checking…' : (live.data?.status ?? 'Unavailable')}</dd>
           <dt>Readiness</dt>
@@ -441,7 +442,7 @@ export function AboutSettings() {
               Reload config
             </Button>
           )}
-          {/* meka 0.82.0 serves no API browser; its book documents the API instead. */}
+          {/* Meka 0.82.0 serves no API browser; its book documents the API instead. */}
           <a
             className="button button-secondary"
             href="https://docs.meka.bot/usage/http-api.html"
@@ -472,7 +473,7 @@ function reloadOutcome(result: Schema['ReloadResponse']) {
     ['Restarted', result.servers_restarted],
     ['Updated', result.servers_reconfigured],
     ['Removed', result.servers_removed],
-    ['Restart meka to apply', result.restart_required],
+    ['Restart Meka to apply', result.restart_required],
   ] as const;
   const parts = changes
     .filter(([, names]) => names.length)
@@ -536,7 +537,7 @@ function InstructionsPanel() {
             )
           )}
           {canWrite && data && !data.writable && data.source && (
-            <p className="muted small">Read only while meka takes them from {data.source}.</p>
+            <p className="muted small">Read only while Meka takes them from {data.source}.</p>
           )}
           {canWrite && data?.writable && (
             <div className="actions">

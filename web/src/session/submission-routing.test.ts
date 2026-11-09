@@ -121,7 +121,7 @@ async function fixture(open = true) {
     return admissions.shift()!;
   }
   const answer = async (value: unknown) => (await pending()).resolve(value);
-  // meka answers for a turn it admitted, from the live turn until its row is written.
+  // Meka answers for a turn it admitted, from the live turn until its row is written.
   const admit = (id = 'turn') => {
     if (!turns.has(id)) turns.set(id, record(id));
     return answer(record(id));
@@ -344,7 +344,7 @@ it.each(['network', 'wrong response'])(
     expect(f.state().submissions[0]).toMatchObject({ kind: 'turn', state: 'uncertain' });
     expect(f.calls('/turns')).toHaveLength(1);
     expect(f.calls('/inbox')).toHaveLength(0);
-    // meka answers a repeated key with the turn the first request started, or starts it now.
+    // Meka answers a repeated key with the turn the first request started, or starts it now.
     f.session.turn_in_flight = true;
     const retry = f.controller.retrySubmission('s', f.state().submissions[0]!.key);
     await f.admit();
@@ -422,14 +422,14 @@ it('asks for review when a turn no longer runs but its record has no ending', as
   await f.feed.event('feed.gap');
   await vi.waitFor(() => expect(f.state().submissions[0]?.state).toBe('uncertain'));
   expect(f.state().submissions[0]?.error).toContain('turn started');
-  // meka holds a turn's key in memory, so a process that died with it would run it again.
+  // Meka holds a turn's key in memory, so a process that died with it would run it again.
   await expect(f.controller.retrySubmission('s', f.state().submissions[0]!.key)).rejects.toThrow(
     'This turn started',
   );
   expect(f.calls('/turns')).toHaveLength(1);
 });
 
-it('does not notify or warn for each attempt of a queued message meka will retry', async () => {
+it('does not notify or warn for each attempt of a queued message Meka will retry', async () => {
   const f = await fixture();
   const completed = vi.fn();
   f.controller.onCompletion(completed);
@@ -456,7 +456,7 @@ it('does not notify or warn for each attempt of a queued message meka will retry
   expect(f.state().notices).toHaveLength(1);
 });
 
-it('tells this tab when meka gives up on its queued message, once', async () => {
+it('tells this tab when Meka gives up on its queued message, once', async () => {
   const f = await fixture();
   const completed = vi.fn();
   f.controller.onCompletion(completed);
@@ -473,7 +473,7 @@ it('tells this tab when meka gives up on its queued message, once', async () => 
     message_withdrawn: true,
   });
   expect(completed).not.toHaveBeenCalled();
-  // Waiting would not change a rejected credential, so meka gives the item up at once.
+  // Waiting would not change a rejected credential, so Meka gives the item up at once.
   await f.feed.event('inbox.failed', {
     item_id: 'item',
     reason: 'the turn opened on it failed, and waiting would not change that',
@@ -485,7 +485,7 @@ it('tells this tab when meka gives up on its queued message, once', async () => 
   expect(f.state().notices).toEqual([
     expect.objectContaining({
       event: 'inbox.failed',
-      text: 'meka gave up on a queued message: The credential was rejected.',
+      text: 'Meka gave up on a queued message: The credential was rejected.',
     }),
   ]);
 });
@@ -527,7 +527,7 @@ it('leaves a turn running while its record has no ending and the session runs a 
   expect(f.state().submissions[0]?.state).toBe('running');
 });
 
-it('asks for review when meka has no record of a turn it no longer runs', async () => {
+it('asks for review when Meka has no record of a turn it no longer runs', async () => {
   const f = await fixture();
   await f.start();
   await f.feed.event('turn.started');

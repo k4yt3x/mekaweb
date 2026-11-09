@@ -133,7 +133,7 @@ export function SessionList({
     },
     getNextPageParam: (page) => page.next_cursor ?? undefined,
     enabled: Boolean(api) && !searching,
-    // meka's server feed says when to read it again; this only covers a feed that is down.
+    // Meka's server feed says when to read it again; this only covers a feed that is down.
     refetchInterval: 300_000,
     retry: false,
   });
@@ -164,7 +164,7 @@ export function SessionList({
   const [asked, setAsked] = useState<Readonly<Record<string, number>>>({});
   const limit = (group: SessionGroup) => asked[group.key] ?? groupFirst(group);
   // The pinned are read always, and those on none even folded, to know whether there are any; a
-  // project's only while it is shown, as meka counts its sessions.
+  // project's only while it is shown, as Meka counts its sessions.
   const read = grouped
     ? [
         PINNED,
@@ -271,7 +271,7 @@ export function SessionList({
   const taken = new Set<string>();
   const listed = list.data?.pages.flatMap((page) => page.sessions) ?? [];
   // The pinned stand apart at the top, a line between them and the rest, whether or not the rest
-  // are grouped; ungrouped, they are the first meka lists.
+  // are grouped; ungrouped, they are the first Meka lists.
   const pinnedApart = !grouped && !searching && listed.some((row) => row.pinned_at);
   const sections = (grouped ? groups : pinnedApart ? [PINNED, undefined] : [undefined]).map(
     (group) => {
@@ -446,7 +446,7 @@ export function SessionList({
       <header>
         <span className="sidebar-brand">
           <MekaLogo />
-          meka
+          Meka Studio
         </span>
         {onCollapse && (
           <Button

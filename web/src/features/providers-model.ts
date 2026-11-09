@@ -17,7 +17,7 @@ export function isSubscription(backend: string | null | undefined) {
   return BACKENDS.some((entry) => entry.id === backend && entry.subscription);
 }
 
-// meka 0.90.0: src/config.rs::Backend::reads_account_key and reads_profile_key. meka refuses a
+// Meka 0.90.0: src/config.rs::Backend::reads_account_key and reads_profile_key. Meka refuses a
 // key the backend never reads, so the forms offer only these.
 export function readsAccountKey(backend: string, key: string) {
   if (key === 'client_id' || key === 'oauth_token_url') return isSubscription(backend);
@@ -154,7 +154,7 @@ export function createProfileBody(
 }
 
 /** What an edit changed: a new value for each setting that moved, `null` for one cleared. The
- * name is not in it, since meka takes a rename on its own. */
+ * name is not in it, since Meka takes a rename on its own. */
 export function patchProfileBody(
   initial: ProfileDraft,
   draft: ProfileDraft,
@@ -165,7 +165,7 @@ export function patchProfileBody(
   const patch: Record<string, unknown> = {};
   for (const key of [...counts, ...words, ...switches])
     if (before[key] !== after[key]) patch[key] = after[key] ?? null;
-  // Sent whole, as meka replaces them whole: only when what they say changed, not their spacing.
+  // Sent whole, as Meka replaces them whole: only when what they say changed, not their spacing.
   if (JSON.stringify(before.parameters) !== JSON.stringify(after.parameters))
     patch.parameters = after.parameters ?? null;
   if (draft.model.trim() !== initial.model.trim()) patch.model = draft.model.trim();
@@ -220,7 +220,7 @@ export interface ProviderGroup {
 }
 /**
  * Profiles under their accounts, in the order they were put in; an account or profile the order
- * does not name follows, in meka's order, and an account only a profile names comes after those.
+ * does not name follows, in Meka's order, and an account only a profile names comes after those.
  */
 export function providerGroups(
   accounts: Schema['AccountView'][] | undefined,

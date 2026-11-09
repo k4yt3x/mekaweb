@@ -39,7 +39,7 @@ export function WorkingDirectoryPicker({
   const runtime = useRuntime();
   const making = useAction();
   const [made, setMade] = useState('');
-  // meka refuses a working folder that is not there; mekaweb can make it, and any above it.
+  // Meka refuses a working folder that is not there; Meka Studio can make it, and any above it.
   const makeable = current.startsWith('/') || current.startsWith('~/');
   function choose(path: string) {
     onChange(path);
@@ -140,7 +140,7 @@ export function WorkingDirectoryPicker({
           <DirectoryOption
             icon={<Server size={15} aria-hidden="true" />}
             name="Server default"
-            detail="meka’s current directory"
+            detail="Meka’s current directory"
             selected={!current}
             onSelect={() => choose('')}
           />

@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.41.0] - 2026-11-08
+
+### Changed
+
+- **Breaking:** mekaweb is now Meka Studio, and its binary `meka-studio`.
+- **Breaking:** the config is in `~/.config/meka-studio`, `%APPDATA%\meka-studio` on Windows.
+- **Breaking:** state is in `~/.local/state/meka-studio`, `%LOCALAPPDATA%\meka-studio` on Windows.
+- **Breaking:** the database is `meka-studio.db`, no longer `mekaweb.db`.
+- **Breaking:** units are `meka-studio.service`; the macOS agent `com.github.k4yt3x.meka-studio`.
+- **Breaking:** the Windows scheduled task in the install guide is `meka-studio`.
+- **Breaking:** release files are `meka-studio-<target>`, from the `k4yt3x/meka-studio` repository.
+- **Breaking:** every device signs in again; browsers' settings, workspaces and drafts start over.
+- Tabs, notifications and a newly added Home Screen app are named Meka Studio.
+- Meka is written with a capital M throughout, as Meka now writes its own name.
+
 ## [0.40.0] - 2026-11-07
 
 ### Added
@@ -22,7 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Breaking:** mekaweb requires meka 0.90.0 or newer.
+- **Breaking:** Meka Studio requires Meka 0.90.0 or newer.
 - Files' top takes two rows instead of four: the path, then the buttons and the branch.
 - Refresh and Show hidden files moved into Files' … menu.
 - The side panels lose their heading; a panel's button at the right edge closes it.
@@ -35,11 +50,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Breaking:** mekaweb requires meka 0.89.0 or newer.
+- **Breaking:** Meka Studio requires Meka 0.89.0 or newer.
 - The conversation keeps the turns before a compaction instead of starting at its summary.
 - Earlier messages load as you scroll up, without a button.
 - A compaction shows as a line across the conversation; open it for its cause and summary.
-- While meka compacts, the line appears at once and moves until the compaction is done.
+- While Meka compacts, the line appears at once and moves until the compaction is done.
 - The Agent heading appears only after someone else's message, not again after a compaction.
 - Delete, edit, run again and branch appear only on turns the agent still has in context.
 - Rewind in the session menu removes only turns the agent still has in context.
@@ -48,7 +63,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
-- Export transcript, since meka 0.89.0 no longer renders one; Export archive remains.
+- Export transcript, since Meka 0.89.0 no longer renders one; Export archive remains.
 
 ## [0.38.0] - 2026-11-05
 
@@ -60,7 +75,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Dismiss a notice below the conversation with its ×; a repeated one shows there once.
 - An error shows the provider's own response to say why; a long one folds, with Show more.
-- Recognize meka 0.88.3 as a verified server version; meka 0.85.0 and newer still connect.
+- Recognize Meka 0.88.3 as a verified server version; Meka 0.85.0 and newer still connect.
 - Settings opens 960px wide at most, from 1280px.
 - Settings → Instructions shows the standing instructions as formatted Markdown.
 - Pinned sessions show a coloured pin, and a line parts them from the rest; they no longer fold.
@@ -69,7 +84,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Recognize meka 0.88.0 as a verified server version; meka 0.85.0 and newer still connect.
+- Recognize Meka 0.88.0 as a verified server version; Meka 0.85.0 and newer still connect.
 
 ### Fixed
 
@@ -145,15 +160,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Providers: switch off the OpenAI requests meka 0.87.0 adds, and cap an account's tool names.
+- Providers: switch off the OpenAI requests Meka 0.87.0 adds, and cap an account's tool names.
 
 ### Changed
 
-- Recognize meka 0.87.0 as a verified server version; meka 0.85.0 and newer still connect.
+- Recognize Meka 0.87.0 as a verified server version; Meka 0.85.0 and newer still connect.
 
 ### Fixed
 
-- A message that ran a skill or attached a file shows on meka 0.87.0, and resends with its skill.
+- A message that ran a skill or attached a file shows on Meka 0.87.0, and resends with its skill.
 - An image in a message you sent no longer flickers and shifts the page while the reply streams.
 
 ## [0.30.0] - 2026-10-29
@@ -176,12 +191,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Providers: add accounts, sign in to them, and add, edit and choose the default profile.
 - MCP: add, edit, enable, remove, sign in to and sign out of servers, and see why one failed.
 - An MCP server's question waits beside approvals, as a form to fill in or a page to open.
-- Settings: edit standing instructions, and reload meka's config without restarting it.
+- Settings: edit standing instructions, and reload Meka's config without restarting it.
 
 ### Changed
 
-- **Breaking:** mekaweb requires meka 0.85.0 or newer; give its token `config:r` and `config:w`.
-- Recognize meka 0.86.0 as a verified server version; meka 0.85.0 and newer still connect.
+- **Breaking:** Meka Studio requires Meka 0.85.0 or newer; give its token `config:r` and `config:w`.
+- Recognize Meka 0.86.0 as a verified server version; Meka 0.85.0 and newer still connect.
 
 ### Security
 
@@ -193,12 +208,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Projects: add, rename and remove them, put sessions on one, and filter and file memories by one.
-- Each compaction says what set it going, and one meka starts on its own shows while it runs.
+- Each compaction says what set it going, and one Meka starts on its own shows while it runs.
 
 ### Changed
 
-- **Breaking:** mekaweb requires meka 0.84.0 or newer.
-- Memory search is meka's own, so it finds words in a memory's body too.
+- **Breaking:** Meka Studio requires Meka 0.84.0 or newer.
+- Memory search is Meka's own, so it finds words in a memory's body too.
 
 ### Fixed
 
@@ -222,7 +237,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- mekaweb runs on macOS and Windows; releases add Apple silicon and x86-64 Windows binaries.
+- Meka Studio runs on macOS and Windows; releases add Apple silicon and x86-64 Windows binaries.
 - Files lists the folder shown again by itself whenever anything changes in it.
 - Files takes Windows paths, from a drive or a share, and hides files Windows marks hidden.
 - The terminal runs PowerShell on Windows, unless `terminal.shell` names another shell.
@@ -254,7 +269,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A large upload scrolls in its own box, so the folder stays in sight below it.
 - A replaced upload no longer says the file already exists.
 - Many files landing together refresh the folder once, not once for each.
-- A running turn's prompt no longer shows twice after mekaweb restarts with older history unloaded.
+- A running turn's prompt no longer shows twice once Meka Studio restarts with old history unloaded.
 - After a reconnect, the live preview leaves out what history shows, with no second Agent heading.
 - History never opens on a tool result apart from its call, under a heading of its own.
 - Zips from Files open in 7-Zip, bsdtar and xarchiver; headers no longer carry bad ZIP64 sizes.
@@ -270,7 +285,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- mekaweb is a server installed beside meka: it serves the interface and passes requests to meka.
+- Meka Studio is a server installed beside Meka: it serves the interface and passes on requests.
 - Sign in with a password or a passkey; risky changes ask you to confirm it's you again.
 - Settings lists the devices signed in, signs them out, and shows recent sign-in activity.
 - Signing a device out ends its open connections; a new password signs out every other device.
@@ -280,25 +295,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Ctrl+` shows or hides the session's terminal.
 - Settings sets the terminal's font size; Ctrl with the wheel, =, - or 0 changes it for a while.
 - Push notifications say when a turn finishes or fails, or waits for approval, with the app closed.
-- Settings shows whether meka answers and whether this mekaweb supports its version.
-- mekaweb keeps your preferences, so every device you sign in on shares them.
+- Settings shows whether Meka answers and whether this Meka Studio supports its version.
+- Meka Studio keeps your preferences, so every device you sign in on shares them.
 - Data saver sends less over mobile data: fewer messages, pictures on tap, and batched replies.
 - File tool calls open the file in the session's Files; Files starts a session in a folder.
 - The new-session folder picker makes the folder it names.
 
 ### Changed
 
-- **Breaking:** mekaweb requires meka 0.83.0 or newer.
-- **Breaking:** meka stays on loopback; browsers reach it only through mekaweb, holding no token.
+- **Breaking:** Meka Studio requires Meka 0.83.0 or newer.
+- **Breaking:** Meka stays on loopback; browsers reach it only through Meka Studio, with no token.
 - After a turn, only the messages that came after those shown are read again.
-- The session list follows meka's change feed, and polls only every five minutes.
+- The session list follows Meka's change feed, and polls only every five minutes.
 - Event streams arrive compressed, and an edit's change carries its changed lines, not whole files.
-- An image over meka's 3.75 MB limit is shrunk to fit before sending, and says so.
+- An image over Meka's 3.75 MB limit is shrunk to fit before sending, and says so.
 - Push notifications replace the browser notifications an open page sent.
 
 ### Removed
 
-- **Breaking:** web.meka.run, and connecting to meka straight from a browser: install mekaweb.
+- **Breaking:** web.meka.run, and connecting to Meka straight from a browser: install Meka Studio.
 - **Breaking:** Saved connections, token storage, and settings import and export.
 
 ## [0.23.1] - 2026-10-21
@@ -317,7 +332,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Recognize meka 0.83.0 as a verified server version.
+- Recognize Meka 0.83.0 as a verified server version.
 
 ### Fixed
 
@@ -327,8 +342,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Recognize meka 0.82.0 as a verified server version.
-- Settings links to meka's online HTTP API reference, since meka 0.82.0 removed its Swagger UI.
+- Recognize Meka 0.82.0 as a verified server version.
+- Settings links to Meka's online HTTP API reference, since Meka 0.82.0 removed its Swagger UI.
 
 ### Fixed
 
@@ -347,16 +362,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A turn keeps running after its tab closes; in new sessions, its approval prompts wait for you.
 - Another client's message, a scheduled fire, or a report shows as soon as the turn it opens starts.
 - A turn whose send went unconfirmed can be retried under the same key, as queued messages can.
-- A queued message whose turn failed shows when meka will try it again, and why.
-- A queued message meka gives up on is reported with the reason, and notifies when it was yours.
+- A queued message whose turn failed shows when Meka will try it again, and why.
+- A queued message Meka gives up on is reported with the reason, and notifies when it was yours.
 - The MCP page shows the protocol version each connected server speaks.
-- meka's session tools show an icon, and `session_search` shows what it searched for.
+- Meka's session tools show an icon, and `session_search` shows what it searched for.
 
 ### Changed
 
-- mekaweb requires meka 0.78.0 or newer, which lets a turn run on without the request that sent it.
-- Recognize meka 0.80.0 as a verified server version.
-- A turn meka stopped because nobody was following it says so.
+- Meka Studio requires Meka 0.78.0 or newer, so a turn can go on without the request that sent it.
+- Recognize Meka 0.80.0 as a verified server version.
+- A turn Meka stopped because nobody was following it says so.
 
 ## [0.19.1] - 2026-10-18
 
@@ -369,21 +384,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- The MCP tool list marks the tools meka defers until the agent loads them, or hides from it.
+- The MCP tool list marks the tools Meka defers until the agent loads them, or hides from it.
 
 ### Changed
 
-- Recognize meka 0.77.0 as a verified server version; meka 0.76.0 and newer still connect.
+- Recognize Meka 0.77.0 as a verified server version; Meka 0.76.0 and newer still connect.
 
 ### Fixed
 
-- On meka 0.77.0, a call that loads tools completes and shows their names, not stuck running.
+- On Meka 0.77.0, a call that loads tools completes and shows their names, not stuck running.
 
 ## [0.18.2] - 2026-10-16
 
 ### Fixed
 
-- Switching connections no longer stops a running turn; mekaweb follows it until it ends.
+- Switching connections no longer stops a running turn; Meka Studio follows it until it ends.
 
 ## [0.18.1] - 2026-10-16
 
@@ -412,23 +427,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Scheduled fires and background task reports show as notes from meka, expanding to what was sent.
+- Scheduled fires and background task reports show as notes from Meka, expanding to what was sent.
 - A background task that finishes during a turn shows its report in that turn as it arrives.
 
 ### Changed
 
-- mekaweb requires meka 0.76.0 or newer, which renames the session working directory field.
-- Inbox messages show their sender's words without meka's header, named by any source they give.
+- Meka Studio requires Meka 0.76.0 or newer, which renames the session working directory field.
+- Inbox messages show their sender's words without Meka's header, named by any source they give.
 
 ## [0.16.0] - 2026-10-14
 
 ### Changed
 
-- Recognize meka 0.75.0 as a verified server version; meka 0.71.0 and newer still connect.
+- Recognize Meka 0.75.0 as a verified server version; Meka 0.71.0 and newer still connect.
 
 ### Fixed
 
-- Loading earlier messages no longer repeats some after meka's turn retention deletes old turns.
+- Loading earlier messages no longer repeats some after Meka's turn retention deletes old turns.
 
 ## [0.15.2] - 2026-10-14
 
@@ -452,13 +467,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Spawn and follow-up calls link to their sub-agent, listing the calls it makes while it runs.
 - Copy, edit, or delete your messages, and copy, run again, or branch from the agent's turns.
 - Approval prompts from a sub-agent name it and link to its session.
-- When meka sends the agent back to its checklist, the turn shows a note with what meka wrote.
+- When Meka sends the agent back to its checklist, the turn shows a note with what Meka wrote.
 - The agent's open checklist shows above the message input while items remain open.
 
 ### Changed
 
 - Session list statuses have their own shapes, such as a spinner for running and a check for done.
-- mekaweb requires meka 0.71.0 or newer, and says so when connecting to an older server.
+- Meka Studio requires Meka 0.71.0 or newer, and says so when connecting to an older server.
 - Settings shows whether each profile accepts images, rather than only the default profile.
 - The session list updates as soon as sessions change, rather than at the next 15-second refresh.
 - Statuses include approvals and outcomes of turns run elsewhere, such as other tabs or schedules.
@@ -466,7 +481,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - An open session's title and settings follow changes made in other tabs or clients.
 - A conversation rewound in another tab or client updates without reloading.
 - An approval prompt closes in every tab once it is answered elsewhere, expires, or is canceled.
-- Tool calls are labeled with meka 0.70.0's checklist tools, which replace the todo tools.
+- Tool calls are labeled with Meka 0.70.0's checklist tools, which replace the todo tools.
 - A running turn's notices show where they arrived; warnings and errors also stay below it.
 - Search also finds sub-agent sessions, marked as sub-agents in the results.
 
@@ -517,12 +532,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Recognize meka 0.67.0 and 0.68.0 as supported server versions.
-- On meka 0.68.0, a running compaction shows as compacting and does not notify when it finishes.
+- Recognize Meka 0.67.0 and 0.68.0 as supported server versions.
+- On Meka 0.68.0, a running compaction shows as compacting and does not notify when it finishes.
 
 ### Fixed
 
-- Read-only tokens open sessions meka 0.68.0 hasn't loaded, following them once the server does.
+- Read-only tokens open sessions Meka 0.68.0 hasn't loaded, following them once the server does.
 
 ## [0.12.1] - 2026-09-29
 
@@ -586,7 +601,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Recognize meka 0.66.0 as a supported server version.
+- Recognize Meka 0.66.0 as a supported server version.
 - The message input grows with its text until resized by hand, which holds until the next send.
 - Running shell output gives way to the tool result when the command finishes, without repeating it.
 
@@ -598,7 +613,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Recognize meka 0.65.0 as a supported server version.
+- Recognize Meka 0.65.0 as a supported server version.
 
 ## [0.7.0] - 2026-09-26
 
@@ -617,7 +632,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Install mekaweb with the meka logo and a standalone Home Screen window on iPhone and iPad.
+- Install Meka Studio with the Meka logo and a standalone Home Screen window on iPhone and iPad.
 
 ### Fixed
 
@@ -636,7 +651,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Use consistent switches for settings and checkbox styling for Markdown task lists.
 - Group sub-agent sessions beneath their parents with indentation and tree guide lines.
-- Recognize meka 0.64.1 as a supported server version.
+- Recognize Meka 0.64.1 as a supported server version.
 
 ## [0.4.1] - 2026-09-25
 
@@ -667,14 +682,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Rename sessions from their heading or list, and pin favorites, on meka 0.64.0 or newer.
+- Rename sessions from their heading or list, and pin favorites, on Meka 0.64.0 or newer.
 - Search session titles and conversations, with matching excerpts in the session list.
 - Adjust conversation font size in Settings → Appearance.
 - Show primary arguments beside tool names in collapsed calls.
 
 ### Changed
 
-- Update API support through meka 0.64.0, including inbox items without a source label.
+- Update API support through Meka 0.64.0, including inbox items without a source label.
 - Start the composer at two lines while keeping it expandable for longer drafts.
 - Show one connection-loss banner, with automatic recovery and a Retry button.
 
@@ -698,7 +713,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Warnings and errors appear in the conversation instead of a separate activity-notices section.
 - Tool calls show arguments and results together; response rounds share a single Agent heading.
 - New sessions stream thinking by default when available, with previews in collapsed entries.
-- Context added by meka is hidden by default and can be enabled in Settings → Diagnostics.
+- Context added by Meka is hidden by default and can be enabled in Settings → Diagnostics.
 - Permission modes use distinct icons, with a yellow warning for unrestricted access.
 
 ### Fixed
@@ -711,7 +726,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- A static web interface for meka 0.59.0 and 0.60.0, with no separate application server.
+- A static web interface for Meka 0.59.0 and 0.60.0, with no separate application server.
 - Saved connections with API tokens kept in local storage or session storage.
 - Live conversations with reasoning, tool activity, and approvals that stay visible across pages.
 - Steer, queue, interrupt, and cancel controls, with permission mode beside the message input.
@@ -724,60 +739,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Light and dark themes, narrow layouts, and collapsible, resizable session panels.
 - Hosting at the root or a subpath, with GitHub Pages deployment on version tags.
 
-[Unreleased]: https://github.com/k4yt3x/mekaweb/compare/0.40.0...HEAD
-[0.40.0]: https://github.com/k4yt3x/mekaweb/compare/0.39.0...0.40.0
-[0.39.0]: https://github.com/k4yt3x/mekaweb/compare/0.38.0...0.39.0
-[0.38.0]: https://github.com/k4yt3x/mekaweb/compare/0.37.0...0.38.0
-[0.37.0]: https://github.com/k4yt3x/mekaweb/compare/0.36.1...0.37.0
-[0.36.1]: https://github.com/k4yt3x/mekaweb/compare/0.36.0...0.36.1
-[0.36.0]: https://github.com/k4yt3x/mekaweb/compare/0.35.0...0.36.0
-[0.35.0]: https://github.com/k4yt3x/mekaweb/compare/0.34.0...0.35.0
-[0.34.0]: https://github.com/k4yt3x/mekaweb/compare/0.33.0...0.34.0
-[0.33.0]: https://github.com/k4yt3x/mekaweb/compare/0.32.0...0.33.0
-[0.32.0]: https://github.com/k4yt3x/mekaweb/compare/0.31.0...0.32.0
-[0.31.0]: https://github.com/k4yt3x/mekaweb/compare/0.30.0...0.31.0
-[0.30.0]: https://github.com/k4yt3x/mekaweb/compare/0.29.0...0.30.0
-[0.29.0]: https://github.com/k4yt3x/mekaweb/compare/0.28.0...0.29.0
-[0.28.0]: https://github.com/k4yt3x/mekaweb/compare/0.27.0...0.28.0
-[0.27.0]: https://github.com/k4yt3x/mekaweb/compare/0.26.0...0.27.0
-[0.26.0]: https://github.com/k4yt3x/mekaweb/compare/0.25.0...0.26.0
-[0.25.0]: https://github.com/k4yt3x/mekaweb/compare/0.24.1...0.25.0
-[0.24.1]: https://github.com/k4yt3x/mekaweb/compare/0.24.0...0.24.1
-[0.24.0]: https://github.com/k4yt3x/mekaweb/compare/0.23.1...0.24.0
-[0.23.1]: https://github.com/k4yt3x/mekaweb/compare/0.23.0...0.23.1
-[0.23.0]: https://github.com/k4yt3x/mekaweb/compare/0.22.0...0.23.0
-[0.22.0]: https://github.com/k4yt3x/mekaweb/compare/0.21.0...0.22.0
-[0.21.0]: https://github.com/k4yt3x/mekaweb/compare/0.20.0...0.21.0
-[0.20.0]: https://github.com/k4yt3x/mekaweb/compare/0.19.1...0.20.0
-[0.19.1]: https://github.com/k4yt3x/mekaweb/compare/0.19.0...0.19.1
-[0.19.0]: https://github.com/k4yt3x/mekaweb/compare/0.18.2...0.19.0
-[0.18.2]: https://github.com/k4yt3x/mekaweb/compare/0.18.1...0.18.2
-[0.18.1]: https://github.com/k4yt3x/mekaweb/compare/0.18.0...0.18.1
-[0.18.0]: https://github.com/k4yt3x/mekaweb/compare/0.17.0...0.18.0
-[0.17.0]: https://github.com/k4yt3x/mekaweb/compare/0.16.0...0.17.0
-[0.16.0]: https://github.com/k4yt3x/mekaweb/compare/0.15.2...0.16.0
-[0.15.2]: https://github.com/k4yt3x/mekaweb/compare/0.15.1...0.15.2
-[0.15.1]: https://github.com/k4yt3x/mekaweb/compare/0.15.0...0.15.1
-[0.15.0]: https://github.com/k4yt3x/mekaweb/compare/0.14.3...0.15.0
-[0.14.3]: https://github.com/k4yt3x/mekaweb/compare/0.14.2...0.14.3
-[0.14.2]: https://github.com/k4yt3x/mekaweb/compare/0.14.1...0.14.2
-[0.14.1]: https://github.com/k4yt3x/mekaweb/compare/0.14.0...0.14.1
-[0.14.0]: https://github.com/k4yt3x/mekaweb/compare/0.13.1...0.14.0
-[0.13.1]: https://github.com/k4yt3x/mekaweb/compare/0.13.0...0.13.1
-[0.13.0]: https://github.com/k4yt3x/mekaweb/compare/0.12.1...0.13.0
-[0.12.1]: https://github.com/k4yt3x/mekaweb/compare/0.12.0...0.12.1
-[0.12.0]: https://github.com/k4yt3x/mekaweb/compare/0.11.1...0.12.0
-[0.11.1]: https://github.com/k4yt3x/mekaweb/compare/0.11.0...0.11.1
-[0.11.0]: https://github.com/k4yt3x/mekaweb/compare/0.10.0...0.11.0
-[0.10.0]: https://github.com/k4yt3x/mekaweb/compare/0.9.0...0.10.0
-[0.9.0]: https://github.com/k4yt3x/mekaweb/compare/0.8.0...0.9.0
-[0.8.0]: https://github.com/k4yt3x/mekaweb/compare/0.7.1...0.8.0
-[0.7.1]: https://github.com/k4yt3x/mekaweb/compare/0.7.0...0.7.1
-[0.7.0]: https://github.com/k4yt3x/mekaweb/compare/0.6.0...0.7.0
-[0.6.0]: https://github.com/k4yt3x/mekaweb/compare/0.5.0...0.6.0
-[0.5.0]: https://github.com/k4yt3x/mekaweb/compare/0.4.1...0.5.0
-[0.4.1]: https://github.com/k4yt3x/mekaweb/compare/0.4.0...0.4.1
-[0.4.0]: https://github.com/k4yt3x/mekaweb/compare/0.3.0...0.4.0
-[0.3.0]: https://github.com/k4yt3x/mekaweb/compare/0.2.0...0.3.0
-[0.2.0]: https://github.com/k4yt3x/mekaweb/compare/0.1.0...0.2.0
-[0.1.0]: https://github.com/k4yt3x/mekaweb/releases/tag/0.1.0
+[Unreleased]: https://github.com/k4yt3x/meka-studio/compare/0.41.0...HEAD
+[0.41.0]: https://github.com/k4yt3x/meka-studio/compare/0.40.0...0.41.0
+[0.40.0]: https://github.com/k4yt3x/meka-studio/compare/0.39.0...0.40.0
+[0.39.0]: https://github.com/k4yt3x/meka-studio/compare/0.38.0...0.39.0
+[0.38.0]: https://github.com/k4yt3x/meka-studio/compare/0.37.0...0.38.0
+[0.37.0]: https://github.com/k4yt3x/meka-studio/compare/0.36.1...0.37.0
+[0.36.1]: https://github.com/k4yt3x/meka-studio/compare/0.36.0...0.36.1
+[0.36.0]: https://github.com/k4yt3x/meka-studio/compare/0.35.0...0.36.0
+[0.35.0]: https://github.com/k4yt3x/meka-studio/compare/0.34.0...0.35.0
+[0.34.0]: https://github.com/k4yt3x/meka-studio/compare/0.33.0...0.34.0
+[0.33.0]: https://github.com/k4yt3x/meka-studio/compare/0.32.0...0.33.0
+[0.32.0]: https://github.com/k4yt3x/meka-studio/compare/0.31.0...0.32.0
+[0.31.0]: https://github.com/k4yt3x/meka-studio/compare/0.30.0...0.31.0
+[0.30.0]: https://github.com/k4yt3x/meka-studio/compare/0.29.0...0.30.0
+[0.29.0]: https://github.com/k4yt3x/meka-studio/compare/0.28.0...0.29.0
+[0.28.0]: https://github.com/k4yt3x/meka-studio/compare/0.27.0...0.28.0
+[0.27.0]: https://github.com/k4yt3x/meka-studio/compare/0.26.0...0.27.0
+[0.26.0]: https://github.com/k4yt3x/meka-studio/compare/0.25.0...0.26.0
+[0.25.0]: https://github.com/k4yt3x/meka-studio/compare/0.24.1...0.25.0
+[0.24.1]: https://github.com/k4yt3x/meka-studio/compare/0.24.0...0.24.1
+[0.24.0]: https://github.com/k4yt3x/meka-studio/compare/0.23.1...0.24.0
+[0.23.1]: https://github.com/k4yt3x/meka-studio/compare/0.23.0...0.23.1
+[0.23.0]: https://github.com/k4yt3x/meka-studio/compare/0.22.0...0.23.0
+[0.22.0]: https://github.com/k4yt3x/meka-studio/compare/0.21.0...0.22.0
+[0.21.0]: https://github.com/k4yt3x/meka-studio/compare/0.20.0...0.21.0
+[0.20.0]: https://github.com/k4yt3x/meka-studio/compare/0.19.1...0.20.0
+[0.19.1]: https://github.com/k4yt3x/meka-studio/compare/0.19.0...0.19.1
+[0.19.0]: https://github.com/k4yt3x/meka-studio/compare/0.18.2...0.19.0
+[0.18.2]: https://github.com/k4yt3x/meka-studio/compare/0.18.1...0.18.2
+[0.18.1]: https://github.com/k4yt3x/meka-studio/compare/0.18.0...0.18.1
+[0.18.0]: https://github.com/k4yt3x/meka-studio/compare/0.17.0...0.18.0
+[0.17.0]: https://github.com/k4yt3x/meka-studio/compare/0.16.0...0.17.0
+[0.16.0]: https://github.com/k4yt3x/meka-studio/compare/0.15.2...0.16.0
+[0.15.2]: https://github.com/k4yt3x/meka-studio/compare/0.15.1...0.15.2
+[0.15.1]: https://github.com/k4yt3x/meka-studio/compare/0.15.0...0.15.1
+[0.15.0]: https://github.com/k4yt3x/meka-studio/compare/0.14.3...0.15.0
+[0.14.3]: https://github.com/k4yt3x/meka-studio/compare/0.14.2...0.14.3
+[0.14.2]: https://github.com/k4yt3x/meka-studio/compare/0.14.1...0.14.2
+[0.14.1]: https://github.com/k4yt3x/meka-studio/compare/0.14.0...0.14.1
+[0.14.0]: https://github.com/k4yt3x/meka-studio/compare/0.13.1...0.14.0
+[0.13.1]: https://github.com/k4yt3x/meka-studio/compare/0.13.0...0.13.1
+[0.13.0]: https://github.com/k4yt3x/meka-studio/compare/0.12.1...0.13.0
+[0.12.1]: https://github.com/k4yt3x/meka-studio/compare/0.12.0...0.12.1
+[0.12.0]: https://github.com/k4yt3x/meka-studio/compare/0.11.1...0.12.0
+[0.11.1]: https://github.com/k4yt3x/meka-studio/compare/0.11.0...0.11.1
+[0.11.0]: https://github.com/k4yt3x/meka-studio/compare/0.10.0...0.11.0
+[0.10.0]: https://github.com/k4yt3x/meka-studio/compare/0.9.0...0.10.0
+[0.9.0]: https://github.com/k4yt3x/meka-studio/compare/0.8.0...0.9.0
+[0.8.0]: https://github.com/k4yt3x/meka-studio/compare/0.7.1...0.8.0
+[0.7.1]: https://github.com/k4yt3x/meka-studio/compare/0.7.0...0.7.1
+[0.7.0]: https://github.com/k4yt3x/meka-studio/compare/0.6.0...0.7.0
+[0.6.0]: https://github.com/k4yt3x/meka-studio/compare/0.5.0...0.6.0
+[0.5.0]: https://github.com/k4yt3x/meka-studio/compare/0.4.1...0.5.0
+[0.4.1]: https://github.com/k4yt3x/meka-studio/compare/0.4.0...0.4.1
+[0.4.0]: https://github.com/k4yt3x/meka-studio/compare/0.3.0...0.4.0
+[0.3.0]: https://github.com/k4yt3x/meka-studio/compare/0.2.0...0.3.0
+[0.2.0]: https://github.com/k4yt3x/meka-studio/compare/0.1.0...0.2.0
+[0.1.0]: https://github.com/k4yt3x/meka-studio/releases/tag/0.1.0

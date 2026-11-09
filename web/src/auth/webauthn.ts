@@ -1,7 +1,7 @@
 /**
- * Passkeys in the browser: mekaweb's WebAuthn options arrive as JSON with their bytes in URL-safe
- * base64, which `navigator.credentials` takes as buffers; the credential it makes goes back as
- * JSON the same way, in the form `PublicKeyCredential.toJSON()` writes.
+ * Passkeys in the browser: Meka Studio's WebAuthn options arrive as JSON with their bytes in
+ * URL-safe base64, which `navigator.credentials` takes as buffers; the credential it makes goes
+ * back as JSON the same way, in the form `PublicKeyCredential.toJSON()` writes.
  */
 
 type Json = Record<string, unknown>;
@@ -42,7 +42,7 @@ export async function isConditionalSupported(): Promise<boolean> {
   }
 }
 
-/** Makes a passkey for mekaweb's creation options; the credential as JSON. */
+/** Makes a passkey for Meka Studio's creation options; the credential as JSON. */
 export async function createPasskey(options: Json): Promise<Json> {
   const publicKey = record(options.publicKey);
   const user = record(publicKey.user);
@@ -68,7 +68,7 @@ export async function createPasskey(options: Json): Promise<Json> {
 }
 
 /**
- * Asks for a passkey answering mekaweb's request options; the credential as JSON. `conditional`
+ * Asks for a passkey answering Meka Studio's request options; the credential as JSON. `conditional`
  * asks quietly, offering the site's passkeys as the username is typed, until `signal` calls it off.
  */
 export async function getPasskey(
@@ -114,7 +114,9 @@ async function ask(request: () => Promise<Credential | null>): Promise<PublicKey
     if (name === 'AbortError')
       throw new PasskeyError('aborted', 'The passkey request was called off.', { cause });
     if (name === 'InvalidStateError')
-      throw new PasskeyError('exists', 'This device has a passkey for mekaweb already.', { cause });
+      throw new PasskeyError('exists', 'This device has a passkey for Meka Studio already.', {
+        cause,
+      });
     throw new PasskeyError('cancelled', 'The passkey was not used.', { cause });
   }
   if (!(credential instanceof PublicKeyCredential))
@@ -140,12 +142,12 @@ function plainExtensions(results: AuthenticationExtensionsClientOutputs): Json {
 
 function record(value: unknown): Json {
   if (typeof value === 'object' && value !== null && !Array.isArray(value)) return value as Json;
-  throw new PasskeyError('unreadable', 'mekaweb sent passkey options this page cannot read.');
+  throw new PasskeyError('unreadable', 'Meka Studio sent passkey options this page cannot read.');
 }
 
 function text(value: unknown): string {
   if (typeof value === 'string') return value;
-  throw new PasskeyError('unreadable', 'mekaweb sent passkey options this page cannot read.');
+  throw new PasskeyError('unreadable', 'Meka Studio sent passkey options this page cannot read.');
 }
 
 /** The bytes URL-safe base64 `encoded` holds. */

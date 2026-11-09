@@ -4,7 +4,7 @@ type Item = Schema['HistoryItem'];
 type Body = { role: string; content: Schema['ContentBlockView'][]; turn_id?: string | null };
 
 /**
- * A session's history as meka serves it, for tests: rows at positions never reused, a rewind's
+ * A session's history as Meka serves it, for tests: rows at positions never reused, a rewind's
  * item naming what it took out, and pages read before or after a position.
  */
 export class FakeHistory {

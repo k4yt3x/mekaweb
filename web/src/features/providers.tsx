@@ -56,7 +56,7 @@ const removals = {
   'remove-account': {
     title: 'Remove account',
     description: (name: string) =>
-      `Remove “${name}” and its stored credential? meka refuses while a profile uses it.`,
+      `Remove “${name}” and its stored credential? Meka refuses while a profile uses it.`,
     path: (name: string) => `/v1/accounts/${segment(name)}`,
     order: 'accounts',
   },
@@ -69,7 +69,7 @@ const removals = {
 } as const;
 
 /**
- * meka's accounts, which hold what a provider signs in with, each with the profiles that run on it
+ * Meka's accounts, which hold what a provider signs in with, each with the profiles that run on it
  * beneath, a line apiece so a long list reads at a glance.
  */
 export function ProvidersPage() {
@@ -172,7 +172,7 @@ export function ProvidersPage() {
       {ready && !groups.length && !orphans.length && !accounts.error && (
         <p className="muted small">
           {listed
-            ? 'No accounts yet. An account is what meka signs in to a provider with.'
+            ? 'No accounts yet. An account is what Meka signs in to a provider with.'
             : 'No profiles yet.'}
         </p>
       )}
@@ -336,7 +336,7 @@ function AccountGroup({
   onReorder,
 }: {
   group: ProviderGroup;
-  /** Whether meka's accounts were read, so one missing from them is not configured. */
+  /** Whether Meka's accounts were read, so one missing from them is not configured. */
   listed: boolean;
   canWrite: boolean;
   writable: string | undefined;
@@ -527,7 +527,7 @@ function SignedIn({ account }: { account: Schema['AccountView'] }) {
   if (account.authenticated === 'yes') return <span className="badge success">Signed in</span>;
   if (account.authenticated === 'unreadable')
     return (
-      <span className="badge danger" title="meka can’t read its stored credential">
+      <span className="badge danger" title="Meka can’t read its stored credential">
         Unreadable
       </span>
     );
@@ -669,7 +669,7 @@ function ProfileForm({
         const path = `/v1/profiles/${segment(initial.name)}`;
         const patch = patchProfileBody(start, draft, backend);
         if (Object.keys(patch).length) await api.mutate('PATCH', path, patch);
-        // meka takes a rename on its own, after the settings it moves with.
+        // Meka takes a rename on its own, after the settings it moves with.
         if (draft.name.trim() !== initial.name) {
           await api.mutate('PATCH', path, {
             name: draft.name.trim(),

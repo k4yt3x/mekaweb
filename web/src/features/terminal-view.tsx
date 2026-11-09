@@ -194,7 +194,7 @@ export function TerminalView({
       if (stopped || document.visibilityState !== 'visible') return;
       retry = setTimeout(connect, Math.min(30_000, 500 * 2 ** Math.max(0, failures - 1)));
     };
-    // A connection refused before it opened says nothing of why: mekaweb is asked.
+    // A connection refused before it opened says nothing of why: Meka Studio is asked.
     const diagnose = async () => {
       try {
         const open = await runtime.gateway.get<Gateway['TerminalView'][]>('/api/terminals');

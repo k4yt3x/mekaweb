@@ -1,0 +1,12 @@
+[Unit]
+Description=Meka Studio, the web interface for Meka
+Documentation=https://github.com/k4yt3x/meka-studio
+
+[Service]
+Type=exec
+ExecStart=%h/.local/bin/meka-studio serve
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

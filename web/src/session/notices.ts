@@ -33,13 +33,13 @@ export function sessionNotice(
     };
   }
   if (event === 'inbox.failed') {
-    // Its failed attempts made no notice, since meka might have run it again.
+    // Its failed attempts made no notice, since Meka might have run it again.
     const why = problemText(data.error) || string(data, 'reason').trim();
     const itemId = string(data, 'item_id');
     return {
       event,
       level: 'error',
-      text: `meka gave up on a queued message${why ? `: ${why}` : '.'}`,
+      text: `Meka gave up on a queued message${why ? `: ${why}` : '.'}`,
       ...(itemId ? { itemId } : {}),
     };
   }
@@ -61,7 +61,7 @@ export function sessionNotice(
     if (!reason || reason === 'client') return;
     const text =
       reason === 'server_shutdown'
-        ? 'The turn stopped because the meka server shut down.'
+        ? 'The turn stopped because the Meka server shut down.'
         : reason === 'abandoned'
           ? 'The turn stopped because the request that started it ended and nobody was following it.'
           : reason === 'sse_lag'

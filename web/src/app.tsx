@@ -41,7 +41,7 @@ function Workspace() {
   const settings = useSettings();
   const location = useLocation();
   const sessions = useSessionStates();
-  // meka's server feed, followed on every page: the session list reads it, and any turn ending
+  // Meka's server feed, followed on every page: the session list reads it, and any turn ending
   // alerts by it.
   useEffect(() => state.controller?.followServer(), [state.controller]);
   const [mobileSessionsOpen, setMobileSessionsOpen] = useState(false);
@@ -180,8 +180,8 @@ function Workspace() {
           <Unavailable />
         ) : (
           <main className="welcome">
-            <section className="connection-card" aria-label="mekaweb">
-              <h1>meka</h1>
+            <section className="connection-card" aria-label="Meka Studio">
+              <h1>Meka Studio</h1>
               {state.error ? (
                 <>
                   <ErrorNotice error={new Error(state.error)} />

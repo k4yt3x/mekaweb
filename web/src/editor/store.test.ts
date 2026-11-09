@@ -38,7 +38,7 @@ function setup(disk: Disk, kept?: Kept) {
     const file = disk[path];
     if (body.version === null ? file : file?.version !== body.version)
       throw new ApiError(file ? 409 : 404, {
-        type: file ? 'urn:mekaweb:changed' : 'urn:mekaweb:not-found',
+        type: file ? 'urn:meka-studio:changed' : 'urn:meka-studio:not-found',
       });
     const version = `v${++saves}`;
     disk[path] = { text: body.text as string, version };
@@ -449,7 +449,7 @@ describe('editor store', () => {
   });
 });
 
-/** A terminal, as mekaweb lists it. */
+/** A terminal, as Meka Studio lists it. */
 function shell(id: string) {
   return {
     id,

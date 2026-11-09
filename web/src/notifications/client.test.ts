@@ -28,7 +28,7 @@ const account = {
 };
 function fixture({ pushEnabled = true, subscribed = false } = {}) {
   vi.mocked(claimNotification).mockResolvedValue(true);
-  const url = new URL('https://mekaweb.test/');
+  const url = new URL('https://meka-studio.test/');
   const window = Object.assign(new EventTarget(), {
     isSecureContext: true,
     PushManager: class {},
@@ -50,7 +50,7 @@ function fixture({ pushEnabled = true, subscribed = false } = {}) {
     getSubscription: vi.fn(async (): Promise<typeof subscription | null> => null),
     subscribe: vi.fn(async () => subscription),
   };
-  const worker = { scriptURL: 'https://mekaweb.test/notifications.js' };
+  const worker = { scriptURL: 'https://meka-studio.test/notifications.js' };
   const registration = { active: worker, pushManager };
   const serviceWorker = Object.assign(new EventTarget(), {
     register: vi.fn(async () => registration),
@@ -99,13 +99,13 @@ function fixture({ pushEnabled = true, subscribed = false } = {}) {
   });
   const storage = new BrowserStorage(undefined);
   const runtime = new ConnectionRuntime(storage, new QueryClient());
-  const controller = new SessionController(new ApiClient('https://mekaweb.test/meka/'), true);
+  const controller = new SessionController(new ApiClient('https://meka-studio.test/meka/'), true);
   let state: RuntimeState = {
     auth: 'signed-in',
     busy: false,
     account,
     controller,
-    connection: { id: 'mekaweb', name: 'phone', endpoint: '', authority: 'device-1' },
+    connection: { id: 'meka-studio', name: 'phone', endpoint: '', authority: 'device-1' },
   };
   vi.spyOn(runtime, 'getSnapshot').mockImplementation(() => state);
   const listeners = new Set<() => void>();
@@ -159,7 +159,7 @@ function fixture({ pushEnabled = true, subscribed = false } = {}) {
   };
 }
 
-it('turns push on in the tap: permission first, then a subscription mekaweb keeps', async () => {
+it('turns push on in the tap: permission first, then a subscription Meka Studio keeps', async () => {
   const f = fixture();
   f.start();
   await vi.waitFor(() => expect(f.runtime.notifications.getSnapshot().push?.enabled).toBe(true));
@@ -192,7 +192,7 @@ it('keeps push off when permission is refused', async () => {
   expect(f.requests.some((request) => request.method === 'PUT')).toBe(false);
 });
 
-it('turns push off: the browser unsubscribes and mekaweb forgets it', async () => {
+it('turns push off: the browser unsubscribes and Meka Studio forgets it', async () => {
   const f = fixture({ subscribed: true });
   f.notification.permission = 'granted';
   f.pushManager.getSubscription.mockResolvedValue(f.subscription);
@@ -206,7 +206,7 @@ it('turns push off: the browser unsubscribes and mekaweb forgets it', async () =
   expect(f.runtime.notifications.getSnapshot().push?.subscribed).toBe(false);
 });
 
-it('says when the browser dropped a subscription mekaweb still has', async () => {
+it('says when the browser dropped a subscription Meka Studio still has', async () => {
   const f = fixture({ subscribed: true });
   f.notification.permission = 'granted';
   f.start();
@@ -309,7 +309,7 @@ it('leaves the chime to a focused tab that claimed it, or to no one', async () =
   expect(claimNotification).not.toHaveBeenCalled();
 });
 
-it('tells mekaweb it is in front only while focused and alerting in the page', () => {
+it('tells Meka Studio it is in front only while focused and alerting in the page', () => {
   const f = fixture();
   const controller = f.runtime.getSnapshot().controller!;
   const focus = vi.spyOn(controller, 'focus');

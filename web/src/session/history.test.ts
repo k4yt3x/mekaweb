@@ -89,8 +89,8 @@ it('leaves a page’s leading results to the page before, which holds their call
   expect(positions(startHistory(items, 11, undefined).messages)).toEqual([10, 11]);
 });
 
-it('takes a row meka wrote while the page was read once, past the position it reported', () => {
-  // meka reads the position ahead of the page, so the page can hold a row past it.
+it('takes a row Meka wrote while the page was read once, past the position it reported', () => {
+  // Meka reads the position ahead of the page, so the page can hold a row past it.
   let saved = startHistory([at(1, 'user', 'a'), at(2, 'assistant', 'a')], 1, undefined);
   expect(saved.position).toBe(2);
   saved = extendHistory(saved, [at(3, 'user', 'b')], 2);
@@ -107,7 +107,7 @@ it('names only turns the context holds: answered after the last compaction, or a
       compaction(3),
       at(4, 'user', 'one'),
       at(5, 'assistant', 'one'),
-      // A prompt meka may have taken back: nothing answered it.
+      // A prompt Meka may have taken back: nothing answered it.
       at(6, 'user', 'withdrawn'),
       at(7, 'user', 'two'),
       at(8, 'assistant', 'two'),
@@ -127,7 +127,7 @@ it('names only turns the context holds: answered after the last compaction, or a
     turns: 2,
     next: 'two',
   });
-  // It does not: meka took it back.
+  // It does not: Meka took it back.
   expect(rewindableTurns(messages, { context: new Set([4, 5, 7, 8]) }).has('withdrawn')).toBe(
     false,
   );

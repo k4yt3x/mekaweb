@@ -7,7 +7,7 @@ import { shortcutAttribute, shortcutHint } from '../components/shortcut-keys';
 import { SIDEBAR_PAGES, type SidebarPage } from './sidebar-pages';
 
 /**
- * The sidebar collapsed, on a wide screen: a column of icons, headed by meka's logo, which opens it
+ * The sidebar collapsed, on a wide screen: a column of icons, headed by Meka's logo, which opens it
  * again and shows so when pointed at; then its pages, the one shown marked; then to start or search
  * sessions, which opens it to search; and at its foot to reach the account and Settings.
  */

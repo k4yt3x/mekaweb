@@ -38,7 +38,7 @@ const statusShapes: Record<SessionStatus, ReactNode> = {
 
 /**
  * A pin toggle pressed from the keyboard, which takes focus back once its row is `pinned` or not,
- * as pinning moves the row; `moved` is the record meka answered with.
+ * as pinning moves the row; `moved` is the record Meka answered with.
  */
 export interface PinFocus {
   pinned: boolean;

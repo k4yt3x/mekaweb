@@ -56,7 +56,7 @@ const HOVER_OPEN_MS = 700;
 /** How long letters typed run on into one name. */
 const TYPE_AHEAD_MS = 700;
 /** What a drag of entries within the tree carries. */
-export const DRAGGED_PATHS = 'application/x-mekaweb-paths';
+export const DRAGGED_PATHS = 'application/x-meka-studio-paths';
 
 /**
  * The folder `root` as a tree, VS Code's way: a folder opens and closes with a click, its arrow,

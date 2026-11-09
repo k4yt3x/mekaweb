@@ -4,7 +4,7 @@ import { useConnection } from '../connections/context';
 import { isSessionRunning, type SessionState } from './controller';
 import type { ConversationMessage } from './history';
 
-/** How many turns a page holds, the most meka gives. */
+/** How many turns a page holds, the most Meka gives. */
 const PAGE = 200;
 
 /** The most pages read back for one history. */
@@ -39,7 +39,7 @@ export function useTurnRecords(state: SessionState) {
   return useQuery({
     queryKey: [connection?.id, connection?.authority, 'turns', state.id, oldest, newest, running],
     queryFn: async ({ signal }) => {
-      if (!api) throw new Error('meka is not connected.');
+      if (!api) throw new Error('Meka is not connected.');
       const turns = new Map<string, Schema['TurnRecord']>();
       let before: string | undefined;
       for (let page = 0; page < MAX_PAGES; page++) {
@@ -58,7 +58,7 @@ export function useTurnRecords(state: SessionState) {
     // A history that grows keeps the summaries it has while the next read is on its way.
     placeholderData: keepPreviousData,
     staleTime: Infinity,
-    // meka may say a turn stopped a moment before its record says when; one that never ends, as
+    // Meka may say a turn stopped a moment before its record says when; one that never ends, as
     // under a process that died, is not waited for long.
     refetchInterval: (query) =>
       !running &&

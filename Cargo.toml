@@ -3,12 +3,12 @@ resolver = "3"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.40.0"
+version = "0.41.0"
 edition = "2024"
 rust-version = "1.95"
 license = "AGPL-3.0-or-later"
 publish = false
-repository = "https://github.com/k4yt3x/mekaweb"
+repository = "https://github.com/k4yt3x/meka-studio"
 
 [workspace.lints.clippy]
 await_holding_lock = "deny"

@@ -295,7 +295,7 @@ it.each(['before', 'after'])(
     ]);
     f.session.turn_in_flight = true;
     const tab = await reopened(f, { hold: order === 'before' });
-    // Rejoining, as after mekaweb restarts, the feed hands over the turn's opening.
+    // Rejoining, as after Meka Studio restarts, the feed hands over the turn's opening.
     const rejoin = async () => {
       await tab.event('turn.started', { turn_id: 'remote', resumed: true }, true);
       await tab.event(
@@ -494,7 +494,7 @@ it('follows a compaction turn without notifying', async () => {
   expect(completed).not.toHaveBeenCalled();
 });
 
-it('shows a compaction meka opens inside a turn until it lands or fails', async () => {
+it('shows a compaction Meka opens inside a turn until it lands or fails', async () => {
   const f = await fixture();
   f.session.turn_in_flight = true;
   await f.event('turn.started', { turn_id: 'work' });
@@ -693,7 +693,7 @@ it.each([
     f.history.sayAll([
       { role: 'user', content: [{ type: 'text', text: 'One.' }], turn_id: 'one' },
       { role: 'assistant', content: [{ type: 'text', text: 'First.' }], turn_id: 'one' },
-      // A failed turn: whether meka took its opening back only the context says.
+      // A failed turn: whether Meka took its opening back only the context says.
       { role: 'user', content: [{ type: 'text', text: 'Failed.' }], turn_id: 'withdrawn' },
     ]);
     await f.controller.refresh('s');
@@ -1215,7 +1215,7 @@ it('waits quietly when deletion ends the feed, and reconnects if the deletion fa
     new Response(new ReadableStream(), { headers: { 'Content-Type': 'text/event-stream' } }),
   );
   const deleting = f.controller.deleteSession('s');
-  // meka 0.68 closes the feed before it removes the rows and answers.
+  // Meka 0.68 closes the feed before it removes the rows and answers.
   f.closeFeed();
   await vi.advanceTimersByTimeAsync(0);
   expect(f.state()).toMatchObject({ feed: 'connected', deleting: true });
@@ -1604,7 +1604,7 @@ it('shows direct-turn text and image metadata until the detached turn ends', asy
   await vi.waitFor(() => expect(f.state().submissions[0]?.preview).toBe(false));
   expect(f.state().blocks).toEqual([]);
 });
-it('keeps a deferred message queued, and says why meka gave up on a failed one', async () => {
+it('keeps a deferred message queued, and says why Meka gave up on a failed one', async () => {
   const f = await fixture();
   vi.spyOn(f.api, 'mutate').mockResolvedValue({
     item_id: 'item',
@@ -1646,10 +1646,10 @@ it('keeps a deferred message queued, and says why meka gave up on a failed one',
   expect(f.state().submissions[0]).toMatchObject({
     state: 'failed',
     preview: false,
-    error: 'meka gave up on this message: The account is out of quota.',
+    error: 'Meka gave up on this message: The account is out of quota.',
   });
 });
-it('says why meka gave up on a queued message, from a replay or a bare reason', async () => {
+it('says why Meka gave up on a queued message, from a replay or a bare reason', async () => {
   const f = await fixture();
   vi.spyOn(f.api, 'mutate')
     .mockRejectedValueOnce(new UncertainMutationError())
@@ -1677,7 +1677,7 @@ it('says why meka gave up on a queued message, from a replay or a bare reason', 
   expect(f.state().submissions[0]).toMatchObject({
     state: 'failed',
     preview: false,
-    error: 'meka withdrew this message: The provider is down.',
+    error: 'Meka withdrew this message: The provider is down.',
   });
   f.inbox.items = [
     {
@@ -1690,11 +1690,11 @@ it('says why meka gave up on a queued message, from a replay or a bare reason', 
     },
   ];
   await f.controller.submit('s', { message: 'Also later.', class: 'followup' }, 'inbox');
-  // At the retry ceiling meka names no error, only why it gave up.
+  // At the retry ceiling Meka names no error, only why it gave up.
   await f.event('inbox.failed', { item_id: 'other', reason: 'retried for an hour' });
   expect(f.state().submissions[1]).toMatchObject({
     state: 'failed',
-    error: 'meka gave up on this message: retried for an hour',
+    error: 'Meka gave up on this message: retried for an hour',
   });
   // It is reported below the conversation as well, whichever message is the latest.
   expect(f.state().notices).toEqual([
@@ -1702,7 +1702,7 @@ it('says why meka gave up on a queued message, from a replay or a bare reason', 
       event: 'inbox.failed',
       itemId: 'other',
       level: 'error',
-      text: 'meka gave up on a queued message: retried for an hour',
+      text: 'Meka gave up on a queued message: retried for an hour',
     }),
   ]);
   await f.event('inbox.failed', { item_id: 'other', reason: 'retried for an hour' }, true);
@@ -1798,7 +1798,7 @@ it('holds an MCP server’s question beside approvals and sends the answer’s c
   await f.event('elicitation.resolved', { request_id: 'u', outcome: 'expired' });
   expect(f.state().approvals).toEqual([]);
 });
-it('keeps what meka last measured in context, inside a turn or not', async () => {
+it('keeps what Meka last measured in context, inside a turn or not', async () => {
   const f = await fixture();
   await f.event('context.measured', { used: 1200, window: 200000 });
   expect(f.state().measured).toEqual({ used: 1200, window: 200000 });
@@ -2292,7 +2292,7 @@ it('puts notices away once a newer turn starts, still knowing their replays', as
   expect(shown()).toEqual([
     'Provider advisory',
     'Provider failed',
-    'meka gave up on a queued message: retried for an hour',
+    'Meka gave up on a queued message: retried for an hour',
   ]);
   await f.event('turn.started', { turn_id: 'next' });
   expect(shown()).toEqual([]);
@@ -2685,7 +2685,7 @@ it('alerts of a turn ending in any root session the server feed tells of, once',
   await f.event('turn.finished', { session_id: 'named', turn_id: 't1' });
   await f.event('turn.finished', { session_id: 'named', turn_id: 't1' });
   await f.event('turn.failed', { session_id: 'looked', turn_id: 't2' });
-  // meka titles a session by its first message in the record alone.
+  // Meka titles a session by its first message in the record alone.
   await f.event('session.created', { id: 'fresh', title: '' });
   await f.event('turn.finished', { session_id: 'fresh', turn_id: 't5' });
   // A sub-agent's turn and a compaction alert no one.

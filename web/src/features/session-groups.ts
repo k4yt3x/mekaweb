@@ -13,7 +13,7 @@ export interface SessionGroup {
   key: string;
   /** The project it lists, '' for the sessions on none; undefined for the pinned. */
   project: string | undefined;
-  /** How many sessions it lists, where meka counts them. */
+  /** How many sessions it lists, where Meka counts them. */
   count?: number | undefined;
 }
 
@@ -57,7 +57,7 @@ export function sessionGroups(
 /** How many sessions a group lists at first, and how many more each time more are asked for. */
 export const GROUP_FIRST = 10;
 export const GROUP_MORE = 40;
-/** Pins are kept at hand, so as many are listed as meka gives at once. */
+/** Pins are kept at hand, so as many are listed as Meka gives at once. */
 export const PINNED_FIRST = 200;
 export function groupFirst(group: SessionGroup) {
   return group.key === PINNED.key ? PINNED_FIRST : GROUP_FIRST;
@@ -69,7 +69,7 @@ export interface GroupPage {
   cursor: string | undefined;
 }
 
-/** Up to `limit` sessions of `group`, newest first as meka orders them, from `cursor` on. */
+/** Up to `limit` sessions of `group`, newest first as Meka orders them, from `cursor` on. */
 export async function readGroup(
   api: ApiClient,
   group: SessionGroup,
@@ -80,7 +80,7 @@ export async function readGroup(
   const filter =
     group.project === undefined ? { pinned: true } : { project: group.project, pinned: false };
   const sessions: GroupPage['sessions'] = [];
-  // meka gives at most 200 at once.
+  // Meka gives at most 200 at once.
   do {
     const page = await api.get<Schema['ListSessionsResponse']>(
       '/v1/sessions',
@@ -127,7 +127,7 @@ export function sessionGroupQuery(
     enabled: Boolean(api),
     // What more was asked for is put in place as read, rather than read again.
     staleTime: 10_000,
-    // meka's server feed says when to read it again; this only covers a feed that is down.
+    // Meka's server feed says when to read it again; this only covers a feed that is down.
     refetchInterval: 300_000,
     retry: false,
   });

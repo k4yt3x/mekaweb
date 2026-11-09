@@ -18,7 +18,7 @@ function fixture(windows: { url: string; focused?: boolean }[] = []) {
   }));
   const openWindow = vi.fn(async () => null);
   const self = {
-    registration: { scope: 'https://mekaweb.test/', showNotification },
+    registration: { scope: 'https://meka-studio.test/', showNotification },
     navigator: { setAppBadge, clearAppBadge },
     clients: { matchAll: vi.fn(async () => clients), openWindow, claim: vi.fn(async () => {}) },
     skipWaiting: vi.fn(),
@@ -61,7 +61,7 @@ it('shows every push, titled by its session, saying what happened, and sets the 
     'Fix the build',
     expect.objectContaining({
       body: 'Waiting for your approval.',
-      tag: 'mekaweb:s1',
+      tag: 'meka-studio:s1',
       data: { session: 's1' },
     }),
   );
@@ -74,7 +74,7 @@ it('still shows a push it cannot read, since iOS cancels silent ones', async () 
   const f = fixture();
   await f.dispatch('push', push('garbage'));
   expect(f.showNotification).toHaveBeenCalledWith(
-    'meka',
+    'Meka Studio',
     expect.objectContaining({ body: 'Finished.' }),
   );
 });
@@ -82,7 +82,7 @@ it('still shows a push it cannot read, since iOS cancels silent ones', async () 
 it('focuses an open window of the app and asks it to open the session', async () => {
   const f = fixture([
     { url: 'https://elsewhere.test/', focused: true },
-    { url: 'https://mekaweb.test/#/files' },
+    { url: 'https://meka-studio.test/#/files' },
   ]);
   const close = vi.fn();
   await f.dispatch('notificationclick', { notification: { close, data: { session: 's1' } } });
@@ -101,5 +101,5 @@ it('opens the app at the session when no window is open', async () => {
   await f.dispatch('notificationclick', {
     notification: { close: vi.fn(), data: { session: 'a b' } },
   });
-  expect(f.openWindow).toHaveBeenCalledWith('https://mekaweb.test/#/sessions/a%20b');
+  expect(f.openWindow).toHaveBeenCalledWith('https://meka-studio.test/#/sessions/a%20b');
 });

@@ -8,7 +8,7 @@ it('omits connection failures owned by the global banner but keeps setup errors 
     '',
   );
   expect(renderToStaticMarkup(<ErrorNotice error={new ConnectionError()} />)).toContain(
-    'Cannot reach mekaweb',
+    'Cannot reach Meka Studio',
   );
 });
 
@@ -23,5 +23,5 @@ it('keeps uncertain mutations and resource-specific errors visible', () => {
   ).toContain('Invalid title');
   expect(
     renderToStaticMarkup(<ErrorNotice error={new Error(new ConnectionError().message)} />),
-  ).toContain('Cannot reach mekaweb');
+  ).toContain('Cannot reach Meka Studio');
 });

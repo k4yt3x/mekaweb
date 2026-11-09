@@ -1,4 +1,4 @@
-// Writes a Brotli and a gzip copy beside each text file of the build, which mekaweb serves to a
+// Writes a Brotli and a gzip copy beside each text file of the build, which Meka Studio serves to a
 // browser that takes them instead of compressing the same files on every request.
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { join, extname } from 'node:path';

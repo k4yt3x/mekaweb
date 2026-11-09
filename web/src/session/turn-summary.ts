@@ -2,7 +2,7 @@ import type { Schema } from '../api/client';
 
 type TurnRecord = Schema['TurnRecord'];
 
-/** How a turn ended, in the word meka's terminal starts its closing row with. */
+/** How a turn ended, in the word Meka's terminal starts its closing row with. */
 const ENDINGS: Record<string, string> = {
   succeeded: 'Finished',
   failed: 'Failed',
@@ -25,7 +25,7 @@ const STOPS: Record<string, string> = {
 };
 
 /**
- * A duration as meka's terminal states it: seconds under a minute, minutes and seconds under an
+ * A duration as Meka's terminal states it: seconds under a minute, minutes and seconds under an
  * hour, then hours and minutes, then days and hours.
  */
 export function formatElapsed(ms: number): string {
@@ -37,7 +37,7 @@ export function formatElapsed(ms: number): string {
   return `${Math.floor(minutes / (24 * 60))}d ${Math.floor((minutes % (24 * 60)) / 60)}h`;
 }
 
-/** A token count as meka's terminal states it: `999`, `1.0k`, `2.3M`. */
+/** A token count as Meka's terminal states it: `999`, `1.0k`, `2.3M`. */
 export function formatTokens(count: number): string {
   if (count < 1000) return String(count);
   if (count < 1_000_000) return `${(count / 1000).toFixed(1)}k`;
@@ -77,7 +77,7 @@ function elapsed(turn: TurnRecord) {
 }
 
 /**
- * The row that closes an ended turn, as meka's terminal writes it: how it ended, when, and after how
+ * The row that closes an ended turn, as Meka's terminal writes it: how it ended, when, and after how
  * long, such as `Finished at 10:36 after 9m 36s`. None for a turn that has not ended.
  */
 export function turnSummary(turn: TurnRecord, now = new Date()): string | undefined {

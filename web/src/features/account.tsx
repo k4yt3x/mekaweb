@@ -125,7 +125,7 @@ function PasskeysPanel() {
               </Button>
               <ConfirmButton
                 title="Remove passkey"
-                description={`Remove “${passkey.name}”? It will no longer sign in to mekaweb. The authenticator keeps its copy until you delete it there.`}
+                description={`Remove “${passkey.name}”? It will no longer sign in to Meka Studio. The authenticator keeps its copy until you delete it there.`}
                 onConfirm={() =>
                   confirmed.run(async () => {
                     await runtime.gateway.send(
@@ -197,7 +197,7 @@ function PasskeysPanel() {
   );
 }
 
-/** What is wrong with `password` as `username`'s, by the rules mekaweb applies. */
+/** What is wrong with `password` as `username`'s, by the rules Meka Studio applies. */
 function passwordProblem(password: string, username: string | undefined) {
   const length = [...password].length;
   if (length < 10) return 'At least 10 characters.';

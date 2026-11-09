@@ -108,7 +108,7 @@ it('rejoins at once, from where it stood, when the page comes to the front or le
   expect(first?.aborted).toBe(true);
   expect(f.stream).toHaveBeenCalledTimes(3);
   expect(f.stream).toHaveBeenLastCalledWith('/v1/feed', '4', undefined, expect.any(AbortSignal), {
-    'X-Mekaweb-Focused': '1',
+    'X-Meka-Studio-Focused': '1',
   });
   feed.focus(true);
   feed.focus(false);

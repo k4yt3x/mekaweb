@@ -33,7 +33,7 @@ export function isEdit(name: string) {
 }
 
 /**
- * What an edit or a write changes, from its call alone, as meka's own screen draws it: the text an
+ * What an edit or a write changes, from its call alone, as Meka's own screen draws it: the text an
  * edit swaps for another, or the text a write puts in, whose old text the call does not hold. A
  * memory or a skill is Markdown.
  */
@@ -89,7 +89,7 @@ export function segments(parts: readonly Part[], ended: boolean, fold = true): S
   return shown;
 }
 
-/** A step, as a run's line counts it: thinking, a tool call, or a note meka wrote into the turn. */
+/** A step, as a run's line counts it: thinking, a tool call, or a note Meka wrote into the turn. */
 export type Step =
   { kind: 'thinking' } | { kind: 'note' } | { kind: 'tool'; name: string; failed: boolean };
 
@@ -114,7 +114,7 @@ function counted(count: number, one: string, many: string) {
 
 const PHRASES: Record<Family, (count: number) => string> = {
   thinking: (count) => `thought ${times(count)}`,
-  note: (count) => `got ${counted(count, 'a note', 'notes')} from meka`,
+  note: (count) => `got ${counted(count, 'a note', 'notes')} from Meka`,
   command: (count) => `ran ${counted(count, 'a command', 'commands')}`,
   read: (count) => `read ${counted(count, 'a file', 'files')}`,
   search: (count) => `searched ${times(count)}`,

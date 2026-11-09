@@ -1,7 +1,7 @@
 import { createContext, useContext } from 'react';
 
 /**
- * The sections of Settings: how mekaweb behaves and looks, the account, how meka is set up, the
+ * The sections of Settings: how Meka Studio behaves and looks, the account, how Meka is set up, the
  * keyboard's shortcuts, and what is running.
  */
 export type SettingsSection =

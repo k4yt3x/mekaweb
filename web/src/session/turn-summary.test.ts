@@ -25,7 +25,7 @@ function turn(overrides: Partial<Schema['TurnRecord']> = {}): Schema['TurnRecord
 
 const clock = (date: Date) => date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-it('states durations as meka’s terminal does', () => {
+it('states durations as Meka’s terminal does', () => {
   expect(formatElapsed(0)).toBe('0s');
   expect(formatElapsed(59_999)).toBe('59s');
   expect(formatElapsed(576_000)).toBe('9m 36s');
@@ -33,7 +33,7 @@ it('states durations as meka’s terminal does', () => {
   expect(formatElapsed(2 * 86_400_000 + 3 * 3_600_000)).toBe('2d 3h');
 });
 
-it('states token counts as meka’s terminal does', () => {
+it('states token counts as Meka’s terminal does', () => {
   expect(formatTokens(999)).toBe('999');
   expect(formatTokens(1_000)).toBe('1.0k');
   expect(formatTokens(234_000)).toBe('234.0k');

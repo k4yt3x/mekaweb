@@ -16,7 +16,7 @@ export interface McpDraft {
   transport: 'stdio' | 'http';
   command: string;
   args: string;
-  /** `KEY=value` lines to set. meka never shows the values already set, only their keys. */
+  /** `KEY=value` lines to set. Meka never shows the values already set, only their keys. */
   env: string;
   /** Keys already set that the edit keeps; one taken out of this list is removed. */
   envKeys: string[];
@@ -135,7 +135,7 @@ function auth(draft: McpDraft): Schema['McpAuthConfig'] | undefined {
     };
   return undefined;
 }
-/** The secret the entry presents, by the key meka stores it under. */
+/** The secret the entry presents, by the key Meka stores it under. */
 function secret(draft: McpDraft) {
   if (draft.auth === 'token' && draft.auth_token.trim())
     return { auth_token: draft.auth_token.trim() };
@@ -189,7 +189,7 @@ export function createMcpBody(draft: McpDraft): Schema['McpServerRequest'] {
 }
 
 /**
- * What an edit changed: each moved key's new value, `null` for one cleared. meka merges `env`,
+ * What an edit changed: each moved key's new value, `null` for one cleared. Meka merges `env`,
  * `headers` and `tool_permissions` key by key, so each carries the keys set or changed, and
  * `null` for each taken out.
  */
@@ -209,7 +209,7 @@ export function patchMcpBody(initial: McpDraft, draft: McpDraft): Schema['PatchM
   const flag = (key: 'trust_read_only_hint' | 'required') => {
     if (draft[key] !== initial[key]) patch[key] = draft[key] ? draft[key] === 'true' : null;
   };
-  /** The keys entered and the kept keys taken out, as meka merges them. */
+  /** The keys entered and the kept keys taken out, as Meka merges them. */
   const merged = (entered: Record<string, string>, kept: string[], before: string[]) => {
     const changes: Record<string, string | null> = { ...entered };
     for (const key of before) if (!kept.includes(key) && !(key in entered)) changes[key] = null;

@@ -9,7 +9,7 @@ const usual = {
   generation: 1,
 };
 
-it('says what set a compaction going, as meka’s screen does', () => {
+it('says what set a compaction going, as Meka’s screen does', () => {
   expect(compactionNote(usual)).toBe(
     'Autocompacted the conversation after context usage crossed the ceiling.',
   );

@@ -23,7 +23,7 @@ const account: Gateway['SessionView'] = {
 type Route = (url: URL, init: RequestInit | undefined) => Response | Promise<Response>;
 const runtimes: ConnectionRuntime[] = [];
 beforeEach(() => {
-  vi.stubGlobal('location', new URL('https://mekaweb.test/'));
+  vi.stubGlobal('location', new URL('https://meka-studio.test/'));
 });
 afterEach(() => {
   for (const runtime of runtimes) runtime.signedOut();
@@ -52,13 +52,13 @@ const signedIn: Record<string, Route> = {
   'GET /meka/v1/info': () => Response.json(info),
 };
 
-it('signs in from the sign-in mekaweb holds and reaches meka through it', async () => {
+it('signs in from the sign-in Meka Studio holds and reaches Meka through it', async () => {
   const { runtime, fetcher } = fixture(signedIn);
   await runtime.check();
   const state = runtime.getSnapshot();
   expect(state).toMatchObject({ auth: 'signed-in', account, info, busy: false });
   expect(state.connection).toMatchObject({
-    endpoint: 'https://mekaweb.test/meka/',
+    endpoint: 'https://meka-studio.test/meka/',
     authority: 'device-1',
   });
   expect(state.controller?.canWrite).toBe(true);
@@ -71,19 +71,19 @@ it('signs in from the sign-in mekaweb holds and reaches meka through it', async 
 it('shows the sign-in page when nobody is signed in', async () => {
   const { runtime } = fixture({
     'GET /api/auth/session': () =>
-      Response.json({ type: 'urn:mekaweb:signed-out' }, { status: 401 }),
+      Response.json({ type: 'urn:meka-studio:signed-out' }, { status: 401 }),
   });
   await runtime.check();
   expect(runtime.getSnapshot()).toEqual({ auth: 'signed-out', busy: false });
 });
 
-it('stays signed in and says why while meka is unavailable', async () => {
+it('stays signed in and says why while Meka is unavailable', async () => {
   vi.useFakeTimers();
   const { runtime } = fixture({
     ...signedIn,
     'GET /meka/v1/info': () =>
       Response.json(
-        { type: 'urn:mekaweb:meka-unavailable', detail: 'mekaweb could not reach meka.' },
+        { type: 'urn:meka-studio:meka-unavailable', detail: 'Meka Studio could not reach Meka.' },
         { status: 502 },
       ),
   });
@@ -93,25 +93,25 @@ it('stays signed in and says why while meka is unavailable', async () => {
   expect(runtime.getSnapshot()).toMatchObject({
     auth: 'signed-in',
     busy: false,
-    error: 'mekaweb could not reach meka.',
+    error: 'Meka Studio could not reach Meka.',
   });
   expect(runtime.getSnapshot().api).toBeUndefined();
 });
 
-it('refuses a meka older than the release supports', async () => {
+it('refuses a Meka older than the release supports', async () => {
   const { runtime } = fixture({
     ...signedIn,
     'GET /meka/v1/info': () => Response.json({ ...info, version: '0.89.0' }),
   });
   await runtime.check();
-  expect(runtime.getSnapshot().error).toMatch(/meka 0\.89\.0.*0\.90\.0 or newer/);
+  expect(runtime.getSnapshot().error).toMatch(/Meka 0\.89\.0.*0\.90\.0 or newer/);
 });
 
-it('goes back to signing in when mekaweb says the sign-in ended', async () => {
+it('goes back to signing in when Meka Studio says the sign-in ended', async () => {
   const { runtime } = fixture({
     ...signedIn,
     'GET /meka/v1/memories': () =>
-      Response.json({ type: 'urn:mekaweb:signed-out' }, { status: 401 }),
+      Response.json({ type: 'urn:meka-studio:signed-out' }, { status: 401 }),
   });
   await runtime.check();
   await expect(runtime.getSnapshot().api?.get('/v1/memories')).rejects.toThrow();
@@ -139,7 +139,7 @@ it('recovers in place with read-only probes, keeping its cached data', async () 
   expect(probes).toHaveLength(1);
 });
 
-it('takes the preferences mekaweb kept, and saves changes for every device once they settle', async () => {
+it('takes the preferences Meka Studio kept, and saves changes for every device once they settle', async () => {
   vi.useFakeTimers();
   const saved: unknown[] = [];
   const { runtime, storage } = fixture({
@@ -190,23 +190,23 @@ it('stays signed in when signing out fails, and forgets the account once it succ
     'POST /api/auth/sign-out': () => answer,
   });
   await runtime.check();
-  storage.saveDraft('mekaweb', 's1', 'a draft');
+  storage.saveDraft('meka-studio', 's1', 'a draft');
   await expect(runtime.signOut()).rejects.toThrow();
   expect(runtime.getSnapshot().auth).toBe('signed-in');
-  expect(storage.draft('mekaweb', 's1')?.text).toBe('a draft');
+  expect(storage.draft('meka-studio', 's1')?.text).toBe('a draft');
   answer = new Response(null, { status: 204 });
   await runtime.signOut();
   expect(runtime.getSnapshot().auth).toBe('signed-out');
-  expect(storage.draft('mekaweb', 's1')).toBeUndefined();
-  storage.saveDraft('mekaweb', 's1', 'written as the page left');
-  expect(storage.draft('mekaweb', 's1'), 'nothing is kept until a sign-in').toBeUndefined();
+  expect(storage.draft('meka-studio', 's1')).toBeUndefined();
+  storage.saveDraft('meka-studio', 's1', 'written as the page left');
+  expect(storage.draft('meka-studio', 's1'), 'nothing is kept until a sign-in').toBeUndefined();
 });
 
-it('counts a sign-out mekaweb already ended as done', async () => {
+it('counts a sign-out Meka Studio already ended as done', async () => {
   const { runtime } = fixture({
     ...signedIn,
     'POST /api/auth/sign-out': () =>
-      Response.json({ type: 'urn:mekaweb:signed-out' }, { status: 401 }),
+      Response.json({ type: 'urn:meka-studio:signed-out' }, { status: 401 }),
   });
   await runtime.check();
   await runtime.signOut();

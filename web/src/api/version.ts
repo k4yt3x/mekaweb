@@ -1,8 +1,8 @@
 import versions from './meka-versions.json';
 
-// The meka versions this release supports, shared with mekaweb's server, which checks meka against
-// them too. Every request type denies unknown fields, so older servers are refused at connect
-// rather than half supported.
+// The Meka versions this release supports, shared with Meka Studio's server, which checks Meka
+// against them too. Every request type denies unknown fields, so older servers are refused at
+// connect rather than half supported.
 export const minimumVersion: string = versions.minimum;
 
 function numbers(version: string): [number, number, number] | undefined {

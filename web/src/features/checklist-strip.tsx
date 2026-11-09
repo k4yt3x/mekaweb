@@ -10,7 +10,7 @@ const statuses = {
 
 /**
  * The agent's open checklist, above the message input: what it has committed to and not yet
- * finished. meka does not let a turn end while an item is pending or in progress, so this is also
+ * finished. Meka does not let a turn end while an item is pending or in progress, so this is also
  * why a turn keeps going after its answer.
  */
 export function ChecklistStrip({ items }: { items: Schema['ChecklistItem'][] }) {
@@ -31,7 +31,7 @@ export function ChecklistStrip({ items }: { items: Schema['ChecklistItem'][] }) 
       {open && (
         <ul>
           {items.map((item) => {
-            // A newer meka may have a status this client does not know; it is shown plainly.
+            // A newer Meka may have a status this client does not know; it is shown plainly.
             const { Icon, label } = statuses[item.status] ?? { Icon: Circle, label: item.status };
             return (
               <li key={item.id} data-status={item.status}>

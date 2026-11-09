@@ -31,10 +31,10 @@ self.addEventListener('push', (event) => {
   const title =
     typeof message.title === 'string' && message.title.trim()
       ? message.title.slice(0, 160)
-      : 'meka';
+      : 'Meka Studio';
   const shown = self.registration.showNotification(title, {
     body: words[kind],
-    tag: session ? 'mekaweb:' + session : 'mekaweb:' + kind,
+    tag: session ? 'meka-studio:' + session : 'meka-studio:' + kind,
     data: { session },
     icon: new URL('meka-192.png', scope).href,
     badge: new URL('meka-192.png', scope).href,

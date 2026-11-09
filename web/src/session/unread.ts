@@ -4,7 +4,7 @@ import type { SeenSessions } from '../connections/storage';
 import type { SessionState } from './controller';
 import { useConnection, useRuntime } from '../connections/context';
 
-// meka keeps no read state, so this browser remembers the server's `updated_at` for each session
+// Meka keeps no read state, so this browser remembers the server's `updated_at` for each session
 // as last viewed. Comparing two server times keeps the browser's clock out of it.
 export function isUnread(
   session: Pick<Schema['SessionResponse'], 'id' | 'updated_at' | 'parent_id'>,

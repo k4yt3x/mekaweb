@@ -188,7 +188,7 @@ export function zipUrl(path: string): string {
   return url.pathname + url.search;
 }
 
-/** The address of a zip of entries chosen, by the id mekaweb keeps them under. */
+/** The address of a zip of entries chosen, by the id Meka Studio keeps them under. */
 export function selectionZipUrl(id: string): string {
   const url = new URL('/api/files/zip', location.origin);
   url.searchParams.set('selection', id);

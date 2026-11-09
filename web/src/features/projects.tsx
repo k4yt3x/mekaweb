@@ -11,7 +11,7 @@ import { useProjects } from './projects-query';
 export function ProjectsPage() {
   const { api } = useConnection();
   const runtime = useRuntime();
-  // A project is a memory tier, so meka writes projects under the memory scope.
+  // A project is a memory tier, so Meka writes projects under the memory scope.
   const canWrite = useCan('memory:w');
   const projects = useProjects();
   const [creating, setCreating] = useState(false);
@@ -60,7 +60,7 @@ export function ProjectsPage() {
               <ConfirmButton
                 disabled={!canWrite}
                 title="Remove project"
-                description="meka removes a project only once no memory or session is on it."
+                description="Meka removes a project only once no memory or session is on it."
                 onConfirm={async () => {
                   await api?.mutate('DELETE', `/v1/projects/${segment(project.name)}`);
                   await runtime.queries.invalidateQueries();

@@ -24,7 +24,7 @@ export function useConfirmed() {
       try {
         return await action();
       } catch (error) {
-        // This device's clock thought the confirmation recent; mekaweb's did not.
+        // This device's clock thought the confirmation recent; Meka Studio's did not.
         if (!isProblem(error, 'verification-required')) throw error;
       }
     }

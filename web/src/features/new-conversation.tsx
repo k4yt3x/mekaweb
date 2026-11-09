@@ -34,7 +34,7 @@ export function NewConversation() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [error, setError] = useState<unknown>();
   const disabled = !canWrite || creation.busy;
-  // meka starts with no profile, and refuses a session until one is added.
+  // Meka starts with no profile, and refuses a session until one is added.
   const noProfile = profiles.data?.profiles.length === 0;
   function updateOptions(patch: Partial<ComposerOptions>) {
     controller?.saveDraft('new', {
@@ -60,7 +60,7 @@ export function NewConversation() {
             {noProfile && (
               <p className="notice">
                 <span>
-                  meka has no profile yet.{' '}
+                  Meka has no profile yet.{' '}
                   <SettingsLink section="providers">Add one in Providers</SettingsLink> to start.
                 </span>
               </p>
@@ -111,7 +111,7 @@ export function NewConversation() {
             onTextChange={draft.setText}
             readOnly={!canWrite}
             pending={creation.busy}
-            placeholder={creation.busy ? 'Creating session…' : 'Ask meka to work on something…'}
+            placeholder={creation.busy ? 'Creating session…' : 'Ask Meka to work on something…'}
             focusId="new"
             inputHeight={height}
             onResize={setHeight}

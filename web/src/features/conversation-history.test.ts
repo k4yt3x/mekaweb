@@ -480,7 +480,7 @@ it('leaves out only this tab’s own blocks from an opening that carries others'
   expect(
     shown(fed('any', true, context, { type: 'text', text: 'Someone else.' }), [unresolved]),
   ).toEqual(['turn_context', 'text']);
-  // meka sends the words with the skill they ran; before 0.87.0 it wrote the skill's body after
+  // Meka sends the words with the skill they ran; before 0.87.0 it wrote the skill's body after
   // them. It writes no words at all for an empty message.
   const skilled: Submission = {
     ...unresolved,
@@ -513,7 +513,7 @@ it('leaves out only this tab’s own blocks from an opening that carries others'
   expect(shown(fed('any', false, item('other words')), [posting])).toEqual(['inbox']);
 });
 
-it('keeps the words of a queued message meka gave up on, which history no longer holds', () => {
+it('keeps the words of a queued message Meka gave up on, which history no longer holds', () => {
   const failed = (key: string, kind: 'inbox' | 'turn', id: string): Submission => ({
     key,
     kind,
@@ -702,7 +702,7 @@ it('names a running compaction, but not a turn whose compaction flag outlived it
   expect(activity(waitingState({ compacting: true }))?.status).toBe('working');
 });
 
-it('copies what was written, without thinking, tools, or context meka added', () => {
+it('copies what was written, without thinking, tools, or context Meka added', () => {
   expect(
     messageText([
       message('user', { type: 'turn_context', text: 'Context.' }, { type: 'text', text: ' Ask. ' }),
@@ -732,7 +732,7 @@ it('keeps a nudge in the turn it answers, apart from one a steer rides', () => {
   expect(messageText(input.slice(1, 4))).toBe('Did one.\n\nDid the other.');
 });
 
-it('keeps a background report in the turn it reached, and shows what meka relayed as such', () => {
+it('keeps a background report in the turn it reached, and shows what Meka relayed as such', () => {
   const report: Schema['ContentBlockView'] = {
     type: 'background_report',
     task_ids: ['7f3a1c22'],
@@ -795,7 +795,7 @@ it('keeps a background report in the turn it reached, and shows what meka relaye
   expect(resendable(input[8]!)).toBeUndefined();
 });
 
-it('reads the sub-agent a spawn names, in meka 0.76.0’s result and in older saved ones', () => {
+it('reads the sub-agent a spawn names, in Meka 0.76.0’s result and in older saved ones', () => {
   const id = '51e4df31-a301-4041-ba63-bab893ac3f85';
   expect(spawnedAgent(`Agent: ${id}\nPermission: workspace\nWorking directory: /srv\nDone.`)).toBe(
     id,
@@ -956,7 +956,7 @@ it('heads what the agent says only after someone else’s words', () => {
   const after = speakers(groups([said('user', 't'), line('t'), said('assistant', 't')]), false);
   expect(after.heads[2]).toBe(true);
   expect(after.goesOn).toEqual([]);
-  // An opening of meka's context alone shows nothing while that is hidden, and parts nothing.
+  // An opening of Meka's context alone shows nothing while that is hidden, and parts nothing.
   const context = said('user', 'u', { type: 'turn_context', text: 'Context.' });
   const hidden = groups([said('assistant', 't'), context, said('assistant', 'u')]);
   expect(speakers(hidden, false).heads).toEqual([true, undefined, false]);

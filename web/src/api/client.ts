@@ -6,20 +6,20 @@ export class ConnectionError extends Error {
   constructor(
     cause?: unknown,
     readonly reportedGlobally = false,
-    message = 'Cannot reach mekaweb. Check your network connection.',
+    message = 'Cannot reach Meka Studio. Check your network connection.',
   ) {
     super(message, { cause });
     this.name = 'ConnectionError';
   }
 }
-/** mekaweb answered, but could not reach meka behind it. */
-export const MEKA_UNAVAILABLE = 'urn:mekaweb:meka-unavailable';
+/** Meka Studio answered, but could not reach Meka behind it. */
+export const MEKA_UNAVAILABLE = 'urn:meka-studio:meka-unavailable';
 export function asError(error: unknown): Error {
   return error instanceof Error ? error : new Error(errorMessage(error));
 }
 /**
  * What a Problem Detail says happened, in its own words: the detail, else its title, then the
- * provider's own response where meka relays one, which says why.
+ * provider's own response where Meka relays one, which says why.
  */
 export function problemText(problem: unknown): string {
   if (typeof problem !== 'object' || problem === null) return '';
@@ -39,7 +39,7 @@ export class ApiError extends Error {
     this.name = 'ApiError';
   }
   /**
-   * Whether meka named this `kind` of problem, by the identifier after `/errors/` alone: meka has
+   * Whether Meka named this `kind` of problem, by the identifier after `/errors/` alone: Meka has
    * moved its type URIs to another host more than once, and the identifier is the contract.
    */
   is(kind: string) {
@@ -55,7 +55,7 @@ export class UncertainMutationError extends Error {
     this.name = 'UncertainMutationError';
   }
 }
-/** Where mekaweb passes requests to meka: its own address, under `/meka/`. */
+/** Where Meka Studio passes requests to Meka: its own address, under `/meka/`. */
 export function mekaEndpoint(): string {
   return new URL('meka/', location.origin + '/').href;
 }
@@ -93,10 +93,10 @@ export interface RequestOptions {
   body?: unknown;
   signal?: AbortSignal | undefined;
   idempotencyKey?: string;
-  /** An `ETag` the write was decided on; meka refuses it with 412 once the resource moved on. */
+  /** An `ETag` the write was decided on; Meka refuses it with 412 once the resource moved on. */
   ifMatch?: string | undefined;
   accept?: string;
-  /** mekaweb's own headers for this request, which it never passes on to meka. */
+  /** Meka Studio's own headers for this request, which it never passes on to Meka. */
   headers?: Record<string, string>;
 }
 export class ApiClient {
@@ -136,7 +136,7 @@ export class ApiClient {
     return new ConnectionError(
       cause,
       Boolean(this.connectionChanged),
-      cause.problem.detail ?? 'meka is not answering.',
+      cause.problem.detail ?? 'Meka is not answering.',
     );
   }
   reportConnectionError(cause: unknown, response?: Response): ConnectionError {
@@ -178,7 +178,7 @@ export class ApiClient {
       this.lifetime.signal,
       ...(options.signal ? [options.signal] : []),
     ]);
-    // mekaweb signs the request in with its cookie and adds meka's token itself.
+    // Meka Studio signs the request in with its cookie and adds Meka's token itself.
     const headers: Record<string, string> = {
       Accept: options.accept ?? 'application/json',
       ...(options.accept === 'text/event-stream' ? this.streamHeaders() : {}),
@@ -232,7 +232,7 @@ export class ApiClient {
       }
       const error = new ApiError(response.status, problem, delay);
       if (response.status === 401) this.unauthorized();
-      // meka itself is down: as far as this client goes, the connection is.
+      // Meka itself is down: as far as this client goes, the connection is.
       if (response.status === 502 && problem.type === MEKA_UNAVAILABLE) {
         if (method !== 'GET')
           throw new UncertainMutationError(this.mekaUnavailable(error, sequence));

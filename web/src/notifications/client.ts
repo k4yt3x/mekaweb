@@ -22,7 +22,7 @@ interface NotificationState {
   /** Whether this browser can receive push notifications here. */
   availability: 'available' | 'insecure' | 'unsupported' | 'install';
   permission: NotificationPermission;
-  /** What mekaweb says: whether it can send them, and whether this device receives them. */
+  /** What Meka Studio says: whether it can send them, and whether this device receives them. */
   push?: Gateway['PushState'] | undefined;
   busy: boolean;
   error?: string | undefined;
@@ -67,7 +67,7 @@ function completion(value: unknown): value is CompletionNotice {
   );
 }
 function notificationTag(value: Target, turnId: string) {
-  return JSON.stringify(['mekaweb:turn', value.sessionId, turnId]);
+  return JSON.stringify(['meka-studio:turn', value.sessionId, turnId]);
 }
 /** `encoded` URL-safe base64 as bytes, as `applicationServerKey` takes them. */
 function keyBytes(encoded: string): Uint8Array<ArrayBuffer> {
@@ -77,7 +77,7 @@ function keyBytes(encoded: string): Uint8Array<ArrayBuffer> {
 }
 
 /**
- * Completion alerts: toasts and a chime in the page, and push notifications from mekaweb, which
+ * Completion alerts: toasts and a chime in the page, and push notifications from Meka Studio, which
  * reach a device whose app is closed or suspended. Owns browser delivery, never the lifetime of a
  * turn.
  */
@@ -154,7 +154,7 @@ export class BrowserNotifications {
     );
   }
   /** Tells the server feed whether this page is in front and alerts of turns ending itself, so
-   * mekaweb holds back push notifications of them from this device meanwhile. */
+   * Meka Studio holds back push notifications of them from this device meanwhile. */
   private reportFocus() {
     const settings = this.runtime.storage.getSnapshot();
     this.runtime
@@ -209,7 +209,7 @@ export class BrowserNotifications {
     const stopSettings = this.runtime.storage.subscribe(settingsChanged);
     this.reportFocus();
     try {
-      this.channel = new BroadcastChannel('mekaweb:notifications:v2');
+      this.channel = new BroadcastChannel('meka-studio:notifications:v2');
       this.channel.onmessage = (event: MessageEvent<unknown>) => {
         if (completion(event.data)) void this.present(event.data);
       };
@@ -297,7 +297,9 @@ export class BrowserNotifications {
     }
     return this.registration;
   }
-  /** Asks mekaweb whether this device receives push notifications, and keeps the two in step. */
+  /**
+   * Asks Meka Studio whether this device receives push notifications, and keeps the two in step.
+   */
   async loadPush() {
     this.inspect();
     try {
@@ -480,7 +482,7 @@ export class BrowserNotifications {
       this.publish({ busy: false });
     }
   }
-  /** Asks mekaweb to push a test notification to this device. */
+  /** Asks Meka Studio to push a test notification to this device. */
   async test() {
     if (this.state.busy) return;
     this.publish({ busy: true, error: undefined });

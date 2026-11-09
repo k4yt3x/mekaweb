@@ -4,7 +4,7 @@ export interface SseFrame {
   data: string;
   id?: string;
 }
-// Past this a frame's data is not held: meka 0.66 sends a shell command's whole output, up to
+// Past this a frame's data is not held: Meka 0.66 sends a shell command's whole output, up to
 // 64 MiB, in `tool_call.completed`, while its saved result is a bounded preview.
 const MAX_FRAME = 2_000_000;
 const KEPT_HEAD = 4096;
@@ -117,7 +117,7 @@ function leadingArray(text: string): unknown[] | undefined {
 }
 /**
  * Stands in for a frame too large to hold. A tool completion keeps its call, outcome and
- * correlation, which meka writes before and after `content`; anything else becomes a notice, whose
+ * correlation, which Meka writes before and after `content`; anything else becomes a notice, whose
  * handling refreshes the saved conversation.
  */
 export function recoverOversized(
@@ -146,7 +146,7 @@ export function recoverOversized(
     head,
   );
   const id = json(call?.[1]);
-  // Since meka 0.83, `change` follows `content` with a changed file's whole text before and after,
+  // Since Meka 0.83, `change` follows `content` with a changed file's whole text before and after,
   // so a large file's edit passes the limit with a short result the kept head holds whole.
   const content = call && leadingArray(head.slice(call[0].length));
   if (event === 'tool_call.completed' && id)
@@ -158,7 +158,7 @@ export function recoverOversized(
         content: content || [
           {
             type: 'text',
-            text: `This result is too large to show while the turn runs (${megabytes}). Once the turn ends, the conversation shows meka's saved preview.`,
+            text: `This result is too large to show while the turn runs (${megabytes}). Once the turn ends, the conversation shows Meka's saved preview.`,
           },
         ],
         ...correlation,

@@ -285,7 +285,7 @@ export function Surface({
       made.trigger('keyboard', 'editor.action.quickCommand', null),
     );
     made.addAction({
-      id: 'mekaweb.toggleWordWrap',
+      id: 'meka-studio.toggleWordWrap',
       label: 'View: Toggle Word Wrap',
       keybindings: [monaco.KeyMod.Alt | monaco.KeyCode.KeyZ],
       run: () => wrapped.current(),

@@ -10,10 +10,10 @@ import { Markdown } from '../components/markdown';
 import { SwitchField } from '../components/ui/switch';
 import { projectNames, useProjects } from './projects-query';
 type Kind = 'memory' | 'skills';
-/** Where meka keeps each kind. */
+/** Where Meka keeps each kind. */
 const routes: Record<Kind, string> = { memory: '/v1/memories', skills: '/v1/skills' };
 type Detail = Schema['MemoryDetail'] | Schema['SkillDetail'];
-/** Where an entry is: meka 0.84 lets projects share a memory name, so a name alone is ambiguous. */
+/** Where an entry is: Meka 0.84 lets projects share a memory name, so a name alone is ambiguous. */
 interface Entry {
   name: string;
   project: string;
@@ -39,13 +39,13 @@ export function ResourcesPage({ kind }: { kind: Kind }) {
     const timer = setTimeout(() => setWords(query), 250);
     return () => clearTimeout(timer);
   }, [query]);
-  // meka searches memory as the agent's `memory_search` does, bodies included, best match first.
+  // Meka searches memory as the agent's `memory_search` does, bodies included, best match first.
   const memories = useResource<Schema['MemoryListResponse']>(
     '/v1/memories',
     { ...tierScope, ...(words ? { q: words, limit: SEARCH_LIMIT } : {}) },
     kind === 'memory' && canRead,
   );
-  // meka decides what has expired, by its own clock and time zone.
+  // Meka decides what has expired, by its own clock and time zone.
   const expired = useResource<Schema['MemoryListResponse']>(
     '/v1/memories',
     { expired: true, ...tierScope },
@@ -66,7 +66,7 @@ export function ResourcesPage({ kind }: { kind: Kind }) {
     Boolean(selected) && canRead,
   );
   const list = kind === 'memory' ? memories.data?.memories : skills.data;
-  // meka cannot search skills, so the shown ones are filtered by name and description.
+  // Meka cannot search skills, so the shown ones are filtered by name and description.
   const rows =
     kind === 'memory'
       ? list
@@ -84,7 +84,7 @@ export function ResourcesPage({ kind }: { kind: Kind }) {
   async function openCiting(name: string) {
     const cited = selected;
     if (!cited) return;
-    // The shown list may be filtered or searched, so ask meka which memories cite this one.
+    // The shown list may be filtered or searched, so ask Meka which memories cite this one.
     const citing = await api
       ?.get<Schema['MemoryListResponse']>('/v1/memories', { referencing: cited.name })
       .then((list) => list.memories.filter((memory) => memory.name === name))
@@ -263,15 +263,15 @@ export function ResourcesPage({ kind }: { kind: Kind }) {
 }
 // No project name holds `*`.
 const ALL_TIERS = '*';
-/** The most matches meka's memory search returns. */
+/** The most matches Meka's memory search returns. */
 const SEARCH_LIMIT = 25;
-/** How a memory reaches the agent's context, by meka's `load`. */
+/** How a memory reaches the agent's context, by Meka's `load`. */
 const loads: Readonly<Record<string, string>> = {
   inline: 'Inline',
   index: 'Index',
   search: 'Search only',
 };
-/** The last day a memory applies, in this browser's time zone; meka stores when it stops. */
+/** The last day a memory applies, in this browser's time zone; Meka stores when it stops. */
 function lastDay(expiresAt: string | null | undefined) {
   if (!expiresAt) return '';
   const day = new Date(Date.parse(expiresAt) - 1);
@@ -312,7 +312,7 @@ function ResourceEditor({
   );
   const memory = initial && 'load' in initial ? initial : undefined;
   // A project memory's name may be another project's too, so a write names its tier. A memory is
-  // filed at creation: meka moves one between the global tier and a project, but naming another
+  // filed at creation: Meka moves one between the global tier and a project, but naming another
   // project for a project's memory adds a memory there.
   const [project, setProject] = useState(memory?.project ?? defaultProject);
   const [load, setLoad] = useState(memory?.load ?? 'index');
@@ -348,7 +348,7 @@ function ResourceEditor({
           .filter(Boolean);
         if (cited.length > 20) throw new Error('Use at most 20 references, one per line.');
         // Each is sent only when changed, so a save cannot move what it did not touch, such as
-        // an expiry meka stores as the moment after the day it was given.
+        // an expiry Meka stores as the moment after the day it was given.
         await api.mutate('PUT', `/v1/memories/${segment(name)}`, {
           ...base,
           ...(JSON.stringify(values) !== JSON.stringify(original) ? { tags: values } : {}),

@@ -1,4 +1,4 @@
-// meka passes the first four formats through and converts the rest, BMP included, to PNG.
+// Meka passes the first four formats through and converts the rest, BMP included, to PNG.
 const fileExtensions = [
   'png',
   'jpg',
@@ -29,17 +29,17 @@ const passThroughTypes = ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 
 /** Browsers leave the type blank for formats they do not know, so the extension decides those. */
 export function isAcceptedImage({ name, type }: Pick<File, 'name' | 'type'>) {
   const extension = /\.([^.]+)$/.exec(name)?.[1]?.toLowerCase();
-  // Any `image/*` would also admit SVG, HEIC, and AVIF, which meka refuses.
+  // Any `image/*` would also admit SVG, HEIC, and AVIF, which Meka refuses.
   return (
     passThroughTypes.includes(type) ||
     (extension !== undefined && fileExtensions.includes(extension))
   );
 }
 
-/** Refuse a batch with anything meka would not take before reading any of it. */
+/** Refuse a batch with anything Meka would not take before reading any of it. */
 export function imageFiles<T extends Pick<File, 'name' | 'type'>>(files: T[]) {
   const other = files.find((file) => !isAcceptedImage(file));
-  if (other) throw new Error(`${other.name} is not an image format meka accepts.`);
+  if (other) throw new Error(`${other.name} is not an image format Meka accepts.`);
   return files;
 }
 

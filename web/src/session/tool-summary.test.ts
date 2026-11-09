@@ -36,7 +36,7 @@ it('does not guess an unknown tool, absent argument, or non-scalar value', () =>
   expect(toolSummary('file_read', Object.create({ path: '/inherited' }))).toBeUndefined();
 });
 
-// meka 0.88.0: src/tools.rs::an_mcp_call_is_shown_by_its_first_argument_that_reads_as_text.
+// Meka 0.88.0: src/tools.rs::an_mcp_call_is_shown_by_its_first_argument_that_reads_as_text.
 it('shows an MCP call by its first argument that is text, else its first that reads as text', () => {
   const shown = (input: unknown) => toolSummary('mcp__exa__web_search_exa', input);
   expect(shown({ query: 'ratatui', numResults: 5 })).toBe('ratatui');
@@ -52,7 +52,7 @@ it('shows an MCP call by its first argument that is text, else its first that re
   expect(shown({})).toBeUndefined();
   // A call whose arguments did not parse holds the reason, which is no argument.
   expect(shown({ _meka_invalid_arguments: 'expected value at line 1' })).toBeUndefined();
-  // meka's own arguments and a blank one are not the call's to be shown by.
+  // Meka's own arguments and a blank one are not the call's to be shown by.
   expect(shown({ background: true, scratchpad: 'results', query: '  ', topic: 'ratatui' })).toBe(
     'ratatui',
   );
@@ -60,7 +60,7 @@ it('shows an MCP call by its first argument that is text, else its first that re
   expect(shown({ background: '#fff' })).toBe('#fff');
 });
 
-it('coerces scalar and list arguments like meka without serializing nested objects', () => {
+it('coerces scalar and list arguments like Meka without serializing nested objects', () => {
   expect(toolSummary('conversation_read', { start: 0 })).toBe('0');
   expect(
     toolSummary('tool_load', { name: ['file_read', '', false, 3, null, {}, ['nested']] }),

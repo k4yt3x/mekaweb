@@ -4,7 +4,7 @@ import { useConnection, useRuntime } from '../connections/context';
 import { useAction } from '../components/actions';
 import { Button } from '../components/ui/button';
 import { ErrorNotice, Field, Loading } from '../components/common';
-import { MekawebLink } from '../components/layout';
+import { MekaStudioLink } from '../components/layout';
 import { isProblem, type Gateway } from '../api/gateway';
 import {
   PasskeyError,
@@ -80,8 +80,8 @@ export function SignIn() {
   }
   return (
     <main className="welcome">
-      <section className="connection-card" aria-label="Sign in to mekaweb">
-        <h1>meka</h1>
+      <section className="connection-card" aria-label="Sign in to Meka Studio">
+        <h1>Meka Studio</h1>
         {state.notice && (
           <p className="muted" role="status">
             {state.notice}
@@ -140,7 +140,7 @@ export function SignIn() {
         </form>
       </section>
       <footer className="app-version">
-        <MekawebLink /> version {__MEKAWEB_VERSION__}
+        <MekaStudioLink /> version {__MEKA_STUDIO_VERSION__}
       </footer>
     </main>
   );

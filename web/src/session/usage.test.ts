@@ -49,12 +49,12 @@ it('does not invent context capacity when occupancy or the window is unavailable
   expect(contextMetrics({ ...context, used: 21000 }).remainingTokens).toBe(0);
 });
 
-it('rounds occupancy down, as meka did', () => {
+it('rounds occupancy down, as Meka did', () => {
   expect(contextMetrics({ ...context, used: 19999 }).usedPercent).toBe(99);
   expect(contextMetrics({ ...context, used: 21000 }).usedPercent).toBe(105);
 });
 
-it('counts context as near ten points before meka compacts it, or at 80% when it does not', () => {
+it('counts context as near ten points before Meka compacts it, or at 80% when it does not', () => {
   expect(contextNear(69, 80)).toBe(false);
   expect(contextNear(70, 80)).toBe(true);
   expect(contextNear(79, null)).toBe(false);

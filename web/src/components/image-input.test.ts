@@ -48,7 +48,7 @@ it('uses safe download extensions for decoded images and unsupported formats', (
   expect(imageFilename('application/octet-stream')).toBe('attachment.bin');
 });
 
-it('accepts the formats meka passes through or converts, by type or extension', () => {
+it('accepts the formats Meka passes through or converts, by type or extension', () => {
   expect(isAcceptedImage({ name: 'image.png', type: 'image/png' })).toBe(true);
   expect(isAcceptedImage({ name: 'photo', type: 'image/jpeg' })).toBe(true);
   expect(isAcceptedImage({ name: 'scan.QOI', type: '' })).toBe(true);
@@ -60,11 +60,11 @@ it('accepts the formats meka passes through or converts, by type or extension', 
   expect(imageAccept).toMatch(/^image\/\*,\.png,.*,\.ff$/);
 });
 
-it('refuses a whole batch that holds anything meka would not take', () => {
+it('refuses a whole batch that holds anything Meka would not take', () => {
   const images = [{ name: 'one.png', type: 'image/png' }];
   expect(imageFiles(images)).toBe(images);
   expect(() => imageFiles([...images, { name: 'notes.pdf', type: 'application/pdf' }])).toThrow(
-    'notes.pdf is not an image format meka accepts.',
+    'notes.pdf is not an image format Meka accepts.',
   );
 });
 

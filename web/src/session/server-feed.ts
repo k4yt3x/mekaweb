@@ -1,11 +1,11 @@
 import { ApiError, pause, type ApiClient } from '../api/client';
 import { SseParser, type SseFrame } from './events';
 
-/** How long after joining with no position what arrives is meka's backlog: history, not news. */
+/** How long after joining with no position what arrives is Meka's backlog: history, not news. */
 const BACKLOG_MS = 2000;
 
 /**
- * Follows meka's server feed, which announces every change this server makes to a session record:
+ * Follows Meka's server feed, which announces every change this server makes to a session record:
  * one created, updated, or deleted, a turn starting or ending, an approval parked or closed. Each
  * event only says that something changed, so the listener re-reads rather than patching, which
  * keeps the server's order and paging. A burst, such as sub-agents starting together, is one read.
@@ -19,7 +19,7 @@ export class ServerFeed {
   constructor(
     private api: ApiClient,
     private changed: () => void,
-    /** Each event as it comes, and whether it is news rather than the backlog meka joins with. */
+    /** Each event as it comes, and whether it is news rather than the backlog Meka joins with. */
     private heard: (frame: SseFrame, news: boolean) => void = () => {},
     private focused = false,
   ) {
@@ -30,8 +30,9 @@ export class ServerFeed {
     clearTimeout(this.timer);
   }
   /**
-   * Whether this page is in front, alerting of finished turns itself. The feed says so to mekaweb,
-   * which then sends this device no push notifications of them; a change rejoins it at once.
+   * Whether this page is in front, alerting of finished turns itself. The feed says so to
+   * Meka Studio, which then sends this device no push notifications of them; a change rejoins it
+   * at once.
    */
   focus(focused: boolean) {
     if (focused === this.focused) return;
@@ -55,7 +56,7 @@ export class ServerFeed {
           this.cursor,
           undefined,
           AbortSignal.any([signal, request.signal]),
-          this.focused ? { 'X-Mekaweb-Focused': '1' } : undefined,
+          this.focused ? { 'X-Meka-Studio-Focused': '1' } : undefined,
         );
         this.retry = 1000;
         await this.read(response, request.signal, backlog);

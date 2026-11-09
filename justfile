@@ -1,4 +1,4 @@
-# mekaweb build helpers. The interface is compiled into the binary, so every build builds web/
+# Meka Studio build helpers. The interface is compiled into the binary, so every build builds web/
 # first.
 
 # List recipes.
@@ -9,13 +9,13 @@ default:
 web:
     cd web && npm ci && npm run build
 
-# Build the release binary, with the interface, into target/release/mekaweb.
+# Build the release binary, with the interface, into target/release/meka-studio.
 build: web
     cargo build --release --locked
 
 # Needs musl-tools (musl-gcc) for the bundled OpenSSL and SQLite, and the target:
 # rustup target add x86_64-unknown-linux-musl
-# Build a static binary for any Linux, into target/x86_64-unknown-linux-musl/release/mekaweb.
+# Build a static binary for any Linux, into target/x86_64-unknown-linux-musl/release/meka-studio.
 build-static: web
     cargo build --release --locked --target x86_64-unknown-linux-musl
 

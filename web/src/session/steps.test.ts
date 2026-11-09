@@ -54,7 +54,7 @@ describe('a run’s line', () => {
         tool('checklist_update'),
       ]),
     ).toEqual({
-      text: 'Ran 2 commands, thought twice, read a file, searched twice, got a note from meka, used a tool',
+      text: 'Ran 2 commands, thought twice, read a file, searched twice, got a note from Meka, used a tool',
       failed: 1,
     });
   });

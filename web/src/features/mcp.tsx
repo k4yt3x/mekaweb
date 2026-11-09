@@ -63,7 +63,7 @@ export function McpPage() {
               <span className={`badge ${server.state === 'connected' ? 'success' : ''}`}>
                 {server.state}
               </span>
-              {/* The MCP revision a connected server speaks, which meka settles as it connects. */}
+              {/* The MCP revision a connected server speaks, which Meka settles as it connects. */}
               {server.protocol_version && (
                 <span className="badge" title="MCP protocol version">
                   {server.protocol_version}

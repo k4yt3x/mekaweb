@@ -1,8 +1,8 @@
 {
-  "name": "mekaweb",
-  "version": "0.40.0",
+  "name": "meka-studio",
+  "version": "0.41.0",
   "private": true,
-  "description": "The web interface for meka",
+  "description": "The web interface for Meka",
   "license": "AGPL-3.0-or-later",
   "type": "module",
   "engines": {
@@ -19,7 +19,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "check": "npm run format:check && npm run lint && npm run build && npm test",
-    "api:generate": "cargo run --quiet --manifest-path ../Cargo.toml -p mekaweb -- openapi > src/api/mekaweb-openapi.json && npm run generate --workspace @mekaweb/schema",
+    "api:generate": "cargo run --quiet --manifest-path ../Cargo.toml -p meka-studio -- openapi > src/api/meka-studio-openapi.json && npm run generate --workspace @meka-studio/schema",
     "icons:generate": "node scripts/file-icons.mjs"
   },
   "dependencies": {

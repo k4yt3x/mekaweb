@@ -4,13 +4,13 @@ import { GatewayClient } from './gateway';
 afterEach(() => vi.unstubAllGlobals());
 
 it('builds same-origin API addresses and refuses paths that would resolve elsewhere', () => {
-  vi.stubGlobal('location', new URL('https://mekaweb.test/'));
+  vi.stubGlobal('location', new URL('https://meka-studio.test/'));
   const gateway = new GatewayClient();
   expect(gateway.url('/api/terminals/abc/socket')).toBe(
-    'https://mekaweb.test/api/terminals/abc/socket',
+    'https://meka-studio.test/api/terminals/abc/socket',
   );
   expect(gateway.url('/api/files/list', { root: 'work', path: 'a b' })).toBe(
-    'https://mekaweb.test/api/files/list?root=work&path=a+b',
+    'https://meka-studio.test/api/files/list?root=work&path=a+b',
   );
   for (const path of [
     '/api/terminals/../socket',

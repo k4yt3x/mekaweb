@@ -360,7 +360,7 @@ export function Conversation({ state }: { state: SessionState }) {
       const text = messageText([first.message]);
       const again = resendable(first.message);
       const at = first.message.position;
-      // A steer meka folded into a tool round or a nudge is part of the turn, not its opening.
+      // A steer Meka folded into a tool round or a nudge is part of the turn, not its opening.
       const opens = turn?.start === first.index;
       return {
         editor: at !== undefined && editing === at && turn && opens && again && (
@@ -827,24 +827,24 @@ function AgentActivity({
     </p>
   );
 }
-/** What meka wrote to send the agent back to work, kept apart from what the person wrote. */
+/** What Meka wrote to send the agent back to work, kept apart from what the person wrote. */
 function Nudge({ kind, text }: { kind: string; text: string }) {
   return (
     <details className="injected">
       <summary>
         {kind === 'checklist'
-          ? 'meka sent the agent back to its checklist'
+          ? 'Meka sent the agent back to its checklist'
           : kind === 'visible_reply'
-            ? 'meka asked the agent for a reply it could show'
-            : 'meka sent the agent back to work'}
+            ? 'Meka asked the agent for a reply it could show'
+            : 'Meka sent the agent back to work'}
       </summary>
       <pre className="plain-text">{text}</pre>
     </details>
   );
 }
-/** meka's short form of a task or job id, as its own screen says it. */
+/** Meka's short form of a task or job id, as its own screen says it. */
 const shortId = (id: string) => id.slice(0, 8);
-/** Background work that finished, reported to the agent by meka rather than written by anyone. */
+/** Background work that finished, reported to the agent by Meka rather than written by anyone. */
 function BackgroundReport({ tasks, text }: { tasks: readonly string[]; text: string }) {
   return (
     <details className="injected">
@@ -859,7 +859,7 @@ function BackgroundReport({ tasks, text }: { tasks: readonly string[]; text: str
     </details>
   );
 }
-/** A scheduled job's fire, which meka wrote in the job's name rather than anyone typing it. */
+/** A scheduled job's fire, which Meka wrote in the job's name rather than anyone typing it. */
 function ScheduledFire({ job, prompt, text }: { job: string; prompt: string; text: string }) {
   return (
     <details className="injected scheduled-fire">
@@ -1088,7 +1088,7 @@ function turnKind(group: HistoryMessage[]) {
   const message = group[0]?.message;
   if (!message || message.compaction) return;
   if (message.role === 'assistant') return 'reply';
-  // A scheduled fire opens its turn with the job's words, which meka wrote but which are copied,
+  // A scheduled fire opens its turn with the job's words, which Meka wrote but which are copied,
   // edited, and deleted like a message's.
   if (isInput(message) || message.content.some((block) => block.type === 'scheduled'))
     return 'input';
@@ -1141,7 +1141,7 @@ function Message({
   if (message.compaction)
     return (
       <article className="message message-summary" data-message={position}>
-        {/* A line across the conversation, as meka's screen draws it: what is above it the agent
+        {/* A line across the conversation, as Meka's screen draws it: what is above it the agent
             now reads as the summary it opens to. */}
         <aside aria-label="Compaction">
           <details
@@ -1231,7 +1231,7 @@ function Message({
               : message.role === 'user'
                 ? isUserInput
                   ? sender(message)
-                  : 'meka'
+                  : 'Meka'
                 : message.role === 'assistant'
                   ? 'Agent'
                   : message.role
@@ -1392,7 +1392,7 @@ function InboxMessage({
     </article>
   );
 }
-/** Why meka holds a queued message back after its turn failed, and when it runs it again. */
+/** Why Meka holds a queued message back after its turn failed, and when it runs it again. */
 function InboxRetry({ item }: { item: Schema['InboxItemView'] | undefined }) {
   // A session another process holds sets a time too, with no error: nothing failed then.
   const problem = problemText(item?.last_error);
@@ -1448,7 +1448,7 @@ function ContentBlock({
     case 'turn_context':
       return (
         <details className="injected">
-          <summary>Context added by meka</summary>
+          <summary>Context added by Meka</summary>
           <pre className="plain-text">{block.text}</pre>
         </details>
       );
@@ -1541,7 +1541,7 @@ function ToolResultContent({
     </ToolOutput>
   );
 }
-/** A deferred tool the result made callable, which meka names in place of its schema. */
+/** A deferred tool the result made callable, which Meka names in place of its schema. */
 function LoadedTool({ name }: { name: string }) {
   return (
     <p className="plain-text">
@@ -1826,7 +1826,7 @@ function Composer({
                 : mode === 'interrupt'
                   ? 'Interrupt with a message…'
                   : 'Steer the agent as it works…'
-              : 'Ask meka to work on something…'
+              : 'Ask Meka to work on something…'
       }
       permission={{
         value: state.session?.permission ?? undefined,

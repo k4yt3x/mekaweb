@@ -25,7 +25,7 @@ export function claimNotification(
     };
     const timeout = setTimeout(() => finish(new Error('Notification storage timed out.')), 5000);
     try {
-      const opening = database.open('mekaweb-notifications:' + scope, 1);
+      const opening = database.open('meka-studio-notifications:' + scope, 1);
       opening.onupgradeneeded = () => {
         if (settled) {
           opening.transaction?.abort();

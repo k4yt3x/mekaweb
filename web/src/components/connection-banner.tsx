@@ -33,7 +33,7 @@ export function ConnectionBanner() {
       <Unplug size={17} aria-hidden="true" />
       <span className="connection-banner-message">
         <span>Connection lost:</span>
-        <strong title={state.connection?.name}>{state.connection?.name ?? 'meka'}</strong>
+        <strong title={state.connection?.name}>{state.connection?.name ?? 'Meka'}</strong>
         <span className="sr-only">Retrying automatically.</span>
       </span>
       <Button

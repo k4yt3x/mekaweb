@@ -1,4 +1,4 @@
-/** The largest image meka takes in a message: it refuses a larger one rather than shrinking it. */
+/** The largest image Meka takes in a message: it refuses a larger one rather than shrinking it. */
 export const MEKA_IMAGE_BYTES = 3_750_000;
 
 /** The shortest long edge a PNG is shrunk to before it becomes a JPEG, which keeps text sharp. */
@@ -35,10 +35,10 @@ export async function shrink(
     }
     scale = next;
   }
-  throw new Error('This image could not be made small enough for meka.');
+  throw new Error('This image could not be made small enough for Meka.');
 }
 
-/** `file` shrunk to fit meka's limit, in the browser, without its metadata. */
+/** `file` shrunk to fit Meka's limit, in the browser, without its metadata. */
 export async function shrinkFile(file: Blob, limit = MEKA_IMAGE_BYTES): Promise<Blob> {
   const bitmap = await createImageBitmap(file);
   try {

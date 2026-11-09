@@ -163,9 +163,9 @@ interface Chosen {
 const nothing: Chosen = { paths: new Set(), held: false };
 
 /**
- * Files, as a session shows them: a tree of any folder mekaweb's user may read, opening where it
- * was last for `place`, at first `start`, the working directory. The path above the tree takes a
- * path typed into it, and its folders, clicked, show from there.
+ * Files, as a session shows them: a tree of any folder Meka Studio's user may read, opening where
+ * it was last for `place`, at first `start`, the working directory. The path above the tree takes
+ * a path typed into it, and its folders, clicked, show from there.
  */
 export function FileBrowser({
   place,
@@ -998,7 +998,7 @@ function useSelectionActions({
   function download(items: readonly { path: string; entry: Entry }[]) {
     const one = items.length === 1 ? items[0] : undefined;
     if (one) startDownload(isFolder(one.entry) ? zipUrl(one.path) : rawUrl(one.path, true));
-    // Their paths would make too long an address: mekaweb keeps them, for a short one.
+    // Their paths would make too long an address: Meka Studio keeps them, for a short one.
     else
       void action.run(async () => {
         const { id } = await runtime.gateway.send<Gateway['SelectionMade']>(

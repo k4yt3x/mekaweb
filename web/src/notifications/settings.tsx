@@ -10,11 +10,11 @@ export function NotificationSettings() {
   const enabled = Boolean(state.push?.subscribed) && state.permission === 'granted';
   const problem =
     state.push && !state.push.enabled
-      ? 'Off in mekaweb’s config: set push.subject.'
+      ? 'Off in Meka Studio’s config: set push.subject.'
       : state.availability === 'insecure'
         ? 'Push notifications need HTTPS.'
         : state.availability === 'install'
-          ? 'On iPhone and iPad, open mekaweb from the Home Screen first.'
+          ? 'On iPhone and iPad, open Meka Studio from the Home Screen first.'
           : state.availability === 'unsupported'
             ? 'Push notifications are unavailable in this browser.'
             : state.permission === 'denied'
@@ -50,7 +50,7 @@ export function NotificationSettings() {
         </Button>
       </div>
       <p id="notification-description" className="muted notification-description" role="status">
-        {problem ?? 'When a turn ends or waits for approval, even with mekaweb closed.'}
+        {problem ?? 'When a turn ends or waits for approval, even with Meka Studio closed.'}
       </p>
       <div className="notification-settings-row">
         <SwitchField

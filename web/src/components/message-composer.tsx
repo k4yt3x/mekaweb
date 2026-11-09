@@ -416,7 +416,7 @@ export function MessageComposer({
   );
 }
 
-/** A picked image as an attachment: as it is, or, past meka's limit, shrunk to fit with a note. */
+/** A picked image as an attachment: as it is, or, past Meka's limit, shrunk to fit with a note. */
 async function fileImage(file: File): Promise<ComposerOptions['images'][number]> {
   let blob: Blob = file;
   let name = file.name;
@@ -425,7 +425,7 @@ async function fileImage(file: File): Promise<ComposerOptions['images'][number]>
       blob = await shrinkFile(file);
     } catch (cause) {
       throw new Error(
-        `${file.name} is larger than meka’s 3.75 MB image limit, and could not be shrunk to fit.`,
+        `${file.name} is larger than Meka’s 3.75 MB image limit, and could not be shrunk to fit.`,
         { cause },
       );
     }

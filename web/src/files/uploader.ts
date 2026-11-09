@@ -10,7 +10,7 @@ export interface UploadItem {
   /** The folder picked or dropped it came in, by name, and its path from there. */
   folder?: { name: string; path: string };
   size: number;
-  /** Bytes mekaweb has. */
+  /** Bytes Meka Studio has. */
   sent: number;
   state:
     | 'queued'
@@ -58,7 +58,7 @@ export function pending(item: UploadItem): boolean {
 
 /**
  * Uploads in progress, sent in pieces so a dropped mobile connection loses one piece at most:
- * after a failure the upload asks mekaweb where it stands and carries on from there. At most
+ * after a failure the upload asks Meka Studio where it stands and carries on from there. At most
  * [`UPLOADS_AT_ONCE`] are sent at a time.
  */
 export class Uploads {
@@ -214,7 +214,7 @@ export class Uploads {
     this.ids.delete(key);
     if (id)
       void this.gateway.send('DELETE', `/api/files/uploads/${encodeURIComponent(id)}`).catch(() => {
-        // Left behind, mekaweb clears it away within a day.
+        // Left behind, Meka Studio clears it away within a day.
       });
   }
   /** Takes a batch off the list, stopping any of it still under way. */

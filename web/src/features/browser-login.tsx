@@ -7,8 +7,8 @@ import { Button } from '../components/ui/button';
 import { ErrorNotice, Field } from '../components/common';
 
 /**
- * A browser sign-in meka began: the page to open, then what the page gives pasted back. Where
- * meka holds the redirect's loopback port itself, a browser on its own machine needs no paste, so
+ * A browser sign-in Meka began: the page to open, then what the page gives pasted back. Where
+ * Meka holds the redirect's loopback port itself, a browser on its own machine needs no paste, so
  * the login's state is watched too.
  */
 export function BrowserLogin({
@@ -28,7 +28,7 @@ export function BrowserLogin({
   const [code, setCode] = useState('');
   const status = useResource<Schema['LoginStatus']>(path, undefined, started.listening, 2000);
   const state = status.data?.status;
-  // Completed once, whether the paste or meka's own listener got there first.
+  // Completed once, whether the paste or Meka's own listener got there first.
   const finished = useRef(false);
   useEffect(() => {
     if (state !== 'completed' || finished.current) return;
@@ -62,7 +62,7 @@ export function BrowserLogin({
         {pasteUrl
           ? 'Sign in on the page. It then sends your browser to a localhost address that may not load; paste that address here.'
           : 'Sign in on the page, then paste the code it shows.'}
-        {pasteUrl && started.listening && ' On meka’s own machine, this finishes by itself.'}
+        {pasteUrl && started.listening && ' On Meka’s own machine, this finishes by itself.'}
       </p>
       <div>
         <a
