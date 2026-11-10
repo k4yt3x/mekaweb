@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A reply that holds no words and no call says the model returned no answer.
 - A compaction that failed or was stopped shows its line where it ended, with why.
 - A reply whose calls stopped at the output limit, or for another reason, says so after them.
-- Reasoning the provider withheld shows as Thinking unavailable while the turn runs.
+- Reasoning the provider withheld shows as Thinking redacted while the turn runs.
 - Words an OpenAI model refused in show as the agent's reply.
 
 ### Changed
@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - An image a tool returns shows while the turn runs, not only once it ends.
 - An output saved to the scratchpad shows its opening and the entry that holds all of it.
 - A turn's details say when it stopped at the context window or a content filter.
+- Reasoning the provider withheld says Thinking redacted, not Thinking unavailable.
 
 ### Fixed
 

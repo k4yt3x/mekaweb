@@ -999,7 +999,7 @@ function LiveBlocks({
         hold={hold}
       />
     ) : block.kind === 'redacted' ? (
-      <ThinkingUnavailable key={index} />
+      <ThinkingRedacted key={index} />
     ) : block.kind === 'nudge' ? (
       <Nudge key={index} kind={block.nudge} text={block.text} />
     ) : block.kind === 'report' ? (
@@ -1093,8 +1093,8 @@ function Thinking({
   );
 }
 /** Reasoning the provider withheld, which shows only that there was some. */
-function ThinkingUnavailable() {
-  return <p className="muted small">Thinking unavailable.</p>;
+function ThinkingRedacted() {
+  return <p className="muted small">Thinking redacted.</p>;
 }
 /** What a saved group is to the actions under it: a message someone sent, or the agent's turn. */
 function turnKind(group: HistoryMessage[]) {
@@ -1503,7 +1503,7 @@ function ContentBlock({
     case 'background_report':
       return <BackgroundReport tasks={block.task_ids} text={block.text} />;
     case 'redacted_thinking':
-      return <ThinkingUnavailable />;
+      return <ThinkingRedacted />;
     case 'image':
       return <Attachment sessionId={sessionId} hash={block.hash} />;
     case 'tool_use':
