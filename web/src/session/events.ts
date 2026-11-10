@@ -186,6 +186,36 @@ function positionRanges(value: unknown) {
     )
   );
 }
+/**
+ * Whether `item` is a tool result's item, in the shape history gives it: text, an image, a tool a
+ * load made callable, or what Meka wrote into it, a note, an image's caption, or a large output's
+ * opening with the scratchpad entry it is saved under.
+ */
+function resultItem(item: unknown) {
+  if (!record(item)) return false;
+  const text = (key: string) => typeof item[key] === 'string';
+  switch (item.type) {
+    case 'text':
+      return text('text');
+    case 'image':
+      return text('media_type');
+    case 'tool_reference':
+      return text('tool_name');
+    case 'harness_note':
+      return text('note') && text('text');
+    case 'image_caption':
+      return text('caption');
+    case 'large_output':
+      return (
+        text('scratchpad_entry') &&
+        text('preview') &&
+        Number.isSafeInteger(item.size_bytes) &&
+        (item.size_bytes as number) >= 0
+      );
+    default:
+      return false;
+  }
+}
 export function string(data: EventData, key: string): string {
   return typeof data[key] === 'string' ? data[key] : '';
 }
@@ -197,6 +227,7 @@ const required: Record<keyof EventPayloads, string[]> = {
   'message.appended': ['role'],
   'assistant_text.delta': ['text'],
   'thinking.delta': ['text'],
+  'thinking.redacted': [],
   'tool_call.composing': ['id', 'name'],
   'tool_call.executing': ['id', 'name'],
   'tool_call.completed': ['id'],
@@ -220,7 +251,7 @@ const required: Record<keyof EventPayloads, string[]> = {
   'context.compacted': ['source'],
   'context.compaction_failed': ['compaction_id'],
   'context.measured': [],
-  'tool_call.progress': [],
+  'tool_call.progress': ['id'],
 };
 export function parseEvent(
   frame: SseFrame,
@@ -284,13 +315,7 @@ export function parseEvent(
     frame.event === 'tool_call.completed' &&
     (typeof value.is_error !== 'boolean' ||
       !Array.isArray(value.content) ||
-      !value.content.every(
-        (item) =>
-          record(item) &&
-          ((item.type === 'text' && typeof item.text === 'string') ||
-            (item.type === 'image' && typeof item.media_type === 'string') ||
-            (item.type === 'tool_reference' && typeof item.tool_name === 'string')),
-      ))
+      !value.content.every(resultItem))
   )
     throw new Error('Invalid tool result event.');
   if (frame.event === 'context.compacted' && !Number.isInteger(value.generation))

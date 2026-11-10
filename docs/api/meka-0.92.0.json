@@ -1,10 +1,10 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "meka HTTP API",
-    "description": "Service-to-service API for driving meka agent turns programmatically. Mirrors the wire format described in the HTTP API docs. A field that has no value is omitted from every response and event, never sent as `null`.",
+    "title": "Meka HTTP API",
+    "description": "Service-to-service API for driving Meka agent turns programmatically. Mirrors the wire format described in the HTTP API docs. A field that has no value is omitted from every response and event, never sent as `null`.",
     "license": { "name": "AGPL-3.0-or-later" },
-    "version": "0.90.0"
+    "version": "0.92.0"
   },
   "paths": {
     "/v1/accounts": {
@@ -236,7 +236,7 @@
             }
           },
           "409": {
-            "description": "A session or sub-agent running on this server may run on the account, or another meka is refreshing its credential, which refreshes under its name",
+            "description": "A session or sub-agent running on this server may run on the account, or another Meka is refreshing its credential, which refreshes under its name",
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
             }
@@ -334,7 +334,7 @@
             }
           },
           "502": {
-            "description": "The login produced no authorization URL in time; the reason is in the meka log",
+            "description": "The login produced no authorization URL in time; the reason is in the Meka log",
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
             }
@@ -477,7 +477,7 @@
             }
           },
           "502": {
-            "description": "The token exchange got no answer meka can read, or the login lapsed; the reason is in the meka log",
+            "description": "The token exchange got no answer Meka can read, or the login lapsed; the reason is in the Meka log",
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
             }
@@ -1281,7 +1281,7 @@
             }
           },
           "502": {
-            "description": "The login did not begin: the server or its authorization server did not answer; the reason is in the meka log",
+            "description": "The login did not begin: the server or its authorization server did not answer; the reason is in the Meka log",
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
             }
@@ -1424,7 +1424,7 @@
             }
           },
           "502": {
-            "description": "The exchange at the authorization server failed; the reason is in the meka log",
+            "description": "The exchange at the authorization server failed; the reason is in the Meka log",
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
             }
@@ -2618,7 +2618,7 @@
             }
           },
           "409": {
-            "description": "A turn is in flight; cancel first (`/errors/turn-in-flight`). Or another meka process holds the session (`/errors/session-locked`)",
+            "description": "A turn is in flight; cancel first (`/errors/turn-in-flight`). Or another Meka process holds the session (`/errors/session-locked`)",
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
             }
@@ -2678,7 +2678,7 @@
             }
           },
           "409": {
-            "description": "A turn is in flight and the body names `working_directory`, `profile` or `project`; cancel first (`/errors/turn-in-flight`). Or another meka process holds the session, so only that process may move it (`/errors/session-locked`)",
+            "description": "A turn is in flight and the body names `working_directory`, `profile` or `project`; cancel first (`/errors/turn-in-flight`). Or another Meka process holds the session, so only that process may move it (`/errors/session-locked`)",
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
             }
@@ -2857,7 +2857,7 @@
             }
           },
           "409": {
-            "description": "A turn is in flight; cancel first (`/errors/turn-in-flight`). Or another meka process holds the session (`/errors/session-locked`)",
+            "description": "A turn is in flight; cancel first (`/errors/turn-in-flight`). Or another Meka process holds the session (`/errors/session-locked`)",
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
             }
@@ -2881,7 +2881,7 @@
             }
           },
           "502": {
-            "description": "The provider rejected or failed the summarizing turn. Read `type`: `/errors/provider-unavailable` is worth resending after a pause, `/errors/provider` covers everything meka does not classify, and `/errors/context-overflow` here means the conversation will not fit even to summarize it",
+            "description": "The provider rejected or failed the summarizing turn. Read `type`: `/errors/provider-unavailable` is worth resending after a pause, `/errors/provider` covers everything Meka does not classify, and `/errors/context-overflow` here means the conversation will not fit even to summarize it",
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
             }
@@ -3100,7 +3100,7 @@
             }
           },
           "409": {
-            "description": "Another meka process holds the session (`/errors/session-locked`), the token may only read and the session is not loaded (`/errors/session-not-loaded`), or the id names a sub-agent this process is not running (`/errors/subagent-not-running`)",
+            "description": "Another Meka process holds the session (`/errors/session-locked`), the token may only read and the session is not loaded (`/errors/session-not-loaded`), or the id names a sub-agent this process is not running (`/errors/subagent-not-running`)",
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
             }
@@ -3178,7 +3178,7 @@
             }
           },
           "409": {
-            "description": "A turn is in flight on the source; cancel first (`/errors/turn-in-flight`). Or another meka process holds the source (`/errors/session-locked`)",
+            "description": "A turn is in flight on the source; cancel first (`/errors/turn-in-flight`). Or another Meka process holds the source (`/errors/session-locked`)",
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
             }
@@ -3575,7 +3575,7 @@
             }
           },
           "409": {
-            "description": "A turn is in flight; cancel first (`/errors/turn-in-flight`). Or another meka process holds the session, as a running sub-agent's parent does (`/errors/session-locked`)",
+            "description": "A turn is in flight; cancel first (`/errors/turn-in-flight`). Or another Meka process holds the session, as a running sub-agent's parent does (`/errors/session-locked`)",
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
             }
@@ -3789,7 +3789,7 @@
             }
           },
           "409": {
-            "description": "A turn is already in flight (`/errors/turn-in-flight`), the Idempotency-Key was used with another body or is in flight on a concurrent request (`/errors/idempotency`), or another meka process holds the session (`/errors/session-locked`)",
+            "description": "A turn is already in flight (`/errors/turn-in-flight`), the Idempotency-Key was used with another body or is in flight on a concurrent request (`/errors/idempotency`), or another Meka process holds the session (`/errors/session-locked`)",
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/ProblemDetail" } }
             }
@@ -4225,7 +4225,7 @@
         "properties": {
           "authenticated": {
             "type": "string",
-            "description": "`yes`, `no`, or `unreadable`: the same three answers as the plain column, because a row\nmeka cannot deserialize is neither logged in nor logged out."
+            "description": "`yes`, `no`, or `unreadable`: the same three answers as the plain column, because a row\nMeka cannot deserialize is neither logged in nor logged out."
           },
           "backend": { "type": "string" },
           "base_url": { "type": ["string", "null"] },
@@ -4336,7 +4336,7 @@
           "subagent_id": {
             "type": ["string", "null"],
             "format": "uuid",
-            "description": "The session a backgrounded `agent_spawn` runs, once it has made one. Omitted on every\nother task."
+            "description": "The sub-agent a backgrounded `agent_spawn` or `agent_followup` drives, from the moment the\ncall returns. Omitted on every other task."
           },
           "tool": {
             "type": "string",
@@ -4420,10 +4420,40 @@
           },
           "keep_recent": {
             "type": ["boolean", "null"],
-            "description": "Whether to keep the most recent turns verbatim after the summary. Omit to let meka decide;\nthe checkpoint turn overrides this when it knows better, having just read the conversation."
+            "description": "Whether to keep the most recent turns verbatim after the summary. Omit to let Meka decide;\nthe checkpoint turn overrides this when it knows better, having just read the conversation."
           }
         },
         "additionalProperties": false
+      },
+      "CompactionFailedItem": {
+        "type": "object",
+        "description": "A compaction that failed or was stopped, as the history says it.",
+        "required": ["trigger", "memories_written", "checkpoint"],
+        "properties": {
+          "checkpoint": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/MessageItem" },
+            "description": "See [`CompactionItem::checkpoint`]."
+          },
+          "error": {
+            "type": ["string", "null"],
+            "description": "What it failed on; absent when it was stopped."
+          },
+          "memories_written": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "The memories its checkpoint wrote, which stay written."
+          },
+          "summarizer": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/MessageItem" },
+            "description": "See [`CompactionItem::summarizer`]."
+          },
+          "trigger": {
+            "type": "string",
+            "description": "What set it going: `reactive`, `proactive`, `manual`, `requested`, `emergency` or\n`retention`."
+          }
+        }
       },
       "CompactionItem": {
         "allOf": [
@@ -4434,8 +4464,13 @@
             "properties": {
               "checkpoint": {
                 "type": "array",
-                "items": { "$ref": "#/components/schemas/MessageBody" },
-                "description": "The rounds the checkpoint turn ran on the way: what the agent thought and called while it\nsaved what must last, with the results. Empty when no checkpoint round ran."
+                "items": { "$ref": "#/components/schemas/MessageItem" },
+                "description": "The rounds the checkpoint turn ran on the way, as they happened: each reply as returned\nwith its record, and the results sent back. Empty when no checkpoint round ran."
+              },
+              "summarizer": {
+                "type": "array",
+                "items": { "$ref": "#/components/schemas/MessageItem" },
+                "description": "The summarizer's replies, as returned with their records, when the summarizer wrote the\nsummary."
               },
               "summary": {
                 "type": "string",
@@ -4526,13 +4561,39 @@
             "type": "object",
             "required": ["text", "type"],
             "properties": {
+              "provider_fields": {
+                "type": ["object", "null"],
+                "description": "The part's fields nothing else holds, as its provider returned them (a Responses\nmessage's `phase`)."
+              },
               "text": { "type": "string" },
               "type": { "type": "string", "enum": ["text"] }
             }
           },
           {
             "type": "object",
-            "description": "What meka injected ahead of the user's words for that turn (permission and environment\ncontext, catalog changes, background outcomes, the resume notice), which the model\nsaw as text ahead of them. Typed so a client can show or hide it; `text` alone is the words.",
+            "description": "Words a model returned in the field its provider keeps for declining (OpenAI's `refusal`).",
+            "required": ["text", "type"],
+            "properties": {
+              "provider_fields": {
+                "type": ["object", "null"],
+                "description": "The part's fields nothing else holds, as its provider returned them."
+              },
+              "text": { "type": "string" },
+              "type": { "type": "string", "enum": ["refusal"] }
+            }
+          },
+          {
+            "type": "object",
+            "description": "What a provider returned that Meka reads no block from, verbatim and in the order it\narrived; never sent back to a model.",
+            "required": ["parts", "type"],
+            "properties": {
+              "parts": { "type": "array", "items": { "type": "object" } },
+              "type": { "type": "string", "enum": ["unrecognized"] }
+            }
+          },
+          {
+            "type": "object",
+            "description": "What Meka injected ahead of the user's words for that turn (permission and environment\ncontext, catalog changes, background outcomes, the resume notice), which the model\nsaw as text ahead of them. Typed so a client can show or hide it; `text` alone is the words.",
             "required": ["text", "type"],
             "properties": {
               "text": { "type": "string" },
@@ -4541,12 +4602,31 @@
           },
           {
             "type": "object",
-            "description": "Words meka wrote into the model's own turn in the user's role, to send it back to work:\n`kind` is `visible_reply` after a reply with no visible text, `checklist` after one that\nleft checklist items open. Typed so a client can show it as meka's rather than the person's.",
+            "description": "Words Meka wrote into the model's own turn in the user's role, to send it back to work:\n`kind` is `visible_reply` after a reply with no visible text, `checklist` after one that\nleft checklist items open. Typed so a client can show it as Meka's rather than the person's.",
             "required": ["kind", "text", "type"],
             "properties": {
               "kind": { "type": "string" },
               "text": { "type": "string" },
               "type": { "type": "string", "enum": ["nudge"] }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Words Meka wrote into a user message in place of what it removed (an image the provider\nrejected or the request budget could not carry): `note` the sentence, `text` as the model\nread it, behind Meka's label. Typed so a client shows it as Meka's rather than the person's.",
+            "required": ["note", "text", "type"],
+            "properties": {
+              "note": { "type": "string" },
+              "text": { "type": "string" },
+              "type": { "type": "string", "enum": ["harness_note"] }
+            }
+          },
+          {
+            "type": "object",
+            "description": "The message a compaction put in place of the turns it summarized, as the model reads it.\nThe message's `compaction` says what the compaction was, its summary as written included.",
+            "required": ["text", "type"],
+            "properties": {
+              "text": { "type": "string" },
+              "type": { "type": "string", "enum": ["summary"] }
             }
           },
           {
@@ -4620,9 +4700,17 @@
           },
           {
             "type": "object",
-            "required": ["thinking", "type"],
+            "description": "Reasoning the model showed, in the parts its provider returned it in.",
+            "required": ["parts", "type"],
             "properties": {
-              "thinking": { "type": "string" },
+              "parts": {
+                "type": "array",
+                "items": { "$ref": "#/components/schemas/ReasoningPartView" }
+              },
+              "provider_fields": {
+                "type": ["object", "null"],
+                "description": "The part's fields nothing else holds, as its provider returned them."
+              },
               "type": { "type": "string", "enum": ["thinking"] }
             }
           },
@@ -4630,16 +4718,38 @@
             "type": "object",
             "description": "Encrypted reasoning whose contents the API withholds; surfaced as a presence marker so\nhistory responses note it occurred without exposing the opaque payload.",
             "required": ["type"],
-            "properties": { "type": { "type": "string", "enum": ["redacted_thinking"] } }
+            "properties": {
+              "provider_fields": {
+                "type": ["object", "null"],
+                "description": "The part's fields nothing else holds, as its provider returned them."
+              },
+              "type": { "type": "string", "enum": ["redacted_thinking"] }
+            }
           },
           {
             "type": "object",
             "required": ["id", "name", "input", "type"],
             "properties": {
               "id": { "type": "string" },
-              "input": { "type": "object" },
+              "input": {
+                "type": "object",
+                "description": "The arguments; `{}` when `unparsed` is present."
+              },
               "name": { "type": "string" },
-              "type": { "type": "string", "enum": ["tool_use"] }
+              "provider_fields": {
+                "type": ["object", "null"],
+                "description": "Every field the provider put on the call beyond its id, name and arguments, as it came."
+              },
+              "type": { "type": "string", "enum": ["tool_use"] },
+              "unparsed": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/UnparsedArgumentsView",
+                    "description": "What the model sent as the arguments when it was not a JSON object, and why the call\nwas refused."
+                  },
+                  { "type": "null" }
+                ]
+              }
             }
           },
           {
@@ -4682,7 +4792,7 @@
           "position": {
             "type": "integer",
             "format": "int64",
-            "description": "The position of the history item this message shows: its own row, the row a copy a\ncompaction kept stands for, the row a message meka rewrote in place was said in, or a\nsummary's compaction."
+            "description": "The position of the history item this message shows: its own row, the row a copy a\ncompaction kept stands for, the row a message Meka rewrote in place was said in, or a\nsummary's compaction."
           },
           "role": { "type": "string" },
           "turn_id": {
@@ -4746,7 +4856,7 @@
           "window": {
             "type": ["integer", "null"],
             "format": "int64",
-            "description": "The model's context window, omitted when meka has no metadata for it. A percentage of an\nunknown denominator is worse than silence, so clients should suppress occupancy rather than\nassume a default.",
+            "description": "The model's context window, omitted when Meka has no metadata for it. A percentage of an\nunknown denominator is worse than silence, so clients should suppress occupancy rather than\nassume a default.",
             "minimum": 0
           }
         }
@@ -5000,7 +5110,7 @@
           {
             "allOf": [
               {
-                "$ref": "#/components/schemas/MessageBody",
+                "$ref": "#/components/schemas/MessageItem",
                 "description": "A message, where it was said."
               },
               {
@@ -5024,6 +5134,20 @@
               }
             ],
             "description": "A compaction, where it happened."
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CompactionFailedItem",
+                "description": "A compaction that failed or was stopped, where it ended, with what it did on the way."
+              },
+              {
+                "type": "object",
+                "required": ["type"],
+                "properties": { "type": { "type": "string", "enum": ["compaction_failed"] } }
+              }
+            ],
+            "description": "A compaction that failed or was stopped, where it ended, with what it did on the way."
           },
           {
             "allOf": [
@@ -5141,7 +5265,7 @@
           },
           "retry_until": {
             "type": "string",
-            "description": "When meka stops retrying it: its enqueue plus `[serve] inbox_retry_ceiling`."
+            "description": "When Meka stops retrying it: its enqueue plus `[serve] inbox_retry_ceiling`."
           },
           "session_id": { "type": "string", "format": "uuid" },
           "source": {
@@ -5179,7 +5303,7 @@
           },
           "source": {
             "type": ["string", "null"],
-            "description": "Who the message is from, as the header names them. Left out or blank, the header names\nnobody: who sent a message is the client's to say, and meka does not guess it from the\ntoken."
+            "description": "Who the message is from, as the header names them. Left out or blank, the header names\nnobody: who sent a message is the client's to say, and Meka does not guess it from the\ntoken."
           }
         },
         "additionalProperties": false
@@ -5203,7 +5327,7 @@
           },
           "retry_until": {
             "type": "string",
-            "description": "When meka stops retrying it: its enqueue plus `[serve] inbox_retry_ceiling`."
+            "description": "When Meka stops retrying it: its enqueue plus `[serve] inbox_retry_ceiling`."
           },
           "session_id": { "type": "string", "format": "uuid" },
           "state": {
@@ -5395,7 +5519,7 @@
           "server": { "type": "string" },
           "state": {
             "type": "string",
-            "description": "Where the server stands now: `connected`, `failed`, or `pending`.\n\nA 200 says meka acted on the request, not that the server came back, so read this to find\nout which. `pending` means no attempt was made because one was already under way. A\n`disabled` server is a 422 and never appears here."
+            "description": "Where the server stands now: `connected`, `failed`, or `pending`.\n\nA 200 says Meka acted on the request, not that the server came back, so read this to find\nout which. `pending` means no attempt was made because one was already under way. A\n`disabled` server is a 422 and never appears here."
           }
         }
       },
@@ -5448,7 +5572,7 @@
           "name": { "type": "string" },
           "permission": {
             "type": ["string", "null"],
-            "description": "Server-wide permission override. Typed, like `[permissions]`, so a level meka does not have\nis refused where the file is parsed rather than when the server connects."
+            "description": "Server-wide permission override. Typed, like `[permissions]`, so a level Meka does not have\nis refused where the file is parsed rather than when the server connects."
           },
           "required": {
             "type": ["boolean", "null"],
@@ -5463,7 +5587,7 @@
           "transport": { "type": "string", "description": "`stdio` or `http`." },
           "trust_read_only_hint": {
             "type": ["boolean", "null"],
-            "description": "Whether this server's `readOnlyHint` annotation may classify a tool as `read`. Defaults to\ntrue, so a server that says a tool only reads is believed.\n\nThe hint is asserted by the server, not verified by meka, and MCP tools execute in the\nserver's own process with no sandbox. A server that advertises `readOnlyHint: true` for a\ntool that in fact writes therefore gets to write while meka sits at `read`. That is the\nreason this knob exists: setting it to `false` makes the hint advisory for display only, so\nthe tool falls through to the strict `Unrestricted` fallback, and nothing from this server\nis reachable at `read` without an explicit [`Self::tool_permissions`] or\n[`Self::permission`] entry.\n\nA refused hint deliberately skips `[mcp].default_permission` on the way. That is a global\nconvenience and this is a per-server audit decision, so the per-server one wins, the same\ndirection the two overrides above already run. Falling through to it meant that with\n`default_permission = \"read\"` the knob changed nothing at all: the tool landed back on\n`Read` and dispatched unapproved at `--permission read`, which is precisely the outcome\nsetting it to `false` was meant to prevent.\n\nDefaulting to true keeps existing configurations working and keeps the `read` level useful\nwith well-behaved servers; the trade is that the `read` level's filesystem guarantee covers\nmeka's built-in tools plus whichever MCP servers the user has chosen to trust."
+            "description": "Whether this server's `readOnlyHint` annotation may classify a tool as `read`. Defaults to\ntrue, so a server that says a tool only reads is believed.\n\nThe hint is asserted by the server, not verified by Meka, and MCP tools execute in the\nserver's own process with no sandbox. A server that advertises `readOnlyHint: true` for a\ntool that in fact writes therefore gets to write while Meka sits at `read`. That is the\nreason this knob exists: setting it to `false` makes the hint advisory for display only, so\nthe tool falls through to the strict `Unrestricted` fallback, and nothing from this server\nis reachable at `read` without an explicit [`Self::tool_permissions`] or\n[`Self::permission`] entry.\n\nA refused hint deliberately skips `[mcp].default_permission` on the way. That is a global\nconvenience and this is a per-server audit decision, so the per-server one wins, the same\ndirection the two overrides above already run. Falling through to it meant that with\n`default_permission = \"read\"` the knob changed nothing at all: the tool landed back on\n`Read` and dispatched unapproved at `--permission read`, which is precisely the outcome\nsetting it to `false` was meant to prevent.\n\nDefaulting to true keeps existing configurations working and keeps the `read` level useful\nwith well-behaved servers; the trade is that the `read` level's filesystem guarantee covers\nMeka's built-in tools plus whichever MCP servers the user has chosen to trust."
           },
           "url": { "type": ["string", "null"] }
         },
@@ -5756,8 +5880,32 @@
             "type": "array",
             "items": { "$ref": "#/components/schemas/ContentBlockView" }
           },
+          "provider_fields": {
+            "type": ["object", "null"],
+            "description": "The fields a provider put on the message itself that nothing else holds, as it returned\nthem (a Chat Completions message's `reasoning_details`)."
+          },
           "role": { "type": "string" }
         }
+      },
+      "MessageItem": {
+        "allOf": [
+          { "$ref": "#/components/schemas/MessageBody" },
+          {
+            "type": "object",
+            "properties": {
+              "reply": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/ReplyView",
+                    "description": "On a reply, what its provider said about it beside its content; absent on any other\nmessage and on a reply written before Meka recorded it."
+                  },
+                  { "type": "null" }
+                ]
+              }
+            }
+          }
+        ],
+        "description": "A message on the history, and for a reply what its provider said about it."
       },
       "NoticeView": {
         "type": "object",
@@ -5919,7 +6067,7 @@
             }
           }
         ],
-        "description": "RFC 9457 Problem Details body. The five core members (`type`, `title`, `status`, `detail`,\n`instance`) are first-class; meka-specific extension members ride in `extensions` and get\nflattened into the top-level JSON object on serialization."
+        "description": "RFC 9457 Problem Details body. The five core members (`type`, `title`, `status`, `detail`,\n`instance`) are first-class; Meka-specific extension members ride in `extensions` and get\nflattened into the top-level JSON object on serialization."
       },
       "ProfileDetailView": {
         "type": "object",
@@ -6048,6 +6196,18 @@
           "status": { "type": "string" }
         }
       },
+      "ReasoningPartView": {
+        "type": "object",
+        "description": "One part of a thinking block.",
+        "required": ["kind", "text"],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "description": "`reasoning`, the reasoning itself, or `summary`, a summary the provider wrote of reasoning\nit keeps."
+          },
+          "text": { "type": "string" }
+        }
+      },
       "ReloadResponse": {
         "type": "object",
         "description": "What `POST /v1/config/reload` applied.",
@@ -6099,6 +6259,43 @@
           "name": { "type": "string", "description": "The name the account moves to." }
         },
         "additionalProperties": false
+      },
+      "ReplyView": {
+        "type": "object",
+        "description": "What a provider said about a reply beside its content.",
+        "properties": {
+          "cut": {
+            "type": ["string", "null"],
+            "description": "What cut the reply short: `stopped`, `interrupted` or `failed`."
+          },
+          "model": { "type": ["string", "null"], "description": "The model the response names." },
+          "profile": {
+            "type": ["string", "null"],
+            "description": "The profile that sent the request."
+          },
+          "provider_fields": {
+            "type": ["object", "null"],
+            "description": "The response's fields nothing else holds, as its provider returned them: its id, the raw\n`usage` the counts are read from, and whatever else it said about the completion."
+          },
+          "stop": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/StopView",
+                "description": "How the reply ended, as its provider said; absent on one cut before it said."
+              },
+              { "type": "null" }
+            ]
+          },
+          "usage": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/UsageView",
+                "description": "What the response reported spending, as Meka counts it."
+              },
+              { "type": "null" }
+            ]
+          }
+        }
       },
       "ResponseBody": {
         "type": "object",
@@ -6203,7 +6400,7 @@
           },
           "supports_reasoning_stream": {
             "type": "boolean",
-            "description": "When `true`, the SSE stream includes `thinking.delta` events for extended-thinking\ncontent. Default `false` so chat-transcript clients (Telegram bridges, etc.) don't\nsurface reasoning text inline.",
+            "description": "When `true`, the SSE stream includes `thinking.delta` events for extended-thinking\ncontent and `thinking.redacted` for a block the provider withheld. Default `false` so\nchat-transcript clients (Telegram bridges, etc.) don't surface reasoning inline.",
             "default": false
           }
         }
@@ -6285,7 +6482,7 @@
           },
           "permission": {
             "type": ["string", "null"],
-            "description": "The session's permission level (`none`, `read`, `workspace`, `unrestricted`). Omitted when\nthe row records no level: every door of this meka records one, so a bare row is an outside\nhand's, and inventing a value for it would state a level the session never ran at."
+            "description": "The session's permission level (`none`, `read`, `workspace`, `unrestricted`). Omitted when\nthe row records no level: every door of this Meka records one, so a bare row is an outside\nhand's, and inventing a value for it would state a level the session never ran at."
           },
           "pinned_at": {
             "type": ["string", "null"],
@@ -6328,7 +6525,7 @@
             "properties": {
               "allowed-tools": {
                 "type": ["string", "null"],
-                "description": "The Agent Skills `allowed-tools` field, verbatim. meka never acts on it; see the skills\nguide."
+                "description": "The Agent Skills `allowed-tools` field, verbatim. Meka never acts on it; see the skills\nguide."
               },
               "body": {
                 "type": ["string", "null"],
@@ -6367,6 +6564,25 @@
           "version": { "type": ["string", "null"] }
         }
       },
+      "StopView": {
+        "type": "object",
+        "description": "How a reply ended.",
+        "required": ["reason"],
+        "properties": {
+          "details": {
+            "type": ["object", "null"],
+            "description": "What the provider said about the stop beside its word, under its own names."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Meka's class of the stop: `end_turn`, `tool_use`, `max_tokens`, `context_window`,\n`refusal`, `content_filter` or `unknown`."
+          },
+          "word": {
+            "type": ["string", "null"],
+            "description": "The provider's own word for it, as sent."
+          }
+        }
+      },
       "ToolResultContentView": {
         "oneOf": [
           {
@@ -6396,6 +6612,36 @@
             "properties": {
               "tool_name": { "type": "string" },
               "type": { "type": "string", "enum": ["tool_reference"] }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Words Meka wrote into the result for the model: `note` the sentence, `text` as the model\nread it, behind Meka's label.",
+            "required": ["note", "text", "type"],
+            "properties": {
+              "note": { "type": "string" },
+              "text": { "type": "string" },
+              "type": { "type": "string", "enum": ["harness_note"] }
+            }
+          },
+          {
+            "type": "object",
+            "description": "The line naming where the image after it came from (a file read, a page fetched).",
+            "required": ["caption", "type"],
+            "properties": {
+              "caption": { "type": "string" },
+              "type": { "type": "string", "enum": ["image_caption"] }
+            }
+          },
+          {
+            "type": "object",
+            "description": "An output too large to keep inline, saved whole to the scratchpad entry it names, with its\nsize and its opening.",
+            "required": ["scratchpad_entry", "size_bytes", "preview", "type"],
+            "properties": {
+              "preview": { "type": "string" },
+              "scratchpad_entry": { "type": "string" },
+              "size_bytes": { "type": "integer", "minimum": 0 },
+              "type": { "type": "string", "enum": ["large_output"] }
             }
           }
         ]
@@ -6428,7 +6674,7 @@
         "type": "object",
         "required": ["type", "detail"],
         "properties": {
-          "detail": { "type": "string", "description": "meka's own sentence about the failure" },
+          "detail": { "type": "string", "description": "Meka's own sentence about the failure" },
           "type": {
             "type": "string",
             "description": "The error's `type`, as a Problem Detail names it"
@@ -6489,7 +6735,7 @@
           "status": { "type": ["string", "null"] },
           "stop_reason": {
             "type": ["string", "null"],
-            "description": "`end_turn`, `max_tokens` or `refusal`, on a turn that succeeded."
+            "description": "The class of the stop the turn's last reply ended on, on a turn that succeeded."
           },
           "usage": {
             "$ref": "#/components/schemas/TurnUsage",
@@ -6540,12 +6786,12 @@
               },
               "refusal_text": {
                 "type": ["string", "null"],
-                "description": "Refusal explanation when `stop_reason == \"refusal\"`; omitted otherwise. Mirrors the\n`refusal_text` field on the streaming `turn.finished` event, so blocking and streaming\nclients share the same shape."
+                "description": "The model's words when `stop_reason` is `refusal` and it wrote any: its refusal, else the\ntext it wrote before the stop; omitted otherwise. Mirrors the `refusal_text` field on the\nstreaming `turn.finished` event, so blocking and streaming clients share the same shape."
               }
             }
           }
         ],
-        "description": "A turn a request held to its end: its record, what it wrote, and what meka said about it."
+        "description": "A turn a request held to its end: its record, what it wrote, and what Meka said about it."
       },
       "TurnUsage": {
         "type": "object",
@@ -6577,6 +6823,21 @@
             "type": "array",
             "items": { "$ref": "#/components/schemas/TurnRecord" },
             "description": "Newest first."
+          }
+        }
+      },
+      "UnparsedArgumentsView": {
+        "type": "object",
+        "description": "What a model sent as a call's arguments when it was not a JSON object.",
+        "required": ["error"],
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "Why the text is not arguments, in the words the call was refused with."
+          },
+          "text": {
+            "type": ["string", "null"],
+            "description": "The text as the model sent it; absent on a call recorded before the text was kept, or\nthat carried no arguments."
           }
         }
       },

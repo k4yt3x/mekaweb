@@ -40,7 +40,7 @@ import type {
   ComposerOptions,
   ImageAttachment,
 } from '../session/controller';
-import { compactionNote } from '../session/compaction';
+import { compactionFailedNote, compactionNote } from '../session/compaction';
 import { contextQuestion, rewindableTurns, type ConversationMessage } from '../session/history';
 import { isSessionRunning, UnsentMessage } from '../session/controller';
 import { useTextDraft } from '../session/drafts';
@@ -65,16 +65,21 @@ import {
   liveAfterSaved,
   groupToolResults,
   isInput,
-  mentionsInline,
   messageText,
   pendingInboxMessages,
+  reasoningText,
   recoverableSubmissions,
   resendable,
   responseActivityIndicator,
+  resultParts,
+  saysWords,
+  shownItems,
+  shows,
   spawnedAgent,
   speakers,
   type HistoryMessage,
   type LiveGroup,
+  type ShownBlock,
   type ToolResultBlock,
   type ToolUseBlock,
 } from './conversation-history';
@@ -289,8 +294,7 @@ export function Conversation({ state }: { state: SessionState }) {
       if (
         messages[position]!.some(
           ({ message, blocks }) =>
-            message.role === 'assistant' &&
-            blocks.some(({ block }) => block.type === 'text' && block.text.trim()),
+            message.role === 'assistant' && blocks.some(({ block }) => saysWords(block)),
         )
       )
         later = true;
@@ -980,7 +984,9 @@ function LiveBlocks({
       const tool = state.tools[block.id];
       return { kind: 'tool', name: tool?.name ?? '', failed: tool?.state === 'error' };
     }
-    return block.kind === 'thinking' ? { kind: 'thinking' } : { kind: 'note' };
+    return block.kind === 'thinking' || block.kind === 'redacted'
+      ? { kind: 'thinking' }
+      : { kind: 'note' };
   };
   const render = ({ block, index }: LiveItem) =>
     block.kind === 'tool' ? (
@@ -992,6 +998,8 @@ function LiveBlocks({
         streaming={expandThinking && !ended && index === state.blocks.length - 1}
         hold={hold}
       />
+    ) : block.kind === 'redacted' ? (
+      <ThinkingUnavailable key={index} />
     ) : block.kind === 'nudge' ? (
       <Nudge key={index} kind={block.nudge} text={block.text} />
     ) : block.kind === 'report' ? (
@@ -1015,10 +1023,11 @@ function LiveBlocks({
 }
 
 /** What a saved block is to folding. */
-function savedPart(block: Schema['ContentBlockView']): Part {
+function savedPart(block: ShownBlock): Part {
   switch (block.type) {
     case 'text':
-      return block.text.trim() ? 'words' : 'other';
+    case 'refusal':
+      return saysWords(block) ? 'words' : 'other';
     case 'thinking':
     case 'redacted_thinking':
     case 'nudge':
@@ -1033,7 +1042,7 @@ function savedPart(block: Schema['ContentBlockView']): Part {
 }
 
 /** A saved step, as its run's line counts it. */
-function savedStep(block: Schema['ContentBlockView'], result: ToolResultBlock | undefined): Step {
+function savedStep(block: ShownBlock, result: ToolResultBlock | undefined): Step {
   if (block.type === 'tool_use')
     return { kind: 'tool', name: block.name, failed: result?.is_error ?? false };
   if (block.type === 'tool_result') return { kind: 'tool', name: '', failed: block.is_error };
@@ -1083,6 +1092,10 @@ function Thinking({
     </details>
   );
 }
+/** Reasoning the provider withheld, which shows only that there was some. */
+function ThinkingUnavailable() {
+  return <p className="muted small">Thinking unavailable.</p>;
+}
 /** What a saved group is to the actions under it: a message someone sent, or the agent's turn. */
 function turnKind(group: HistoryMessage[]) {
   const message = group[0]?.message;
@@ -1130,14 +1143,27 @@ function Message({
   if (!message) return null;
   // Filter only the rendered blocks; preserve message boundaries, indexes, and saved history.
   // Blank words show nothing, and would part a run of steps.
-  const content = messages.flatMap(({ blocks, index: messageIndex }) =>
-    mentionsInline(blocks).flatMap(({ block, index }) =>
-      (showTurnContext || block.type !== 'turn_context') &&
-      !(block.type === 'text' && !block.text.trim())
-        ? [{ block, index, messageIndex }]
-        : [],
-    ),
-  );
+  const content = shownItems(messages, showTurnContext);
+  if (message.compactionFailed)
+    return (
+      <article className="message message-summary" data-message={position}>
+        {/* A line where it ended, which leaves the context as it was. */}
+        <aside aria-label="Compaction">
+          <details className="compaction">
+            <summary className="compaction-rule">
+              <span className="compaction-label">
+                <FoldVertical size={16} aria-hidden="true" />
+                {message.compactionFailed.error ? 'Compaction failed' : 'Compaction stopped'}
+                <ChevronRight className="compaction-chevron" size={14} aria-hidden="true" />
+              </span>
+            </summary>
+            <div className="compaction-content">
+              <p className="compaction-note">{compactionFailedNote(message.compactionFailed)}</p>
+            </div>
+          </details>
+        </aside>
+      </article>
+    );
   if (message.compaction)
     return (
       <article className="message message-summary" data-message={position}>
@@ -1186,7 +1212,7 @@ function Message({
         </aside>
       </article>
     );
-  if (!content.length && message.content.length > 0) return null;
+  if (!shows(messages, showTurnContext)) return null;
   const isUserInput = isInput(message);
   const turnOf = new Map(messages.map(({ index, message }) => [index, message.turn_id ?? '']));
   // Saved messages are known by their place in the history; live ones by their place here.
@@ -1438,12 +1464,13 @@ function ContentBlock({
   sessionId,
   result,
 }: {
-  block: Schema['ContentBlockView'];
+  block: ShownBlock;
   sessionId: string;
   result?: ToolResultBlock | undefined;
 }) {
   switch (block.type) {
     case 'text':
+    case 'refusal':
       return <Markdown text={block.text} />;
     case 'turn_context':
       return (
@@ -1453,7 +1480,11 @@ function ContentBlock({
         </details>
       );
     case 'thinking':
-      return <Thinking text={block.thinking} />;
+      return <Thinking text={reasoningText(block.parts)} />;
+    case 'harness_note':
+      return <p className="muted small">{block.note}</p>;
+    case 'reply_note':
+      return <p className="muted small">{block.text}</p>;
     case 'nudge':
       return <Nudge kind={block.kind} text={block.text} />;
     case 'inbox':
@@ -1472,7 +1503,7 @@ function ContentBlock({
     case 'background_report':
       return <BackgroundReport tasks={block.task_ids} text={block.text} />;
     case 'redacted_thinking':
-      return <p className="muted small">Thinking unavailable.</p>;
+      return <ThinkingUnavailable />;
     case 'image':
       return <Attachment sessionId={sessionId} hash={block.hash} />;
     case 'tool_use':
@@ -1518,24 +1549,32 @@ function ContentBlock({
       );
   }
 }
+/** What a tool's result shows: see {@link resultParts}. */
 function ToolResultContent({
   content,
   sessionId,
+  live = false,
 }: {
-  content: Schema['ToolResultContentView'][];
+  content: readonly Schema['ToolResultContentView'][];
   sessionId: string;
+  /** Whether a running turn returned it, whose images may not be saved yet. */
+  live?: boolean;
 }) {
   return (
     <ToolOutput>
-      {content.map((block, index) =>
-        block.type === 'text' ? (
+      {resultParts(content).map((part, index) =>
+        part.kind === 'text' ? (
           <pre className="plain-text" key={index}>
-            {block.text}
+            {part.text}
           </pre>
-        ) : block.type === 'tool_reference' ? (
-          <LoadedTool key={index} name={block.tool_name} />
+        ) : part.kind === 'note' ? (
+          <p className="muted small" key={index}>
+            {part.text}
+          </p>
+        ) : part.kind === 'loaded' ? (
+          <LoadedTool key={index} name={part.name} />
         ) : (
-          <Attachment key={index} sessionId={sessionId} hash={block.hash} />
+          <Attachment key={index} sessionId={sessionId} hash={part.hash} live={live} />
         ),
       )}
     </ToolOutput>
@@ -1602,29 +1641,14 @@ function Tool({ tool, sessionId }: { tool: LiveTool | undefined; sessionId: stri
           call={tool.id}
           name={tool.name}
           input={tool.input}
-          result={Array.isArray(tool.content) ? tool.content : undefined}
+          result={tool.content}
         />
       )}
       {tool.progress && <p>{tool.progress}</p>}
       {['completed', 'error'].includes(tool.state) && (
         <div className="tool-section">
           <h4>Result</h4>
-          <ToolOutput>
-            {Array.isArray(tool.content) &&
-              tool.content.map((content: Schema['ToolResultContentView'], index: number) =>
-                content.type === 'text' ? (
-                  <pre className="plain-text" key={index}>
-                    {content.text}
-                  </pre>
-                ) : content.type === 'tool_reference' ? (
-                  <LoadedTool key={index} name={content.tool_name} />
-                ) : (
-                  <p className="muted small" key={index}>
-                    Image preview available after this turn finishes.
-                  </p>
-                ),
-              )}
-          </ToolOutput>
+          <ToolResultContent content={tool.content} sessionId={sessionId} live />
         </div>
       )}
     </ToolCard>
@@ -1647,17 +1671,19 @@ function SubagentSection({
   call: string;
   name: string;
   input: unknown;
-  result: { type: string; text?: string }[] | undefined;
+  result: readonly Schema['ToolResultContentView'][] | undefined;
 }) {
   const { api, connection } = useConnection();
   const children = useQuery(subagentsQuery(api, connection, sessionId)).data?.sessions;
   const running = useSessionStates().find(
     ({ spawnedBy }) => spawnedBy?.sessionId === sessionId && spawnedBy.toolCallId === call,
   );
+  // A report too large to keep inline keeps its opening, header included, as its preview.
+  const [report = ''] = resultParts(result ?? []).flatMap((part) =>
+    part.kind === 'text' ? [part.text] : [],
+  );
   const named =
-    name === 'agent_followup'
-      ? (input as { id?: unknown } | null)?.id
-      : spawnedAgent(result?.find((item) => item.type === 'text')?.text ?? '');
+    name === 'agent_followup' ? (input as { id?: unknown } | null)?.id : spawnedAgent(report);
   const matches =
     typeof named === 'string' ? (children ?? []).filter(({ id }) => id.startsWith(named)) : [];
   const id =

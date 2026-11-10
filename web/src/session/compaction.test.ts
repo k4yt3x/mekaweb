@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { compactionNote } from './compaction';
+import { compactionFailedNote, compactionNote } from './compaction';
 
 const usual = {
   trigger: 'reactive',
@@ -34,5 +34,18 @@ it('adds what was not usual about it', () => {
   );
   expect(compactionNote({ ...usual, memories_written: ['notes'] })).toMatch(
     /ceiling\. Wrote 1 memory: notes\.$/,
+  );
+});
+
+it('says why a compaction failed, or nothing when it was stopped, and what its checkpoint wrote', () => {
+  const failed = { trigger: 'reactive', memories_written: [], checkpoint: [] };
+  expect(compactionFailedNote({ ...failed, error: 'the provider refused' })).toBe(
+    'Error: the provider refused. The context is unchanged.',
+  );
+  expect(compactionFailedNote({ ...failed, error: 'It timed out.' })).toBe(
+    'Error: It timed out. The context is unchanged.',
+  );
+  expect(compactionFailedNote({ ...failed, memories_written: ['notes'] })).toBe(
+    'The context is unchanged. Wrote 1 memory: notes.',
   );
 });

@@ -7,6 +7,8 @@ import {
 } from '../session/controller';
 import type { ConversationMessage } from '../session/history';
 import type { SessionNotice } from '../session/notices';
+import { stopLabel } from '../session/turn-summary';
+import { formatSize } from '../files/paths';
 
 export type ToolUseBlock = Extract<Schema['ContentBlockView'], { type: 'tool_use' }>;
 export type ToolResultBlock = Extract<Schema['ContentBlockView'], { type: 'tool_result' }>;
@@ -56,27 +58,129 @@ export function groupToolResults(messages: readonly ConversationMessage[]) {
 
 export type HistoryMessage = ReturnType<typeof groupToolResults>['messages'][number];
 
-/** Whether a group shows anything, by the rules `Message` draws it by. */
-function shows(group: HistoryMessage[], showTurnContext: boolean) {
+/** A line Meka's screen says of a reply that does not say it itself. */
+export interface ReplyNote {
+  type: 'reply_note';
+  text: string;
+}
+/** A block the conversation draws: a saved one, or the line said of the reply before it. */
+export type ShownBlock = Schema['ContentBlockView'] | ReplyNote;
+
+/** A thinking block's words, its parts a blank line apart, as Meka's `reasoning_text` joins them. */
+export function reasoningText(parts: readonly Schema['ReasoningPartView'][]) {
+  return parts.flatMap(({ text }) => (text ? [text] : [])).join('\n\n');
+}
+
+/** Whether a block holds words a reply said: its text, or the words a model refused in. */
+export function saysWords(block: ShownBlock) {
+  return (block.type === 'text' || block.type === 'refusal') && Boolean(block.text.trim());
+}
+
+/**
+ * A reply's adjacent text blocks as one run of words, as they streamed: a provider splits one
+ * answer into blocks for reasons of its own, a citation or an output item, and the split is no
+ * paragraph. Meka's `shown_content`.
+ */
+function joinedWords<T extends { block: Schema['ContentBlockView'] }>(items: readonly T[]): T[] {
+  const joined: T[] = [];
+  for (const item of items) {
+    const last = joined.at(-1);
+    if (item.block.type === 'text' && last?.block.type === 'text')
+      joined[joined.length - 1] = {
+        ...last,
+        block: { ...last.block, text: last.block.text + item.block.text },
+      };
+    else joined.push(item);
+  }
+  return joined;
+}
+
+/** A message's blocks as they read: a reply's words joined, someone's with their mentions. */
+function readable<T extends { block: Schema['ContentBlockView'] }>(
+  message: ConversationMessage,
+  items: readonly T[],
+): T[] {
+  return message.role === 'assistant' ? joinedWords(items) : mentionsInline(items);
+}
+
+/**
+ * Whether a saved block shows anything. Blank words and reasoning do not; nor does what Meka keeps
+ * for the record alone, a compaction's message, which its line stands for, and what a provider
+ * returned that Meka could not read; nor the calls of a reply cut short, which never ran.
+ */
+function drawn(
+  block: Schema['ContentBlockView'],
+  message: ConversationMessage,
+  showTurnContext: boolean,
+) {
+  switch (block.type) {
+    case 'turn_context':
+      return showTurnContext;
+    case 'text':
+    case 'refusal':
+      return saysWords(block);
+    case 'thinking':
+      return Boolean(reasoningText(block.parts).trim());
+    case 'tool_use':
+      return !message.reply?.cut;
+    case 'summary':
+    case 'unrecognized':
+      return false;
+    default:
+      return true;
+  }
+}
+
+/**
+ * The line Meka's screen says after a reply: that it answered nothing, with no words and no call,
+ * or why one that made calls stopped, when not to have them run. A reply cut short did not end,
+ * and its turn's end says what cut it.
+ */
+function replyNote(message: ConversationMessage): ReplyNote | undefined {
+  if (message.role !== 'assistant' || message.reply?.cut) return;
+  const calls = message.content.some((block) => block.type === 'tool_use');
+  if (!calls && !message.content.some(saysWords))
+    return { type: 'reply_note', text: 'The model returned no answer.' };
+  const stopped = calls ? stopLabel(message.reply?.stop?.reason) : undefined;
+  return stopped ? { type: 'reply_note', text: `Stopped: ${stopped}` } : undefined;
+}
+
+/**
+ * What a group draws, each block by where it sits among its message's: the blocks that show
+ * anything, and the line said of a reply after it.
+ */
+export function shownItems(group: readonly HistoryMessage[], showTurnContext: boolean) {
+  return group.flatMap(({ message, blocks, index: messageIndex }) => {
+    const items = readable(message, blocks).flatMap(({ block, index }) =>
+      drawn(block, message, showTurnContext)
+        ? [{ block: block as ShownBlock, index, messageIndex }]
+        : [],
+    );
+    const note = replyNote(message);
+    return note ? [...items, { block: note, index: message.content.length, messageIndex }] : items;
+  });
+}
+
+/**
+ * Whether a group shows anything, by the rules `Message` draws it by. An empty message of
+ * someone's still shows who sent it.
+ */
+export function shows(group: readonly HistoryMessage[], showTurnContext: boolean) {
   const first = group[0]?.message;
   if (!first) return false;
-  if (first.compaction) return true;
-  const content = group.some(({ blocks }) =>
-    blocks.some(
-      ({ block }) =>
-        (showTurnContext || block.type !== 'turn_context') &&
-        !(block.type === 'text' && !block.text.trim()),
-    ),
+  if (first.compaction || first.compactionFailed) return true;
+  return (
+    shownItems(group, showTurnContext).length > 0 ||
+    (first.content.length === 0 && first.role !== 'assistant')
   );
-  return content || first.content.length === 0;
 }
 
 /**
  * Who says what in the saved conversation's groups, for headings and a reply's actions. The
  * agent's heading marks a change of speaker: it heads what the agent says only after someone
- * else's words, not after more of its own, nor after a compaction's line, which carries on whoever
- * spoke before it. A turn a compaction cut in two reads as one reply. Groups that show nothing are
- * passed over.
+ * else's words, not after more of its own, nor after a compaction's line, landed or failed, which
+ * carries on whoever spoke before it. A turn a compaction cut in two reads as one reply. Groups
+ * that show nothing are passed over.
  */
 export function speakers(groups: readonly HistoryMessage[][], showTurnContext: boolean) {
   /** For each group shown, whether it heads what it says. */
@@ -91,6 +195,7 @@ export function speakers(groups: readonly HistoryMessage[][], showTurnContext: b
   groups.forEach((group, position) => {
     if (!shows(group, showTurnContext)) return;
     const message = group[0]!.message;
+    const line = message.compaction || message.compactionFailed;
     const head = !(message.role === 'assistant' && any && agentLast);
     heads[position] = head;
     if (message.role === 'assistant') {
@@ -98,8 +203,8 @@ export function speakers(groups: readonly HistoryMessage[][], showTurnContext: b
       if (goes) goesOn[reply!.position] = true;
       runs[position] = goes ? runs[reply!.position]! : position;
       reply = { position, turn: group.at(-1)?.message.turn_id };
-    } else if (!message.compaction) reply = undefined;
-    if (!message.compaction) agentLast = message.role === 'assistant';
+    } else if (!line) reply = undefined;
+    if (!line) agentLast = message.role === 'assistant';
     any = true;
   });
   /** Whether what shows last is the agent's, which what it says live carries on. */
@@ -180,14 +285,17 @@ export function groupAgentMessages(messages: HistoryMessage[]) {
 
 /**
  * What the messages say, as written: their text with the files attached among it by name, the
- * inbox items someone sent, the words sent with a skill or an MCP prompt, and a scheduled job's
- * words, without thinking, tools, or what Meka wrote around them.
+ * words a model refused in, the inbox items someone sent, the words sent with a skill or an MCP
+ * prompt, and a scheduled job's words, without thinking, tools, or what Meka wrote around them.
  */
 export function messageText(messages: readonly ConversationMessage[]) {
   return messages
     .flatMap((message) =>
-      mentionsInline(message.content.map((block) => ({ block }))).flatMap(({ block }) =>
-        block.type === 'text'
+      readable(
+        message,
+        message.content.map((block) => ({ block })),
+      ).flatMap(({ block }) =>
+        block.type === 'text' || block.type === 'refusal'
           ? [block.text.trim()]
           : block.type === 'inbox'
             ? [block.body.trim()]
@@ -221,9 +329,58 @@ export function resendable(message: ConversationMessage) {
   };
 }
 
-/** The sub-agent a spawn's result names: `Agent: <id>`, or `agent: <id>` before Meka 0.76.0. */
+/**
+ * The sub-agent a spawn's result names: `Agent: <id>`, or `agent: <id>` before Meka 0.76.0, and
+ * for one sent to the background, `It runs sub-agent <id>.` after the task's label. The last such
+ * sentence is Meka's, since the label before it holds the model's words.
+ */
 export function spawnedAgent(result: string) {
-  return /^agent: (\S+)/i.exec(result)?.[1];
+  return (
+    /^agent: (\S+)/i.exec(result)?.[1] ??
+    [...result.matchAll(/ It runs sub-agent ([0-9a-f-]{36})\./g)].at(-1)?.[1]
+  );
+}
+
+/** What a tool's result shows, item by item, as {@link resultParts} reads it. */
+export type ResultPart =
+  | { kind: 'text'; text: string }
+  | { kind: 'note'; text: string }
+  | { kind: 'image'; hash: string | null | undefined }
+  | { kind: 'loaded'; name: string };
+
+/**
+ * What a tool's result shows: its text, its images, the tools it loaded, and what Meka wrote into
+ * it as notes. A large output saved to the scratchpad shows its opening, and says where the rest
+ * is; the caption naming where an image came from shows only when the image is not there.
+ */
+export function resultParts(content: readonly Schema['ToolResultContentView'][]): ResultPart[] {
+  const images = content.some((item) => item.type === 'image');
+  return content.flatMap((item): ResultPart[] => {
+    switch (item.type) {
+      case 'text':
+        return [{ kind: 'text', text: item.text }];
+      case 'image':
+        return [{ kind: 'image', hash: item.hash }];
+      case 'tool_reference':
+        return [{ kind: 'loaded', name: item.tool_name }];
+      case 'harness_note':
+        return [{ kind: 'note', text: item.note }];
+      case 'image_caption':
+        return images ? [] : [{ kind: 'note', text: item.caption }];
+      case 'large_output': {
+        const shown = formatSize(new TextEncoder().encode(item.preview).length);
+        return [
+          { kind: 'text', text: item.preview },
+          {
+            kind: 'note',
+            text: `The first ${shown} of ${formatSize(item.size_bytes)}; all of it is in scratchpad entry ${item.scratchpad_entry}.`,
+          },
+        ];
+      }
+      default:
+        return [];
+    }
+  });
 }
 
 type AgentBlock = Exclude<LiveBlock, { kind: 'submission' | 'message' }>;

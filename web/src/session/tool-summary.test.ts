@@ -50,8 +50,6 @@ it('shows an MCP call by its first argument that is text, else its first that re
   expect(shown({ count: 42 })).toBe('42');
   expect(shown({ config: { nested: 1 } })).toBeUndefined();
   expect(shown({})).toBeUndefined();
-  // A call whose arguments did not parse holds the reason, which is no argument.
-  expect(shown({ _meka_invalid_arguments: 'expected value at line 1' })).toBeUndefined();
   // Meka's own arguments and a blank one are not the call's to be shown by.
   expect(shown({ background: true, scratchpad: 'results', query: '  ', topic: 'ratatui' })).toBe(
     'ratatui',

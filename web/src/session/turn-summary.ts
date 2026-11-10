@@ -18,11 +18,19 @@ const SOURCES: Record<string, string> = {
   compaction: 'Compaction',
 };
 
-/** Why a turn that succeeded stopped, when not at the end of its reply. */
+/** Why a reply stopped, when not at its end or to have its calls run: Meka's `stop_words`. */
 const STOPS: Record<string, string> = {
   max_tokens: 'Output limit reached',
+  context_window: 'Context window reached',
   refusal: 'The model refused',
+  content_filter: 'Content filter',
+  unknown: 'Unrecognized reason',
 };
+
+/** Why a reply, or the turn it ended, stopped; none for an answer or a round of calls. */
+export function stopLabel(reason: string | null | undefined) {
+  return reason && Object.hasOwn(STOPS, reason) ? STOPS[reason] : undefined;
+}
 
 /**
  * A duration as Meka's terminal states it: seconds under a minute, minutes and seconds under an
@@ -123,7 +131,7 @@ export function turnDetails(turn: TurnRecord, now = new Date()) {
   }
   if (turn.source !== 'client') add('Started by', SOURCES[turn.source] ?? turn.source);
   if (turn.profile) add('Fallback profile', turn.profile);
-  if (turn.stop_reason) add('Stopped', STOPS[turn.stop_reason]);
+  add('Stopped', stopLabel(turn.stop_reason));
   if (turn.status === 'canceled') add('Reason', turn.reason);
   if (turn.status === 'failed') add('Error', turn.error?.detail);
   return rows;

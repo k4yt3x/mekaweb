@@ -43,6 +43,8 @@ export interface EventPayloads {
   };
   'assistant_text.delta': Correlation & { text: string };
   'thinking.delta': Correlation & { text: string };
+  // 0.92 marks reasoning the provider withheld with an event of its own.
+  'thinking.redacted': Correlation;
   'tool_call.composing': Correlation & { id: string; name: string };
   'tool_call.executing': Correlation & {
     id: string;
@@ -112,9 +114,9 @@ export interface EventPayloads {
   };
   // 0.85 says what is in context after every provider round, a compaction, or a rewind.
   'context.measured': Correlation & { used: number; window?: number };
-  // 0.89 names the call by its id, which is omitted for a call that carried none.
+  // 0.92 names the call by its id on every progress event.
   'tool_call.progress': Correlation & {
-    id?: string;
+    id: string;
     progress: number;
     total?: number;
     message?: string;

@@ -410,6 +410,20 @@ it('drops a shown opening once a refresh finds it saved', async () => {
   expect(f.state().blocks).toEqual([{ kind: 'thinking', text: 'Thinking' }]);
 });
 
+it('shows reasoning the provider withheld where it came, apart from what streamed', async () => {
+  const f = await fixture();
+  f.session.turn_in_flight = true;
+  await f.event('turn.started', { turn_id: 'remote' });
+  await f.event('thinking.delta', { turn_id: 'remote', text: 'Shown.' });
+  await f.event('thinking.redacted', { turn_id: 'remote' });
+  await f.event('thinking.delta', { turn_id: 'remote', text: 'Shown again.' });
+  expect(f.state().blocks).toEqual([
+    { kind: 'thinking', text: 'Shown.' },
+    { kind: 'redacted' },
+    { kind: 'thinking', text: 'Shown again.' },
+  ]);
+});
+
 it('notifies once for an observed live turn, but never for historical replay or cancellation', async () => {
   const f = await fixture();
   const completed = vi.fn();
@@ -1080,6 +1094,7 @@ it('ignores malformed optional tool labels without interrupting the feed', async
 
 it.each([
   ['thinking.delta', { text: 'Considering the result' }],
+  ['thinking.redacted', {}],
   ['tool_call.composing', { id: 'tool', name: 'file_read' }],
   ['tool_call.executing', { id: 'tool', name: 'file_read', input: {} }],
   [

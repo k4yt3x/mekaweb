@@ -79,6 +79,35 @@ it('takes a tool result that loads deferred tools by reference, but only by name
   ).toThrow('Invalid tool result event.');
 });
 
+it('takes a tool result in the shapes history gives its items, and in no other', () => {
+  const completed = {
+    id: 'toolu_1',
+    is_error: false,
+    content: [
+      { type: 'image_caption', caption: 'Image: /srv/a.png' },
+      { type: 'image', media_type: 'image/png', hash: 'bc09' },
+      { type: 'harness_note', note: 'Saved.', text: '[Meka] Saved.' },
+      { type: 'large_output', scratchpad_entry: 'out', size_bytes: 389_094, preview: 'head' },
+    ],
+  };
+  expect(parseEvent({ event: 'tool_call.completed', data: JSON.stringify(completed) })).toEqual(
+    completed,
+  );
+  for (const item of [
+    { type: 'large_output', scratchpad_entry: 'out', preview: 'head' },
+    { type: 'large_output', scratchpad_entry: 'out', size_bytes: -1, preview: 'head' },
+    { type: 'harness_note', note: 'Saved.' },
+    { type: 'image_caption' },
+    { type: 'later', text: 'x' },
+  ])
+    expect(() =>
+      parseEvent({
+        event: 'tool_call.completed',
+        data: JSON.stringify({ ...completed, content: [item] }),
+      }),
+    ).toThrow('Invalid tool result event.');
+});
+
 it('takes a turn’s opening only with typed blocks, and a deferral only with its items', () => {
   const opening = { turn_id: 't', role: 'user', content: [{ type: 'text', text: 'Hello.' }] };
   expect(parseEvent({ event: 'message.appended', data: JSON.stringify(opening) })).toEqual(opening);

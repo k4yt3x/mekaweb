@@ -1050,7 +1050,7 @@ export interface components {
     AccountView: {
       /**
        * @description `yes`, `no`, or `unreadable`: the same three answers as the plain column, because a row
-       *     meka cannot deserialize is neither logged in nor logged out.
+       *     Meka cannot deserialize is neither logged in nor logged out.
        */
       authenticated: string;
       backend: string;
@@ -1154,8 +1154,8 @@ export interface components {
       status: string;
       /**
        * Format: uuid
-       * @description The session a backgrounded `agent_spawn` runs, once it has made one. Omitted on every
-       *     other task.
+       * @description The sub-agent a backgrounded `agent_spawn` or `agent_followup` drives, from the moment the
+       *     call returns. Omitted on every other task.
        */
       subagent_id?: string | null;
       /** @description The tool that was backgrounded, e.g. `shell_execute`. */
@@ -1225,18 +1225,39 @@ export interface components {
        */
       instructions?: string | null;
       /**
-       * @description Whether to keep the most recent turns verbatim after the summary. Omit to let meka decide;
+       * @description Whether to keep the most recent turns verbatim after the summary. Omit to let Meka decide;
        *     the checkpoint turn overrides this when it knows better, having just read the conversation.
        */
       keep_recent?: boolean | null;
     };
+    /** @description A compaction that failed or was stopped, as the history says it. */
+    CompactionFailedItem: {
+      /** @description See [`CompactionItem::checkpoint`]. */
+      checkpoint: components['schemas']['MessageItem'][];
+      /** @description What it failed on; absent when it was stopped. */
+      error?: string | null;
+      /** @description The memories its checkpoint wrote, which stay written. */
+      memories_written: string[];
+      /** @description See [`CompactionItem::summarizer`]. */
+      summarizer?: components['schemas']['MessageItem'][];
+      /**
+       * @description What set it going: `reactive`, `proactive`, `manual`, `requested`, `emergency` or
+       *     `retention`.
+       */
+      trigger: string;
+    };
     /** @description A compaction as the history says it. */
     CompactionItem: components['schemas']['CompactionView'] & {
       /**
-       * @description The rounds the checkpoint turn ran on the way: what the agent thought and called while it
-       *     saved what must last, with the results. Empty when no checkpoint round ran.
+       * @description The rounds the checkpoint turn ran on the way, as they happened: each reply as returned
+       *     with its record, and the results sent back. Empty when no checkpoint round ran.
        */
-      checkpoint: components['schemas']['MessageBody'][];
+      checkpoint: components['schemas']['MessageItem'][];
+      /**
+       * @description The summarizer's replies, as returned with their records, when the summarizer wrote the
+       *     summary.
+       */
+      summarizer?: components['schemas']['MessageItem'][];
       /**
        * @description The summary as the agent or the summarizer wrote it. The message the model reads in its
        *     place is on `GET /v1/sessions/{id}/context/messages`.
@@ -1311,9 +1332,26 @@ export interface components {
     };
     ContentBlockView:
       | {
+          /**
+           * @description The part's fields nothing else holds, as its provider returned them (a Responses
+           *     message's `phase`).
+           */
+          provider_fields?: Record<string, unknown> | null;
           text: string;
           /** @enum {string} */
           type: 'text';
+        }
+      | {
+          /** @description The part's fields nothing else holds, as its provider returned them. */
+          provider_fields?: Record<string, unknown> | null;
+          text: string;
+          /** @enum {string} */
+          type: 'refusal';
+        }
+      | {
+          parts: Record<string, unknown>[];
+          /** @enum {string} */
+          type: 'unrecognized';
         }
       | {
           text: string;
@@ -1325,6 +1363,17 @@ export interface components {
           text: string;
           /** @enum {string} */
           type: 'nudge';
+        }
+      | {
+          note: string;
+          text: string;
+          /** @enum {string} */
+          type: 'harness_note';
+        }
+      | {
+          text: string;
+          /** @enum {string} */
+          type: 'summary';
         }
       | {
           body: string;
@@ -1375,20 +1424,28 @@ export interface components {
           type: 'image';
         }
       | {
-          thinking: string;
+          parts: components['schemas']['ReasoningPartView'][];
+          /** @description The part's fields nothing else holds, as its provider returned them. */
+          provider_fields?: Record<string, unknown> | null;
           /** @enum {string} */
           type: 'thinking';
         }
       | {
+          /** @description The part's fields nothing else holds, as its provider returned them. */
+          provider_fields?: Record<string, unknown> | null;
           /** @enum {string} */
           type: 'redacted_thinking';
         }
       | {
           id: string;
+          /** @description The arguments; `{}` when `unparsed` is present. */
           input: Record<string, unknown>;
           name: string;
+          /** @description Every field the provider put on the call beyond its id, name and arguments, as it came. */
+          provider_fields?: Record<string, unknown> | null;
           /** @enum {string} */
           type: 'tool_use';
+          unparsed?: components['schemas']['UnparsedArgumentsView'] | null;
         }
       | {
           content: components['schemas']['ToolResultContentView'][];
@@ -1406,7 +1463,7 @@ export interface components {
       /**
        * Format: int64
        * @description The position of the history item this message shows: its own row, the row a copy a
-       *     compaction kept stands for, the row a message meka rewrote in place was said in, or a
+       *     compaction kept stands for, the row a message Meka rewrote in place was said in, or a
        *     summary's compaction.
        */
       position: number;
@@ -1471,7 +1528,7 @@ export interface components {
       used?: number | null;
       /**
        * Format: int64
-       * @description The model's context window, omitted when meka has no metadata for it. A percentage of an
+       * @description The model's context window, omitted when Meka has no metadata for it. A percentage of an
        *     unknown denominator is worse than silence, so clients should suppress occupancy rather than
        *     assume a default.
        */
@@ -1675,13 +1732,17 @@ export interface components {
     };
     /** @description What a [`HistoryItem`] is, by its `type`. */
     HistoryItemKind:
-      | (components['schemas']['MessageBody'] & {
+      | (components['schemas']['MessageItem'] & {
           /** @enum {string} */
           type: 'message';
         })
       | (components['schemas']['CompactionItem'] & {
           /** @enum {string} */
           type: 'compaction';
+        })
+      | (components['schemas']['CompactionFailedItem'] & {
+          /** @enum {string} */
+          type: 'compaction_failed';
         })
       | (components['schemas']['RewindItem'] & {
           /** @enum {string} */
@@ -1759,7 +1820,7 @@ export interface components {
       last_error?: unknown;
       /** @description When its next attempt may run, while it waits after a failed turn or a held session. */
       not_before?: string | null;
-      /** @description When meka stops retrying it: its enqueue plus `[serve] inbox_retry_ceiling`. */
+      /** @description When Meka stops retrying it: its enqueue plus `[serve] inbox_retry_ceiling`. */
       retry_until: string;
       /** Format: uuid */
       session_id: string;
@@ -1793,7 +1854,7 @@ export interface components {
       message: string;
       /**
        * @description Who the message is from, as the header names them. Left out or blank, the header names
-       *     nobody: who sent a message is the client's to say, and meka does not guess it from the
+       *     nobody: who sent a message is the client's to say, and Meka does not guess it from the
        *     token.
        */
       source?: string | null;
@@ -1815,7 +1876,7 @@ export interface components {
       not_before?: string | null;
       /** @description Whether the `Idempotency-Key` had been used before, so the item is the earlier one. */
       replayed: boolean;
-      /** @description When meka stops retrying it: its enqueue plus `[serve] inbox_retry_ceiling`. */
+      /** @description When Meka stops retrying it: its enqueue plus `[serve] inbox_retry_ceiling`. */
       retry_until: string;
       /** Format: uuid */
       session_id: string;
@@ -1972,7 +2033,7 @@ export interface components {
       /**
        * @description Where the server stands now: `connected`, `failed`, or `pending`.
        *
-       *     A 200 says meka acted on the request, not that the server came back, so read this to find
+       *     A 200 says Meka acted on the request, not that the server came back, so read this to find
        *     out which. `pending` means no attempt was made because one was already under way. A
        *     `disabled` server is a 422 and never appears here.
        */
@@ -2028,7 +2089,7 @@ export interface components {
       headers_helper?: string | null;
       name: string;
       /**
-       * @description Server-wide permission override. Typed, like `[permissions]`, so a level meka does not have
+       * @description Server-wide permission override. Typed, like `[permissions]`, so a level Meka does not have
        *     is refused where the file is parsed rather than when the server connects.
        */
       permission?: string | null;
@@ -2056,9 +2117,9 @@ export interface components {
        * @description Whether this server's `readOnlyHint` annotation may classify a tool as `read`. Defaults to
        *     true, so a server that says a tool only reads is believed.
        *
-       *     The hint is asserted by the server, not verified by meka, and MCP tools execute in the
+       *     The hint is asserted by the server, not verified by Meka, and MCP tools execute in the
        *     server's own process with no sandbox. A server that advertises `readOnlyHint: true` for a
-       *     tool that in fact writes therefore gets to write while meka sits at `read`. That is the
+       *     tool that in fact writes therefore gets to write while Meka sits at `read`. That is the
        *     reason this knob exists: setting it to `false` makes the hint advisory for display only, so
        *     the tool falls through to the strict `Unrestricted` fallback, and nothing from this server
        *     is reachable at `read` without an explicit [`Self::tool_permissions`] or
@@ -2073,7 +2134,7 @@ export interface components {
        *
        *     Defaulting to true keeps existing configurations working and keeps the `read` level useful
        *     with well-behaved servers; the trade is that the `read` level's filesystem guarantee covers
-       *     meka's built-in tools plus whichever MCP servers the user has chosen to trust.
+       *     Meka's built-in tools plus whichever MCP servers the user has chosen to trust.
        */
       trust_read_only_hint?: boolean | null;
       url?: string | null;
@@ -2272,7 +2333,16 @@ export interface components {
      */
     MessageBody: {
       content: components['schemas']['ContentBlockView'][];
+      /**
+       * @description The fields a provider put on the message itself that nothing else holds, as it returned
+       *     them (a Chat Completions message's `reasoning_details`).
+       */
+      provider_fields?: Record<string, unknown> | null;
       role: string;
+    };
+    /** @description A message on the history, and for a reply what its provider said about it. */
+    MessageItem: components['schemas']['MessageBody'] & {
+      reply?: components['schemas']['ReplyView'] | null;
     };
     /** @description A [`Notice`] as every JSON surface serializes it: `level` is [`NoticeLevel::name`]. */
     NoticeView: {
@@ -2402,7 +2472,7 @@ export interface components {
     };
     /**
      * @description RFC 9457 Problem Details body. The five core members (`type`, `title`, `status`, `detail`,
-     *     `instance`) are first-class; meka-specific extension members ride in `extensions` and get
+     *     `instance`) are first-class; Meka-specific extension members ride in `extensions` and get
      *     flattened into the top-level JSON object on serialization.
      */
     ProblemDetail: Record<string, unknown> & {
@@ -2547,6 +2617,15 @@ export interface components {
       session_db: boolean;
       status: string;
     };
+    /** @description One part of a thinking block. */
+    ReasoningPartView: {
+      /**
+       * @description `reasoning`, the reasoning itself, or `summary`, a summary the provider wrote of reasoning
+       *     it keeps.
+       */
+      kind: string;
+      text: string;
+    };
     /** @description What `POST /v1/config/reload` applied. */
     ReloadResponse: {
       /**
@@ -2573,6 +2652,22 @@ export interface components {
     RenameRequest: {
       /** @description The name the account moves to. */
       name: string;
+    };
+    /** @description What a provider said about a reply beside its content. */
+    ReplyView: {
+      /** @description What cut the reply short: `stopped`, `interrupted` or `failed`. */
+      cut?: string | null;
+      /** @description The model the response names. */
+      model?: string | null;
+      /** @description The profile that sent the request. */
+      profile?: string | null;
+      /**
+       * @description The response's fields nothing else holds, as its provider returned them: its id, the raw
+       *     `usage` the counts are read from, and whatever else it said about the completion.
+       */
+      provider_fields?: Record<string, unknown> | null;
+      stop?: components['schemas']['StopView'] | null;
+      usage?: components['schemas']['UsageView'] | null;
     };
     ResponseBody: {
       /** @description What the form was filled with, on an `accept`: an object of the fields the schema named. */
@@ -2686,8 +2781,8 @@ export interface components {
       supports_permission_prompts: boolean;
       /**
        * @description When `true`, the SSE stream includes `thinking.delta` events for extended-thinking
-       *     content. Default `false` so chat-transcript clients (Telegram bridges, etc.) don't
-       *     surface reasoning text inline.
+       *     content and `thinking.redacted` for a block the provider withheld. Default `false` so
+       *     chat-transcript clients (Telegram bridges, etc.) don't surface reasoning inline.
        * @default false
        */
       supports_reasoning_stream: boolean;
@@ -2763,7 +2858,7 @@ export interface components {
       parent_id?: string | null;
       /**
        * @description The session's permission level (`none`, `read`, `workspace`, `unrestricted`). Omitted when
-       *     the row records no level: every door of this meka records one, so a bare row is an outside
+       *     the row records no level: every door of this Meka records one, so a bare row is an outside
        *     hand's, and inventing a value for it would state a level the session never ran at.
        */
       permission?: string | null;
@@ -2803,7 +2898,7 @@ export interface components {
      */
     SkillDetail: components['schemas']['SkillView'] & {
       /**
-       * @description The Agent Skills `allowed-tools` field, verbatim. meka never acts on it; see the skills
+       * @description The Agent Skills `allowed-tools` field, verbatim. Meka never acts on it; see the skills
        *     guide.
        */
       'allowed-tools'?: string | null;
@@ -2841,6 +2936,18 @@ export interface components {
       priority: number;
       version?: string | null;
     };
+    /** @description How a reply ended. */
+    StopView: {
+      /** @description What the provider said about the stop beside its word, under its own names. */
+      details?: Record<string, unknown> | null;
+      /**
+       * @description Meka's class of the stop: `end_turn`, `tool_use`, `max_tokens`, `context_window`,
+       *     `refusal`, `content_filter` or `unknown`.
+       */
+      reason: string;
+      /** @description The provider's own word for it, as sent. */
+      word?: string | null;
+    };
     ToolResultContentView:
       | {
           text: string;
@@ -2858,6 +2965,24 @@ export interface components {
           tool_name: string;
           /** @enum {string} */
           type: 'tool_reference';
+        }
+      | {
+          note: string;
+          text: string;
+          /** @enum {string} */
+          type: 'harness_note';
+        }
+      | {
+          caption: string;
+          /** @enum {string} */
+          type: 'image_caption';
+        }
+      | {
+          preview: string;
+          scratchpad_entry: string;
+          size_bytes: number;
+          /** @enum {string} */
+          type: 'large_output';
         };
     /**
      * @description One entry of a tool catalog: what `GET /v1/sessions/{id}/tools` answers with, and the core of
@@ -2878,7 +3003,7 @@ export interface components {
       tools: components['schemas']['ToolView'][];
     };
     TurnError: {
-      /** @description meka's own sentence about the failure */
+      /** @description Meka's own sentence about the failure */
       detail: string;
       /** @description The error's `type`, as a Problem Detail names it */
       type: string;
@@ -2934,7 +3059,7 @@ export interface components {
       /** @description RFC 3339, when the turn began. */
       started_at: string;
       status?: string | null;
-      /** @description `end_turn`, `max_tokens` or `refusal`, on a turn that succeeded. */
+      /** @description The class of the stop the turn's last reply ended on, on a turn that succeeded. */
       stop_reason?: string | null;
       /** @description What the turn spent, every round of it. */
       usage: components['schemas']['TurnUsage'];
@@ -2960,7 +3085,7 @@ export interface components {
       /** @description `false` (default) → a JSON response. `true` → SSE. */
       stream?: boolean;
     };
-    /** @description A turn a request held to its end: its record, what it wrote, and what meka said about it. */
+    /** @description A turn a request held to its end: its record, what it wrote, and what Meka said about it. */
     TurnResponse: components['schemas']['TurnRecord'] & {
       /**
        * @description What the turn wrote, as `GET /v1/sessions/{id}/history` lists it: the message it opened
@@ -2970,9 +3095,9 @@ export interface components {
       messages: components['schemas']['HistoryItem'][];
       notices: components['schemas']['NoticeView'][];
       /**
-       * @description Refusal explanation when `stop_reason == "refusal"`; omitted otherwise. Mirrors the
-       *     `refusal_text` field on the streaming `turn.finished` event, so blocking and streaming
-       *     clients share the same shape.
+       * @description The model's words when `stop_reason` is `refusal` and it wrote any: its refusal, else the
+       *     text it wrote before the stop; omitted otherwise. Mirrors the `refusal_text` field on the
+       *     streaming `turn.finished` event, so blocking and streaming clients share the same shape.
        */
       refusal_text?: string | null;
     };
@@ -2997,6 +3122,16 @@ export interface components {
       session_id: string;
       /** @description Newest first. */
       turns: components['schemas']['TurnRecord'][];
+    };
+    /** @description What a model sent as a call's arguments when it was not a JSON object. */
+    UnparsedArgumentsView: {
+      /** @description Why the text is not arguments, in the words the call was refused with. */
+      error: string;
+      /**
+       * @description The text as the model sent it; absent on a call recorded before the text was kept, or
+       *     that carried no arguments.
+       */
+      text?: string | null;
     };
     UsageView: {
       /** Format: int64 */
@@ -3381,7 +3516,7 @@ export interface operations {
           'application/json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description A session or sub-agent running on this server may run on the account, or another meka is refreshing its credential, which refreshes under its name */
+      /** @description A session or sub-agent running on this server may run on the account, or another Meka is refreshing its credential, which refreshes under its name */
       409: {
         headers: {
           [name: string]: unknown;
@@ -3507,7 +3642,7 @@ export interface operations {
           'application/json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description The login produced no authorization URL in time; the reason is in the meka log */
+      /** @description The login produced no authorization URL in time; the reason is in the Meka log */
       502: {
         headers: {
           [name: string]: unknown;
@@ -3669,7 +3804,7 @@ export interface operations {
           'application/json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description The token exchange got no answer meka can read, or the login lapsed; the reason is in the meka log */
+      /** @description The token exchange got no answer Meka can read, or the login lapsed; the reason is in the Meka log */
       502: {
         headers: {
           [name: string]: unknown;
@@ -4694,7 +4829,7 @@ export interface operations {
           'application/json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description The login did not begin: the server or its authorization server did not answer; the reason is in the meka log */
+      /** @description The login did not begin: the server or its authorization server did not answer; the reason is in the Meka log */
       502: {
         headers: {
           [name: string]: unknown;
@@ -4856,7 +4991,7 @@ export interface operations {
           'application/json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description The exchange at the authorization server failed; the reason is in the meka log */
+      /** @description The exchange at the authorization server failed; the reason is in the Meka log */
       502: {
         headers: {
           [name: string]: unknown;
@@ -6290,7 +6425,7 @@ export interface operations {
           'application/json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description A turn is in flight; cancel first (`/errors/turn-in-flight`). Or another meka process holds the session (`/errors/session-locked`) */
+      /** @description A turn is in flight; cancel first (`/errors/turn-in-flight`). Or another Meka process holds the session (`/errors/session-locked`) */
       409: {
         headers: {
           [name: string]: unknown;
@@ -6362,7 +6497,7 @@ export interface operations {
           'application/json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description A turn is in flight and the body names `working_directory`, `profile` or `project`; cancel first (`/errors/turn-in-flight`). Or another meka process holds the session, so only that process may move it (`/errors/session-locked`) */
+      /** @description A turn is in flight and the body names `working_directory`, `profile` or `project`; cancel first (`/errors/turn-in-flight`). Or another Meka process holds the session, so only that process may move it (`/errors/session-locked`) */
       409: {
         headers: {
           [name: string]: unknown;
@@ -6575,7 +6710,7 @@ export interface operations {
           'application/json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description A turn is in flight; cancel first (`/errors/turn-in-flight`). Or another meka process holds the session (`/errors/session-locked`) */
+      /** @description A turn is in flight; cancel first (`/errors/turn-in-flight`). Or another Meka process holds the session (`/errors/session-locked`) */
       409: {
         headers: {
           [name: string]: unknown;
@@ -6611,7 +6746,7 @@ export interface operations {
           'application/json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description The provider rejected or failed the summarizing turn. Read `type`: `/errors/provider-unavailable` is worth resending after a pause, `/errors/provider` covers everything meka does not classify, and `/errors/context-overflow` here means the conversation will not fit even to summarize it */
+      /** @description The provider rejected or failed the summarizing turn. Read `type`: `/errors/provider-unavailable` is worth resending after a pause, `/errors/provider` covers everything Meka does not classify, and `/errors/context-overflow` here means the conversation will not fit even to summarize it */
       502: {
         headers: {
           [name: string]: unknown;
@@ -6870,7 +7005,7 @@ export interface operations {
           'application/json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description Another meka process holds the session (`/errors/session-locked`), the token may only read and the session is not loaded (`/errors/session-not-loaded`), or the id names a sub-agent this process is not running (`/errors/subagent-not-running`) */
+      /** @description Another Meka process holds the session (`/errors/session-locked`), the token may only read and the session is not loaded (`/errors/session-not-loaded`), or the id names a sub-agent this process is not running (`/errors/subagent-not-running`) */
       409: {
         headers: {
           [name: string]: unknown;
@@ -6954,7 +7089,7 @@ export interface operations {
           'application/json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description A turn is in flight on the source; cancel first (`/errors/turn-in-flight`). Or another meka process holds the source (`/errors/session-locked`) */
+      /** @description A turn is in flight on the source; cancel first (`/errors/turn-in-flight`). Or another Meka process holds the source (`/errors/session-locked`) */
       409: {
         headers: {
           [name: string]: unknown;
@@ -7423,7 +7558,7 @@ export interface operations {
           'application/json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description A turn is in flight; cancel first (`/errors/turn-in-flight`). Or another meka process holds the session, as a running sub-agent's parent does (`/errors/session-locked`) */
+      /** @description A turn is in flight; cancel first (`/errors/turn-in-flight`). Or another Meka process holds the session, as a running sub-agent's parent does (`/errors/session-locked`) */
       409: {
         headers: {
           [name: string]: unknown;
@@ -7675,7 +7810,7 @@ export interface operations {
           'application/json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description A turn is already in flight (`/errors/turn-in-flight`), the Idempotency-Key was used with another body or is in flight on a concurrent request (`/errors/idempotency`), or another meka process holds the session (`/errors/session-locked`) */
+      /** @description A turn is already in flight (`/errors/turn-in-flight`), the Idempotency-Key was used with another body or is in flight on a concurrent request (`/errors/idempotency`), or another Meka process holds the session (`/errors/session-locked`) */
       409: {
         headers: {
           [name: string]: unknown;

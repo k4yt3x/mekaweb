@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ApiClient, sessionPath, segment } from '../api/client';
+import { imageBlob, retryUnsavedImage } from './image-fetch';
 import { Image as ImageIcon } from 'lucide-react';
 import { useConnection, useSettings } from '../connections/context';
 import { ErrorNotice } from './common';
@@ -144,19 +144,15 @@ export function InlineAttachment({
   );
 }
 
-async function imageBlob(api: ApiClient, id: string, hash: string, signal: AbortSignal) {
-  const blob = await api.blob(sessionPath(id) + '/blobs/' + segment(hash), undefined, signal);
-  if (!['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/bmp'].includes(blob.type))
-    throw new Error('The server returned an unsupported image type.');
-  return blob;
-}
-
 export function Attachment({
   sessionId,
   hash,
+  live = false,
 }: {
   sessionId: string;
   hash?: string | null | undefined;
+  /** Whether a running turn returned it, whose results may not be saved yet. */
+  live?: boolean;
 }) {
   const { api, connection } = useConnection();
   const { dataSaver } = useSettings();
@@ -172,7 +168,8 @@ export function Attachment({
     // Failed reads recover with the connection; immutable images need no refetch.
     staleTime: (query) => (query.state.data ? 'static' : Infinity),
     gcTime: 0,
-    retry: false,
+    retry: live && retryUnsavedImage,
+    retryDelay: (failures) => 250 * 2 ** failures,
   });
   if (!image.data && image.error) return <ErrorNotice error={image.error} />;
   if (!image.data && hash && dataSaver && !asked)

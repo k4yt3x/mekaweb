@@ -48,6 +48,33 @@ it('shows a compaction where it happened, as its summary, and an edit not at all
   expect(saved.messages[1]?.compaction).toMatchObject({ generation: 1 });
 });
 
+it('shows a compaction that failed where it ended, and a reply with what was said of it', () => {
+  const reply = {
+    ...at(2, 'assistant', 'a'),
+    reply: { stop: { reason: 'max_tokens', word: 'length' }, model: 'm' },
+  };
+  const failed: Schema['HistoryItem'] = {
+    type: 'compaction_failed',
+    position: 3,
+    created_at: '2026-11-06T00:00:00Z',
+    turn_id: 'c',
+    trigger: 'manual',
+    memories_written: ['notes'],
+    checkpoint: [],
+    error: 'the provider refused',
+  };
+  const saved = startHistory([at(1, 'user', 'a'), reply, failed], 3, undefined);
+  expect(positions(saved.messages)).toEqual([1, 2, 3]);
+  expect(saved.messages[1]?.reply).toEqual(reply.reply);
+  expect(saved.messages[2]).toMatchObject({
+    content: [],
+    turn_id: 'c',
+    compactionFailed: { error: 'the provider refused' },
+  });
+  // Its turn opened nothing the context could have taken back, so the history says enough.
+  expect(contextQuestion(saved.messages)).toBeUndefined();
+});
+
 it('takes what an edit took back out, and does not take items it holds again', () => {
   let saved = startHistory([at(1, 'user', 'a'), at(2, 'assistant', 'a')], 2, undefined);
   saved = extendHistory(saved, [at(3, 'user', 'b'), at(4, 'assistant', 'b')], 4);

@@ -87,3 +87,15 @@ it('details what a turn spent, and what was unusual about it', () => {
   });
   expect(unusual).not.toHaveProperty('Tokens in');
 });
+
+it('says why a turn stopped short, in its words for each of Meka’s stops', () => {
+  const stopped = (stop_reason: string) =>
+    turnDetails(turn({ stop_reason }), now).find((row) => row.label === 'Stopped')?.value;
+  expect(stopped('max_tokens')).toBe('Output limit reached');
+  expect(stopped('context_window')).toBe('Context window reached');
+  expect(stopped('refusal')).toBe('The model refused');
+  expect(stopped('content_filter')).toBe('Content filter');
+  expect(stopped('unknown')).toBe('Unrecognized reason');
+  // A reply that stopped for calls and made none ended the turn as an answer does.
+  expect(stopped('tool_use')).toBeUndefined();
+});

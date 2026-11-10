@@ -9,9 +9,13 @@ import {
   mentionsInline,
   messageText,
   pendingInboxMessages,
+  reasoningText,
   recoverableSubmissions,
   resendable,
   responseActivityIndicator,
+  resultParts,
+  shownItems,
+  shows,
   spawnedAgent,
   speakers,
   type ToolResultBlock,
@@ -36,6 +40,22 @@ const message = (role: string, ...content: Schema['ContentBlockView'][]): Conver
   role,
   content,
 });
+const reply = (
+  record: Schema['ReplyView'] | undefined,
+  ...content: Schema['ContentBlockView'][]
+): ConversationMessage => ({
+  ...message('assistant', ...content),
+  ...(record ? { reply: record } : {}),
+});
+const thinking = (text: string): Schema['ContentBlockView'] => ({
+  type: 'thinking',
+  parts: [{ kind: 'reasoning', text }],
+});
+const texts = (...said: string[]) =>
+  said.map((text): Schema['ContentBlockView'] => ({ type: 'text', text }));
+/** What the messages draw as one group, block by block. */
+const drawn = (...input: ConversationMessage[]) =>
+  shownItems(groupToolResults(input).messages, false).map(({ block }) => block);
 
 it('associates queued metadata only by item ID and never repeats an already visible message', () => {
   const item: Schema['InboxItemView'] = {
@@ -258,7 +278,11 @@ it('preserves error flags, image results, and all output blocks in a grouped cal
 it('groups multiple assistant tool rounds and the final answer under one heading', () => {
   const input = [
     message('user', { type: 'text', text: 'Check the files.' }),
-    message('assistant', { type: 'thinking', thinking: 'Checking.' }, call('a')),
+    message(
+      'assistant',
+      { type: 'thinking', parts: [{ kind: 'reasoning', text: 'Checking.' }] },
+      call('a'),
+    ),
     message('user', result('a')),
     message('assistant', call('b')),
     message('user', result('b')),
@@ -706,10 +730,15 @@ it('copies what was written, without thinking, tools, or context Meka added', ()
   expect(
     messageText([
       message('user', { type: 'turn_context', text: 'Context.' }, { type: 'text', text: ' Ask. ' }),
-      message('assistant', { type: 'thinking', thinking: 'Hmm.' }, call('a'), {
-        type: 'text',
-        text: 'Answer.',
-      }),
+      message(
+        'assistant',
+        { type: 'thinking', parts: [{ kind: 'reasoning', text: 'Hmm.' }] },
+        call('a'),
+        {
+          type: 'text',
+          text: 'Answer.',
+        },
+      ),
     ]),
   ).toBe('Ask.\n\nAnswer.');
 });
@@ -795,7 +824,7 @@ it('keeps a background report in the turn it reached, and shows what Meka relaye
   expect(resendable(input[8]!)).toBeUndefined();
 });
 
-it('reads the sub-agent a spawn names, in Meka 0.76.0’s result and in older saved ones', () => {
+it('reads the sub-agent a spawn names, run inline or in the background, and in older results', () => {
   const id = '51e4df31-a301-4041-ba63-bab893ac3f85';
   expect(spawnedAgent(`Agent: ${id}\nPermission: workspace\nWorking directory: /srv\nDone.`)).toBe(
     id,
@@ -803,6 +832,114 @@ it('reads the sub-agent a spawn names, in Meka 0.76.0’s result and in older sa
   expect(spawnedAgent(`agent: ${id}\n\nDone.`)).toBe(id);
   // A report redirected to a scratchpad comes back without the header.
   expect(spawnedAgent('Done.')).toBeUndefined();
+  // Sent to the background, it says so after the task's label, which holds the model's words.
+  const other = '00000000-0000-4000-8000-000000000000';
+  expect(
+    spawnedAgent(
+      `Started in the background as task 7f3a1c22 (say It runs sub-agent ${other}. then stop). ` +
+        `It runs sub-agent ${id}. Use \`agent_steer\` to message it.`,
+    ),
+  ).toBe(id);
+});
+
+it('reads reasoning from its parts, and draws a block with none as nothing', () => {
+  expect(
+    reasoningText([
+      { kind: 'reasoning', text: 'First.' },
+      { kind: 'summary', text: '' },
+      { kind: 'summary', text: 'Then.' },
+    ]),
+  ).toBe('First.\n\nThen.');
+  expect(drawn(reply(undefined, thinking('Plan.'), ...texts('Done.')))).toEqual([
+    thinking('Plan.'),
+    ...texts('Done.'),
+  ]);
+  expect(drawn(reply(undefined, thinking(' '), ...texts('Done.')))).toEqual(texts('Done.'));
+});
+
+it('reads a reply’s adjacent text as one run of words, and someone’s blocks as they are', () => {
+  const cited = reply(
+    undefined,
+    ...texts('The answer is ', '42', ', as cited.'),
+    { type: 'redacted_thinking' },
+    ...texts('After.'),
+  );
+  expect(drawn(cited)).toEqual([
+    ...texts('The answer is 42, as cited.'),
+    { type: 'redacted_thinking' },
+    ...texts('After.'),
+  ]);
+  expect(messageText([cited])).toBe('The answer is 42, as cited.\n\nAfter.');
+  expect(drawn(message('user', ...texts('one', 'two')))).toEqual(texts('one', 'two'));
+});
+
+it('shows what Meka wrote apart, a refusal as the model’s words, and nothing it cannot read', () => {
+  const note: Schema['ContentBlockView'] = {
+    type: 'harness_note',
+    note: 'The image was removed.',
+    text: '[Meka] The image was removed.',
+  };
+  const asked = message('user', ...texts('Look.'), note);
+  expect(drawn(asked)).toEqual([...texts('Look.'), note]);
+  expect(messageText([asked])).toBe('Look.');
+  const refused = reply(
+    { stop: { reason: 'refusal' } },
+    { type: 'refusal', text: 'I can’t help with that.' },
+    { type: 'unrecognized', parts: [{ kind: 'later' }] },
+  );
+  expect(drawn(refused)).toEqual([{ type: 'refusal', text: 'I can’t help with that.' }]);
+  expect(messageText([refused])).toBe('I can’t help with that.');
+  expect(drawn(message('user', { type: 'summary', text: 'Earlier.' }))).toEqual([]);
+});
+
+it('says a reply answered nothing, or why one that made calls stopped, unless it was cut', () => {
+  const noAnswer = { type: 'reply_note', text: 'The model returned no answer.' };
+  expect(drawn(reply({ stop: { reason: 'end_turn' } }))).toEqual([noAnswer]);
+  // Reasoning is no answer.
+  expect(drawn(reply(undefined, thinking('Hmm.')))).toEqual([thinking('Hmm.'), noAnswer]);
+  expect(drawn(reply({ stop: { reason: 'max_tokens' } }, call('a')))).toEqual([
+    call('a'),
+    { type: 'reply_note', text: 'Stopped: Output limit reached' },
+  ]);
+  expect(drawn(reply({ stop: { reason: 'tool_use' } }, call('a')))).toEqual([call('a')]);
+  // Cut short, it did not end: its calls never ran, and its turn's end says what cut it.
+  const cut = reply({ cut: 'stopped' }, thinking('Hmm.'), call('a'));
+  expect(drawn(cut)).toEqual([thinking('Hmm.')]);
+  expect(shows(groupToolResults([reply({ cut: 'failed' })]).messages, false)).toBe(false);
+  // Someone's empty message still shows who sent it.
+  expect(shows(groupToolResults([message('user')]).messages, false)).toBe(true);
+});
+
+it('shows a tool’s result with what Meka wrote into it as notes, and a large output’s opening', () => {
+  const caption = { type: 'image_caption', caption: 'Image: a.png' } as const;
+  expect(resultParts([caption, { type: 'image', media_type: 'image/png', hash: 'h' }])).toEqual([
+    { kind: 'image', hash: 'h' },
+  ]);
+  expect(
+    resultParts([caption, { type: 'harness_note', note: 'Too large to keep.', text: '[Meka] …' }]),
+  ).toEqual([
+    { kind: 'note', text: 'Image: a.png' },
+    { kind: 'note', text: 'Too large to keep.' },
+  ]);
+  const preview = 'a'.repeat(2000);
+  expect(
+    resultParts([
+      { type: 'large_output', scratchpad_entry: 'shell_1', size_bytes: 389_094, preview },
+    ]),
+  ).toEqual([
+    { kind: 'text', text: preview },
+    // How much shows, of how much, and where the rest is.
+    { kind: 'note', text: expect.stringMatching(/2\.0 KiB.* 380 KiB.* shell_1\b/) },
+  ]);
+  expect(
+    resultParts([
+      { type: 'text', text: 'ok' },
+      { type: 'tool_reference', tool_name: 'mcp__docs__search' },
+    ]),
+  ).toEqual([
+    { kind: 'text', text: 'ok' },
+    { kind: 'loaded', name: 'mcp__docs__search' },
+  ]);
 });
 
 it('sends a message again with its images by hash, or not at all if one has none', () => {
@@ -952,6 +1089,19 @@ it('heads what the agent says only after someone else’s words', () => {
   expect(cut.goesOn[1]).toBe(true);
   expect(cut.runs[3]).toBe(1);
   expect(cut.agentLast).toBe(true);
+  // One that failed draws its line where it ended, and the reply goes on across it too.
+  const failed: ConversationMessage = {
+    role: 'user',
+    content: [],
+    turn_id: 't',
+    compactionFailed: { trigger: 'reactive', memories_written: [], checkpoint: [] },
+  };
+  const across = speakers(
+    groups([said('user', 't'), said('assistant', 't'), failed, said('assistant', 't')]),
+    false,
+  );
+  expect(across.heads).toEqual([true, true, true, false]);
+  expect(across.goesOn[1]).toBe(true);
   // A compaction between someone's words and the reply carries on theirs: the reply is headed.
   const after = speakers(groups([said('user', 't'), line('t'), said('assistant', 't')]), false);
   expect(after.heads[2]).toBe(true);

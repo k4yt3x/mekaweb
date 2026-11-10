@@ -1,6 +1,6 @@
 import { record } from './events';
 
-// Meka 0.88.0: src/tools.rs::resolve_primary_param. History carries inputs, but not the
+// Meka 0.92.0: src/tools.rs::resolve_primary_param. History carries inputs, but not the
 // display summaries Meka resolves from them.
 const primaryKeys: Readonly<Record<string, string>> = {
   agent_delete: 'id',
@@ -62,11 +62,10 @@ function displayValue(value: unknown): string | undefined {
   return value.flatMap((item) => scalar(item) ?? []).join(', ') || undefined;
 }
 
-// What Meka puts among an MCP call's arguments, which are no argument of the call's: the reason
-// its arguments did not parse, and the keys Meka adds to every MCP tool.
+// What Meka puts among an MCP call's arguments, which are no argument of the call's: the keys it
+// adds to every MCP tool.
 function mekaArgument(key: string, value: unknown) {
   return (
-    key === '_meka_invalid_arguments' ||
     (key === 'background' && typeof value === 'boolean') ||
     (key === 'scratchpad' && typeof value === 'string')
   );

@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.42.0] - 2026-11-10
+
+### Added
+
+- A reply that holds no words and no call says the model returned no answer.
+- A compaction that failed or was stopped shows its line where it ended, with why.
+- A reply whose calls stopped at the output limit, or for another reason, says so after them.
+- Reasoning the provider withheld shows as Thinking unavailable while the turn runs.
+- Words an OpenAI model refused in show as the agent's reply.
+
+### Changed
+
+- **Breaking:** Meka Studio requires Meka 0.92.0 or newer.
+- An image a tool returns shows while the turn runs, not only once it ends.
+- An output saved to the scratchpad shows its opening and the entry that holds all of it.
+- A turn's details say when it stopped at the context window or a content filter.
+
+### Fixed
+
+- With Meka 0.92.0, a session holding the agent's reasoning opens instead of a blank page.
+- Reading an image during a turn no longer reports an invalid tool result.
+- A reply split into several text blocks, such as one citing sources, reads as one run of words.
+- A sub-agent sent to the background stays linked from its call after a reload.
+- The ChatGPT sign-in says it sends the browser to a 127.0.0.1 address, not localhost.
+
 ## [0.41.0] - 2026-11-08
 
 ### Changed
@@ -739,7 +764,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Light and dark themes, narrow layouts, and collapsible, resizable session panels.
 - Hosting at the root or a subpath, with GitHub Pages deployment on version tags.
 
-[Unreleased]: https://github.com/k4yt3x/meka-studio/compare/0.41.0...HEAD
+[Unreleased]: https://github.com/k4yt3x/meka-studio/compare/0.42.0...HEAD
+[0.42.0]: https://github.com/k4yt3x/meka-studio/compare/0.41.0...0.42.0
 [0.41.0]: https://github.com/k4yt3x/meka-studio/compare/0.40.0...0.41.0
 [0.40.0]: https://github.com/k4yt3x/meka-studio/compare/0.39.0...0.40.0
 [0.39.0]: https://github.com/k4yt3x/meka-studio/compare/0.38.0...0.39.0

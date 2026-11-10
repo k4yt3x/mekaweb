@@ -33,11 +33,13 @@ export interface LiveTool {
   displaySummary?: string;
   state: 'composing' | 'executing' | 'completed' | 'error' | 'ended';
   output: string;
-  content: unknown;
+  content: Schema['ToolResultContentView'][];
   progress: string;
 }
 export type LiveBlock =
   | { kind: 'text' | 'thinking'; text: string }
+  /** Reasoning the provider withheld. */
+  | { kind: 'redacted' }
   | { kind: 'tool'; id: string }
   /** What Meka wrote to send the model back to work, of the `nudge` kind it names. */
   | { kind: 'nudge'; nudge: string; text: string }
@@ -829,6 +831,7 @@ export class SessionController {
         [
           'assistant_text.delta',
           'thinking.delta',
+          'thinking.redacted',
           'approval.requested',
           'elicitation.requested',
           'turn.nudged',
@@ -860,6 +863,7 @@ export class SessionController {
       [
         'assistant_text.delta',
         'thinking.delta',
+        'thinking.redacted',
         'tool_call.composing',
         'tool_call.executing',
       ].includes(frame.event)
@@ -878,6 +882,11 @@ export class SessionController {
       const textStreaming = tail?.kind === 'text' && Boolean(tail.text.trim());
       if (textStreaming) this.noteTextStreaming(entry);
       this.publish(entry, { blocks, textStreaming });
+    } else if (frame.event === 'thinking.redacted') {
+      this.publish(entry, {
+        textStreaming: false,
+        blocks: [...state.blocks, { kind: 'redacted' }],
+      });
     } else if (frame.event === 'message.appended') {
       const message: ConversationMessage = {
         role: string(data, 'role'),
@@ -970,7 +979,8 @@ export class SessionController {
       }
       if (frame.event === 'tool_call.completed') {
         tool.state = data.is_error ? 'error' : 'completed';
-        tool.content = data.content;
+        // The parser checked each of its items.
+        tool.content = data.content as Schema['ToolResultContentView'][];
       }
       if (frame.event === 'tool_call.output_delta' && tool.state === 'executing')
         tool.output = (tool.output + string(data, 'chunk')).slice(-1_000_000);

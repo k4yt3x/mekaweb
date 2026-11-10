@@ -5,7 +5,8 @@ type Range = Schema['PositionRange'];
 
 /**
  * A message the conversation shows: one the history holds, at its position, or one the feed
- * announced, which has none yet. A compaction is shown where it happened, its summary the text.
+ * announced, which has none yet. A compaction is shown where it happened, its summary the text,
+ * and one that failed where it ended, with no content.
  */
 export interface ConversationMessage {
   role: string;
@@ -14,6 +15,9 @@ export interface ConversationMessage {
   position?: number;
   created_at?: string;
   compaction?: Schema['CompactionItem'];
+  compactionFailed?: Schema['CompactionFailedItem'];
+  /** On a reply, what its provider said of it: how it stopped, or what cut it short. */
+  reply?: Schema['ReplyView'];
 }
 
 /** The history as this tab holds it: a stretch of it, from the end back as far as it was read. */
@@ -40,14 +44,23 @@ function within(position: number | undefined, ranges: readonly Range[]) {
   );
 }
 
-/** What an item shows: a message, or a compaction as its summary. An edit shows nothing. */
+/**
+ * What an item shows: a message, a compaction as its summary, or a compaction that failed. An edit
+ * shows nothing.
+ */
 function shown(item: Item): ConversationMessage | undefined {
   const at = {
     position: item.position,
     created_at: item.created_at,
     ...(item.turn_id ? { turn_id: item.turn_id } : {}),
   };
-  if (item.type === 'message') return { role: item.role, content: item.content, ...at };
+  if (item.type === 'message')
+    return {
+      role: item.role,
+      content: item.content,
+      ...(item.reply ? { reply: item.reply } : {}),
+      ...at,
+    };
   if (item.type === 'compaction')
     return {
       role: 'user',
@@ -55,6 +68,8 @@ function shown(item: Item): ConversationMessage | undefined {
       compaction: item,
       ...at,
     };
+  if (item.type === 'compaction_failed')
+    return { role: 'user', content: [], compactionFailed: item, ...at };
   return undefined;
 }
 
@@ -176,8 +191,11 @@ export function contextQuestion(messages: readonly ConversationMessage[]) {
   const unsure = new Set(
     messages
       .slice(since)
+      // A compaction that failed is no opening the context could have taken back.
       .flatMap((message) =>
-        message.turn_id && !answered.has(message.turn_id) ? [message.turn_id] : [],
+        message.turn_id && !message.compactionFailed && !answered.has(message.turn_id)
+          ? [message.turn_id]
+          : [],
       ),
   );
   const kept = messages[since - 1]?.compaction?.kept_recent ? messages[since - 1]!.position : 0;

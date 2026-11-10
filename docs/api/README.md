@@ -1,8 +1,8 @@
 # API schema maintenance
 
-`meka-0.90.0.json` was captured from Meka `0.90.0`, commit `abfd25a8a60ea3f1a7661075ee03b55cd0c65a9f`, through `/v1/openapi.json` with `[serve].docs = true`. The generated REST types are committed in `web/src/api/schema.d.ts`; runtime connections do not require schema access.
+`meka-0.92.0.json` was captured from Meka `0.92.0`, commit `5979422e1c099bc27ebdb7fdf767a28f0c89f33d`, through `/v1/openapi.json` with `[serve].docs = true`. The generated REST types are committed in `web/src/api/schema.d.ts`; runtime connections do not require schema access.
 
-Meka Studio requires Meka 0.90.0 or newer and refuses older servers when it connects. Compared with 0.68.0, the 0.70.0 and 0.71.0 APIs change these shapes the client used:
+Meka Studio requires Meka 0.92.0 or newer and refuses older servers when it connects. Compared with 0.68.0, the 0.70.0 and 0.71.0 APIs change these shapes the client used:
 
 - `/v1/info` no longer reports `vision`; each `/v1/profiles` entry does.
 - `/v1/sessions/{id}/context` no longer reports `used_percent`. The client divides `used` by `window`, rounding down as Meka did.
@@ -111,16 +111,33 @@ Meka Studio requires Meka 0.90.0 or newer and refuses older servers when it conn
 - `parameters`: request fields sent as written, such as `temperature`, read by `anthropic-messages`, `openai-chat-completions` and `openai-responses`. A `PATCH` replaces them whole, and `null` removes them. Meka refuses a field it writes itself, naming the profile setting to use instead.
 - `cyber_access_program`: the cyber access program a `chatgpt-subscription` profile asks for, such as `daybreak_blue`; unset leaves it to the server.
 
+0.91.0 changes no shape the client uses. A spawn sent to the background answers `Started in the background as task <id> (<label>). It runs sub-agent <id>.`, from which the client reads the sub-agent; it takes the last such sentence, since the label holds the model's words.
+
+0.92.0 changes these, and the client therefore requires it:
+
+- A `thinking` block holds `parts`, each a `kind`, `reasoning` or `summary`, and its `text`, where it held one `thinking` string; Meka converts stored blocks on upgrade. The client joins the parts a blank line apart, as Meka's `reasoning_text` does, and draws a block with no words as nothing.
+- What Meka writes into a conversation has a kind of its own. A `harness_note`, a block or a result's item, stands where Meka removed something, with `note` and the `text` the model read; the client shows the `note` as Meka's. A result's `image_caption` names where the image after it came from, which the client shows only when the image is missing, as Meka's screen does. A `large_output` is an output saved to the scratchpad, with `scratchpad_entry`, `size_bytes` and its opening, `preview`, which the client shows with the entry that holds all of it; a spawn's report kept so still names its sub-agent in its preview. A `summary` block is a compaction's message in the context, which the history's `compaction` item stands for, so the client draws nothing for it.
+- `tool_call.completed` carries a result's items in the history's shapes, an image with its `hash`, and the feed's parser takes these and no others. The client reads the image by its hash while the turn runs. Meka serves it once a saved message holds it, and saves a round's results only after all its calls complete, so a `404` for a running turn's image is asked again, five times over about eight seconds.
+- A `refusal` block holds the words an OpenAI model refused in, shown and copied as the agent's words. An `unrecognized` block holds what a provider returned that Meka reads nothing from, which the client draws as nothing. Blocks and messages carry `provider_fields`, which the client does not read.
+- A reply's adjacent text blocks are one run of words, as Meka's `shown_content` reads them, since a provider splits an answer into blocks for a citation or an output item. The client joins them to show and copy a reply.
+- A reply carries `reply`: its `stop` (`reason`, the provider's `word`, and `details`), `cut` (`stopped`, `interrupted` or `failed`), `model`, `profile`, `usage`, and `provider_fields`. A reply with no words and no call is empty, where Meka wrote a sentence into it, so the client says the model returned no answer after it unless it was cut, as Meka's screen does. A reply that made calls and stopped for a reason of its own says why after them. A cut reply's calls never ran, and the client draws them as nothing.
+- `stop_reason` gains `tool_use`, `context_window`, `content_filter` and `unknown`. A turn's details name the last three, as they name `max_tokens` and `refusal`.
+- A call whose arguments did not parse has `input` `{}` and `unparsed` beside it, where its input held `_meka_invalid_arguments`. Its result says why it was refused.
+- A `compaction_failed` history item stands where a compaction ended without replacing the context, with its `error`, absent when it was stopped, and the memories its checkpoint wrote. The client draws a line there, which opens to them.
+- The feed sends `thinking.redacted` for reasoning the provider withheld, where it sent `[redacted thinking]` as a `thinking.delta`, and `tool_call.progress` always names its call by `id`.
+- A ChatGPT sign-in sends the browser to `127.0.0.1` rather than `localhost`.
+- The export archive is format 26, and 0.92.0 brings a 0.91 archive forward on import.
+
 A shell command may print 64 MiB, all of which `tool_call.completed` carries, while the saved result stays a bounded preview. The SSE parser therefore skips data past 2,000,000 characters and keeps the frame's id, so a reconnect cannot replay it. A skipped tool completion keeps its call, outcome, and correlation from the ends of its JSON, and other skipped events become a notice.
 
 The feed's 409 covers `session-not-loaded`: a token with only `sessions:r` does not load a session by attaching. The client then shows the saved conversation and retries the feed until the server loads the session. `POST /compact` runs as a turn on the feed, with `source: "compaction"` on `turn.started`; the client shows it as compacting and does not notify when it ends.
 
-Schema capture is a manual maintenance step. Choose a disposable Meka instance with `[serve].docs = true`, confirm its version, and download its schema. For a 0.90.0 instance listening on port 8081:
+Schema capture is a manual maintenance step. Choose a disposable Meka instance with `[serve].docs = true`, confirm its version, and download its schema. For a 0.92.0 instance listening on port 8081:
 
 ```sh
-curl --fail --silent --show-error http://127.0.0.1:8081/v1/openapi.json --output docs/api/meka-0.90.0.json
+curl --fail --silent --show-error http://127.0.0.1:8081/v1/openapi.json --output docs/api/meka-0.92.0.json
 cd web
-npx prettier --write ../docs/api/meka-0.90.0.json
+npx prettier --write ../docs/api/meka-0.92.0.json
 npm run api:generate
 ```
 

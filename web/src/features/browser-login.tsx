@@ -60,7 +60,7 @@ export function BrowserLogin({
     <form className="form-stack" onSubmit={(event) => void submit(event)}>
       <p className="muted small">
         {pasteUrl
-          ? 'Sign in on the page. It then sends your browser to a localhost address that may not load; paste that address here.'
+          ? 'Sign in on the page. It then sends your browser to a 127.0.0.1 address that may not load; paste that address here.'
           : 'Sign in on the page, then paste the code it shows.'}
         {pasteUrl && started.listening && ' On Meka’s own machine, this finishes by itself.'}
       </p>
