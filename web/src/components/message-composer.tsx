@@ -52,6 +52,7 @@ export function MessageComposer({
   resizeGeneration,
   permission,
   profile,
+  project,
   attachments,
   action,
   settings,
@@ -72,6 +73,8 @@ export function MessageComposer({
   resizeGeneration: number;
   permission: ComponentProps<typeof PermissionSelect>;
   profile: ComponentProps<typeof ProfileSelect>;
+  /** Shown after the profile: the project picker. */
+  project?: ReactNode;
   attachments: {
     value: ComposerOptions['images'];
     disabled: boolean;
@@ -382,6 +385,7 @@ export function MessageComposer({
             <div className="composer-selectors">
               <PermissionSelect {...permission} />
               <ProfileSelect {...profile} />
+              {project}
               {meter}
             </div>
             <Button

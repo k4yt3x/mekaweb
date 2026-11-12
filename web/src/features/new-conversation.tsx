@@ -1,4 +1,4 @@
-import { useState, useSyncExternalStore } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { useCan, useConnection, useResource, useRuntime } from '../connections/context';
 import type { Schema } from '../api/client';
 import type { ComposerOptions } from '../session/controller';
@@ -13,7 +13,8 @@ import { Dialog } from '../components/ui/dialog';
 import { useSessionNavigation } from './session-navigation';
 import { TurnSettingsFields, type TurnSettings } from './session-settings';
 import { WorkingDirectoryPicker } from './working-directory-picker';
-import { ProjectPicker } from './project-select';
+import { ProjectSelect } from './project-select';
+import { useProjects } from './projects-query';
 import { useMentions } from '../components/workspace';
 
 const subscribeToNothing = () => () => {};
@@ -36,6 +37,15 @@ export function NewConversation() {
   const disabled = !canWrite || creation.busy;
   // Meka starts with no profile, and refuses a session until one is added.
   const noProfile = profiles.data?.profiles.length === 0;
+  const projects = useProjects();
+  const { project } = creation.settings;
+  // The pick outlives the session it opened, so one renamed or removed since then is dropped.
+  const projectGone = Boolean(
+    project && projects.data && !projects.data.projects.some(({ name }) => name === project),
+  );
+  useEffect(() => {
+    if (projectGone) creation.setSettings({ ...creation.settings, project: '' });
+  }, [projectGone, creation]);
   function updateOptions(patch: Partial<ComposerOptions>) {
     controller?.saveDraft('new', {
       ...(controller.draft('new') ?? emptyComposerOptions),
@@ -133,6 +143,13 @@ export function NewConversation() {
               locked: false,
               onChange: (profile) => creation.setSettings({ ...creation.settings, profile }),
             }}
+            project={
+              <ProjectSelect
+                value={project}
+                disabled={disabled}
+                onChange={(name) => creation.setSettings({ ...creation.settings, project: name })}
+              />
+            }
             attachments={{
               value: options.images,
               disabled,
@@ -158,11 +175,6 @@ export function NewConversation() {
                 onChange={(workingDirectory) =>
                   creation.setSettings({ ...creation.settings, workingDirectory })
                 }
-              />
-              <ProjectPicker
-                value={creation.settings.project}
-                disabled={disabled}
-                onChange={(project) => creation.setSettings({ ...creation.settings, project })}
               />
             </div>
             <Dialog open={settingsOpen} onOpenChange={setSettingsOpen} title="Session settings">

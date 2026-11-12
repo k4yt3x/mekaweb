@@ -4118,7 +4118,8 @@ fieldset.form-stack {
   margin: 0;
 }
 .permission-trigger,
-.profile-trigger {
+.profile-trigger,
+.project-trigger {
   display: flex;
   align-items: center;
   justify-self: end;
@@ -4137,12 +4138,18 @@ fieldset.form-stack {
 .profile-trigger {
   max-width: min(200px, 50%);
 }
+.project-trigger {
+  max-width: min(160px, 40%);
+}
 .permission-trigger:hover:not(:disabled),
 .permission-trigger[data-saving='true']:hover,
 .permission-trigger[data-state='open'],
 .profile-trigger:hover:not(:disabled),
 .profile-trigger[data-saving='true']:hover,
-.profile-trigger[data-state='open'] {
+.profile-trigger[data-state='open'],
+.project-trigger:hover:not(:disabled),
+.project-trigger[data-saving='true']:hover,
+.project-trigger[data-state='open'] {
   background: var(--surface);
   border-color: var(--border);
 }
@@ -4158,6 +4165,7 @@ fieldset.form-stack {
 }
 .permission-trigger svg,
 .profile-trigger svg,
+.project-trigger svg,
 .composer-select-option svg {
   flex-shrink: 0;
 }
@@ -4188,6 +4196,13 @@ select option {
   }
   .context-meter > span {
     display: none;
+  }
+  /* The folder icon alone; the value stays accessible, and the title names it. */
+  .project-trigger .composer-select-label > span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    clip-path: inset(50%);
   }
 }
 @container (max-width: 360px) {
@@ -4456,7 +4471,7 @@ body:has(.settings-dialog[data-state='open']) .approval-tray {
     min-height: 0;
   }
   .sessions-workspace {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
   .sessions-workspace > .session-toolbar {
     grid-column: 1;

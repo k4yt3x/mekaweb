@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- A project picker beside the profile changes a session's project and can add a new one.
+
+### Fixed
+
+- On a phone, a long working directory no longer pushes the header's buttons off the screen.
+
 ## [0.42.0] - 2026-11-10
 
 ### Added

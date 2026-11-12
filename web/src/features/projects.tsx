@@ -106,7 +106,14 @@ export function ProjectsPage() {
   );
 }
 
-function ProjectForm({ initial, onSaved }: { initial?: string; onSaved: () => Promise<void> }) {
+/** Adds a project, or renames `initial`, and hands on the name Meka saved it under. */
+export function ProjectForm({
+  initial,
+  onSaved,
+}: {
+  initial?: string;
+  onSaved: (name: string) => Promise<void>;
+}) {
   const { api } = useConnection();
   const [name, setName] = useState(initial ?? '');
   const action = useAction();
@@ -115,10 +122,14 @@ function ProjectForm({ initial, onSaved }: { initial?: string; onSaved: () => Pr
     await action.run(async () => {
       if (!api) return;
       const body = { name } satisfies Schema['ProjectNameRequest'];
-      if (initial === undefined) await api.mutate('POST', '/v1/projects', body);
+      let saved = name;
+      if (initial === undefined)
+        saved = (await api.mutate<Schema['ProjectView']>('POST', '/v1/projects', body)).name;
       else if (name !== initial)
-        await api.mutate('PATCH', `/v1/projects/${segment(initial)}`, body);
-      await onSaved();
+        saved = (
+          await api.mutate<Schema['ProjectView']>('PATCH', `/v1/projects/${segment(initial)}`, body)
+        ).name;
+      await onSaved(saved);
     });
   }
   return (
@@ -127,6 +138,7 @@ function ProjectForm({ initial, onSaved }: { initial?: string; onSaved: () => Pr
         <Field label="Name" hint="Letters, digits, hyphens, and underscores.">
           <input
             required
+            autoFocus
             value={name}
             onChange={(event) => setName(event.target.value)}
             pattern="[A-Za-z0-9][A-Za-z0-9_\-]*"

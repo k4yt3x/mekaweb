@@ -42,7 +42,7 @@ import type {
 } from '../session/controller';
 import { compactionFailedNote, compactionNote } from '../session/compaction';
 import { contextQuestion, rewindableTurns, type ConversationMessage } from '../session/history';
-import { isSessionRunning, UnsentMessage } from '../session/controller';
+import { isSessionRunning, isSwitchLocked, UnsentMessage } from '../session/controller';
 import { useTextDraft } from '../session/drafts';
 import { subagentsQuery, useContextPositions, useSessionStates } from '../session/hooks';
 import { useMarkSeen } from '../session/unread';
@@ -59,6 +59,7 @@ import { Attachment, InlineAttachment, ImageViewerProvider } from '../components
 import { scrollRegion } from '../components/scrolling';
 import { Dialog } from '../components/ui/dialog';
 import { ComposerSettingsForm } from './session-settings';
+import { ProjectSelect } from './project-select';
 import {
   groupAgentMessages,
   groupLiveMessages,
@@ -1790,8 +1791,8 @@ function Composer({
     state.deleting ||
     !observedTurn ||
     cancelAction.busy;
-  const profileLocked = running || pending || Boolean(uncertain);
-  const profileDisabled = !mutableSettings || settingsSaving || profileLocked || !profiles.length;
+  const switchLocked = isSwitchLocked(state);
+  const profileDisabled = !mutableSettings || settingsSaving || switchLocked || !profiles.length;
   const blocked =
     !canWrite ||
     Boolean(state.session?.parent_id) ||
@@ -1830,6 +1831,12 @@ function Composer({
       return;
     void settingsAction.run(async () => controller?.patchSettings(state.id, { profile }));
   }
+  function changeProject(project: string) {
+    // A turn may start while a new project's dialog is open; Meka's refusal then says why, where
+    // returning here would drop the pick without a word.
+    if (!mutableSettings || project === state.session?.project) return;
+    void settingsAction.run(async () => controller?.patchSettings(state.id, { project }));
+  }
   return (
     <MessageComposer
       above={<ChecklistStrip items={state.session?.checklist ?? []} />}
@@ -1865,10 +1872,21 @@ function Composer({
         value: state.session?.profile,
         profiles,
         disabled: profileDisabled,
-        busy: mutableSettings && !profileLocked && settingsSaving,
-        locked: profileLocked,
+        busy: mutableSettings && !switchLocked && settingsSaving,
+        locked: switchLocked,
         onChange: changeProfile,
       }}
+      project={
+        state.session && (
+          <ProjectSelect
+            value={state.session.project}
+            disabled={!mutableSettings || settingsSaving || switchLocked}
+            busy={mutableSettings && !switchLocked && settingsSaving}
+            locked={switchLocked}
+            onChange={changeProject}
+          />
+        )
+      }
       attachments={{
         value: images,
         disabled: !canWrite || Boolean(state.session?.parent_id) || pending || state.deleting,

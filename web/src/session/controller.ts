@@ -183,6 +183,18 @@ interface Entry {
 export function isSessionRunning(state: SessionState) {
   return state.running || state.submissions.some((submission) => submission.state === 'running');
 }
+/**
+ * Whether Meka refuses to move the session to another profile or project: a turn runs, or a
+ * message being sent, or one whose fate is unknown, may have started one.
+ */
+export function isSwitchLocked(state: SessionState) {
+  return (
+    isSessionRunning(state) ||
+    state.submissions.some(
+      (submission) => submission.state === 'sending' || submission.state === 'uncertain',
+    )
+  );
+}
 function initial(id: string): SessionState {
   return {
     id,
