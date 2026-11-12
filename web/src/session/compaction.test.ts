@@ -37,6 +37,17 @@ it('adds what was not usual about it', () => {
   );
 });
 
+it('does not call keeping no recent turns unusual when the person asked for none', () => {
+  const manual = { ...usual, trigger: 'manual', kept_recent: false };
+  expect(compactionNote({ ...manual, person_keeps_recent: false })).toBe(
+    'Compacted the conversation on user request.',
+  );
+  for (const asked of [{ person_keeps_recent: true }, { person_keeps_recent: null }, {}])
+    expect(compactionNote({ ...manual, ...asked })).toBe(
+      'Compacted the conversation on user request. No recent turns were kept.',
+    );
+});
+
 it('says why a compaction failed, or nothing when it was stopped, and what its checkpoint wrote', () => {
   const failed = { trigger: 'reactive', memories_written: [], checkpoint: [] };
   expect(compactionFailedNote({ ...failed, error: 'the provider refused' })).toBe(

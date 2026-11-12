@@ -1,8 +1,8 @@
 # API schema maintenance
 
-`meka-0.92.0.json` was captured from Meka `0.92.0`, commit `5979422e1c099bc27ebdb7fdf767a28f0c89f33d`, through `/v1/openapi.json` with `[serve].docs = true`. The generated REST types are committed in `web/src/api/schema.d.ts`; runtime connections do not require schema access.
+`meka-0.94.0.json` was captured from Meka `0.94.0`, commit `cbbb23d63e815a4300ce107fcbec82457f2c93c9`, through `/v1/openapi.json` with `[serve].docs = true`. The generated REST types are committed in `web/src/api/schema.d.ts`; runtime connections do not require schema access.
 
-Meka Studio requires Meka 0.92.0 or newer and refuses older servers when it connects. Compared with 0.68.0, the 0.70.0 and 0.71.0 APIs change these shapes the client used:
+Meka Studio requires Meka 0.93.0 or newer and refuses older servers when it connects. Compared with 0.68.0, the 0.70.0 and 0.71.0 APIs change these shapes the client used:
 
 - `/v1/info` no longer reports `vision`; each `/v1/profiles` entry does.
 - `/v1/sessions/{id}/context` no longer reports `used_percent`. The client divides `used` by `window`, rounding down as Meka did.
@@ -128,16 +128,29 @@ Meka Studio requires Meka 0.92.0 or newer and refuses older servers when it conn
 - A ChatGPT sign-in sends the browser to `127.0.0.1` rather than `localhost`.
 - The export archive is format 26, and 0.92.0 brings a 0.91 archive forward on import.
 
+0.93.0 changes these, and the client therefore requires it:
+
+- `POST /compact` without `keep_recent` keeps the summary alone, where Meka decided whether to keep a tail, and `true` keeps one whatever the checkpoint turn answers. The compact dialog's **Keep recent turns** sends `true` when on and leaves the field out otherwise, which asks for no tail only from 0.93.0.
+- A compaction a person asked for carries `person_keeps_recent`, what they asked for; no other compaction carries it. Meka's note leaves out that no recent turns were kept when the person asked for none, and the client's line says it as Meka does.
+- When the provider rejects the first request after a session's profile or model changed, or one a fallback serves, the turn fails with the provider's error, where Meka took attachments or tool results out and retried. After a session's own switch, a warning notice also says how to go on: switch back, compact, then switch again. The client shows both as it shows any failure and notice, and its compact default, no tail, is what lets the switch carry nothing the old provider returned.
+- The export archive is format 27, and 0.93.0 brings a 0.92 archive forward on import.
+
+0.94.0 changes these:
+
+- A turn whose conversation and the profile's `max_output_tokens` do not fit its `context_window` fails as `output-cap-too-large`, a `502` whose detail names the profile and says to lower the cap, where Meka compacted. The client shows it as any failed turn.
+- An emergency compaction's note says the provider rejected the request, where it said refused.
+- The export archive is format 28, and 0.94.0 reads a 0.93 archive as it is.
+
 A shell command may print 64 MiB, all of which `tool_call.completed` carries, while the saved result stays a bounded preview. The SSE parser therefore skips data past 2,000,000 characters and keeps the frame's id, so a reconnect cannot replay it. A skipped tool completion keeps its call, outcome, and correlation from the ends of its JSON, and other skipped events become a notice.
 
 The feed's 409 covers `session-not-loaded`: a token with only `sessions:r` does not load a session by attaching. The client then shows the saved conversation and retries the feed until the server loads the session. `POST /compact` runs as a turn on the feed, with `source: "compaction"` on `turn.started`; the client shows it as compacting and does not notify when it ends.
 
-Schema capture is a manual maintenance step. Choose a disposable Meka instance with `[serve].docs = true`, confirm its version, and download its schema. For a 0.92.0 instance listening on port 8081:
+Schema capture is a manual maintenance step. Choose a disposable Meka instance with `[serve].docs = true`, confirm its version, and download its schema. For a 0.94.0 instance listening on port 8081:
 
 ```sh
-curl --fail --silent --show-error http://127.0.0.1:8081/v1/openapi.json --output docs/api/meka-0.92.0.json
+curl --fail --silent --show-error http://127.0.0.1:8081/v1/openapi.json --output docs/api/meka-0.94.0.json
 cd web
-npx prettier --write ../docs/api/meka-0.92.0.json
+npx prettier --write ../docs/api/meka-0.94.0.json
 npm run api:generate
 ```
 

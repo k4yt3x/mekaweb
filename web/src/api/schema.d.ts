@@ -1225,8 +1225,8 @@ export interface components {
        */
       instructions?: string | null;
       /**
-       * @description Whether to keep the most recent turns verbatim after the summary. Omit to let Meka decide;
-       *     the checkpoint turn overrides this when it knows better, having just read the conversation.
+       * @description Whether to keep the most recent turns verbatim after the summary. Defaults to `false`, no
+       *     tail; `true` keeps one, whatever the checkpoint turn answers.
        */
       keep_recent?: boolean | null;
     };
@@ -1281,6 +1281,11 @@ export interface components {
       kept_recent: boolean;
       /** @description Memories the checkpoint turn wrote, observed from its calls rather than self-reported. */
       memories_written: string[];
+      /**
+       * @description For a compaction a person asked for, whether they asked for the recent turns to be kept;
+       *     absent for one nobody asked for, and for a person's recorded before Meka kept the answer.
+       */
+      person_keeps_recent?: boolean | null;
       /**
        * @description Which strategy wrote the summary: `checkpoint` or `summarizer`. They differ in fidelity,
        *     not just mechanism.

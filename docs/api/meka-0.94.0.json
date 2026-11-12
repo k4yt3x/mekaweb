@@ -4,7 +4,7 @@
     "title": "Meka HTTP API",
     "description": "Service-to-service API for driving Meka agent turns programmatically. Mirrors the wire format described in the HTTP API docs. A field that has no value is omitted from every response and event, never sent as `null`.",
     "license": { "name": "AGPL-3.0-or-later" },
-    "version": "0.92.0"
+    "version": "0.94.0"
   },
   "paths": {
     "/v1/accounts": {
@@ -4420,7 +4420,7 @@
           },
           "keep_recent": {
             "type": ["boolean", "null"],
-            "description": "Whether to keep the most recent turns verbatim after the summary. Omit to let Meka decide;\nthe checkpoint turn overrides this when it knows better, having just read the conversation."
+            "description": "Whether to keep the most recent turns verbatim after the summary. Defaults to `false`, no\ntail; `true` keeps one, whatever the checkpoint turn answers."
           }
         },
         "additionalProperties": false
@@ -4500,6 +4500,10 @@
             "type": "array",
             "items": { "type": "string" },
             "description": "Memories the checkpoint turn wrote, observed from its calls rather than self-reported."
+          },
+          "person_keeps_recent": {
+            "type": ["boolean", "null"],
+            "description": "For a compaction a person asked for, whether they asked for the recent turns to be kept;\nabsent for one nobody asked for, and for a person's recorded before Meka kept the answer."
           },
           "source": {
             "type": "string",

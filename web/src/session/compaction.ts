@@ -1,12 +1,12 @@
 import type { Schema } from '../api/client';
 
-// Meka 0.92.0: src/conversation.rs::CompactionRecord::note, the line its screen shows.
+// Meka 0.94.0: src/conversation.rs::CompactionRecord::note, the line its screen shows.
 const triggers: Readonly<Record<string, string>> = {
   reactive: 'Autocompacted the conversation after context usage crossed the ceiling.',
   proactive: 'Autocompacted the conversation ahead of a turn that would have crossed the ceiling.',
   manual: 'Compacted the conversation on user request.',
   requested: 'The agent compacted the conversation.',
-  emergency: 'Compacted the conversation after the provider refused the request as too large.',
+  emergency: 'Compacted the conversation after the provider rejected the request as too large.',
   retention: 'Autocompacted the conversation to summarize turns older than the retention window.',
 };
 
@@ -22,7 +22,9 @@ function wrote(written: readonly string[]) {
 /** A compaction in one line, as Meka says it: what set it going, then what was not usual. */
 export function compactionNote(compaction: Schema['CompactionView']): string {
   const parts = [triggers[compaction.trigger] ?? 'Compacted the conversation.'];
-  if (!compaction.kept_recent) parts.push('No recent turns were kept.');
+  // A person who asked for no recent turns got what they asked for, which is nothing unusual.
+  if (!compaction.kept_recent && compaction.person_keeps_recent !== false)
+    parts.push('No recent turns were kept.');
   if (compaction.source === 'summarizer') parts.push('Written by the standalone summarizer.');
   return [...parts, ...wrote(compaction.memories_written)].join(' ');
 }

@@ -7,15 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-
-- A project picker beside the profile changes a session's project and can add a new one.
-
-### Fixed
-
-- On a phone, a long working directory no longer pushes the header's buttons off the screen.
-
-## [0.42.0] - 2026-11-10
+## [0.42.0] - 2026-11-12
 
 ### Added
 
@@ -24,22 +16,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A reply whose calls stopped at the output limit, or for another reason, says so after them.
 - Reasoning the provider withheld shows as Thinking redacted while the turn runs.
 - Words an OpenAI model refused in show as the agent's reply.
+- A project picker beside the profile changes a session's project and can add a new one.
 
 ### Changed
 
-- **Breaking:** Meka Studio requires Meka 0.92.0 or newer.
+- **Breaking:** Meka Studio requires Meka 0.93.0 or newer.
 - An image a tool returns shows while the turn runs, not only once it ends.
 - An output saved to the scratchpad shows its opening and the entry that holds all of it.
 - A turn's details say when it stopped at the context window or a content filter.
 - Reasoning the provider withheld says Thinking redacted, not Thinking unavailable.
+- Compact context keeps only the summary unless Keep recent turns is on; Meka no longer decides.
+- A compaction you asked to keep no recent turns no longer says that none were kept.
 
 ### Fixed
 
-- With Meka 0.92.0, a session holding the agent's reasoning opens instead of a blank page.
+- With Meka 0.92.0 or newer, a session holding the agent's reasoning opens instead of a blank page.
 - Reading an image during a turn no longer reports an invalid tool result.
 - A reply split into several text blocks, such as one citing sources, reads as one run of words.
 - A sub-agent sent to the background stays linked from its call after a reload.
 - The ChatGPT sign-in says it sends the browser to a 127.0.0.1 address, not localhost.
+- On a phone, a long working directory no longer pushes the header's buttons off the screen.
 
 ## [0.41.0] - 2026-11-08
 

@@ -47,6 +47,7 @@ import { compactionNote } from '../session/compaction';
 import { useLocation, useParams } from '@tanstack/react-router';
 import { Button } from '../components/ui/button';
 import { Dialog } from '../components/ui/dialog';
+import { SwitchField } from '../components/ui/switch';
 import { Empty, ErrorNotice, Field, Json, Loading } from '../components/common';
 import { Conversation } from './conversation';
 import { NewConversation } from './new-conversation';
@@ -837,7 +838,7 @@ function SessionActions({
   const [workingDirectory, setWorkingDirectory] = useState('');
   const [turns, setTurns] = useState(1);
   const [instructions, setInstructions] = useState('');
-  const [keep, setKeep] = useState('');
+  const [keep, setKeep] = useState(false);
   const action = useAction();
   const mutable = canWrite && !session.parent_id;
   function openAction(name: string) {
@@ -912,7 +913,7 @@ function SessionActions({
           sessionPath(session.id) + '/compact',
           {
             ...(instructions ? { instructions } : {}),
-            ...(keep ? { keep_recent: keep === 'true' } : {}),
+            ...(keep ? { keep_recent: true } : {}),
           } satisfies Schema['CompactRequestBody'],
         );
         await controller?.refresh(session.id, true);
@@ -1082,13 +1083,7 @@ function SessionActions({
                     onChange={(event) => setInstructions(event.target.value)}
                   />
                 </Field>
-                <Field label="Keep recent turns">
-                  <select value={keep} onChange={(event) => setKeep(event.target.value)}>
-                    <option value="">Let Meka decide</option>
-                    <option value="true">Keep recent turns</option>
-                    <option value="false">Do not keep recent turns</option>
-                  </select>
-                </Field>
+                <SwitchField label="Keep recent turns" checked={keep} onCheckedChange={setKeep} />
               </>
             )}
 

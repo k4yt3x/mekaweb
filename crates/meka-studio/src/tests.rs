@@ -51,7 +51,7 @@ async fn stand_in_meka() -> (SocketAddr, Arc<Mutex<Seen>>) {
                     return StatusCode::UNAUTHORIZED.into_response();
                 }
                 Json(serde_json::json!({
-                    "version": "0.92.0",
+                    "version": "0.93.0",
                     "scopes": ["sessions:r", "sessions:w"],
                     "default_permission": "workspace",
                     "enabled_permissions": ["read", "workspace"],

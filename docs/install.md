@@ -6,7 +6,7 @@ Meka Studio runs on the Meka host, beside Meka. Meka listens on loopback only; M
 browser ──HTTPS──▶ Cloudflare Tunnel or Caddy ──▶ Meka Studio (loopback) ──▶ meka serve (loopback)
 ```
 
-Meka Studio runs on Linux, macOS and Windows. Each release states which Meka versions it supports; this one needs Meka 0.92.0 or newer. Files marks git's changes where git 2.31 or newer is installed. The steps show Linux and macOS commands, with Windows' where they differ.
+Meka Studio runs on Linux, macOS and Windows. Each release states which Meka versions it supports; this one needs Meka 0.93.0 or newer. Files marks git's changes where git 2.31 or newer is installed. The steps show Linux and macOS commands, with Windows' where they differ.
 
 ## 1. Get Meka Studio
 

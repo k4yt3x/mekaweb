@@ -1,6 +1,6 @@
 import { record } from './events';
 
-// Meka 0.92.0: src/tools.rs::resolve_primary_param. History carries inputs, but not the
+// Meka 0.94.0: src/tools.rs::resolve_primary_param. History carries inputs, but not the
 // display summaries Meka resolves from them.
 const primaryKeys: Readonly<Record<string, string>> = {
   agent_delete: 'id',

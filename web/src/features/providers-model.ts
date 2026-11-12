@@ -17,7 +17,7 @@ export function isSubscription(backend: string | null | undefined) {
   return BACKENDS.some((entry) => entry.id === backend && entry.subscription);
 }
 
-// Meka 0.92.0: src/config.rs::Backend::reads_account_key and reads_profile_key. Meka refuses a
+// Meka 0.94.0: src/config.rs::Backend::reads_account_key and reads_profile_key. Meka refuses a
 // key the backend never reads, so the forms offer only these.
 export function readsAccountKey(backend: string, key: string) {
   if (key === 'client_id' || key === 'oauth_token_url') return isSubscription(backend);
